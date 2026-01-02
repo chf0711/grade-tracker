@@ -1,13 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 // 確保安裝了這些套件: npm install recharts lucide-react firebase
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { BookOpen, Users, Search, Save, Plus, Check, TrendingUp, BarChart3, X, Lock, CloudDownload, LayoutDashboard, GraduationCap, Calendar, Clipboard, LogOut, AlertTriangle, UserPlus, Sparkles, Edit3, Quote, Loader2, RefreshCw, Trash2, Layers } from 'lucide-react';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell } from 'recharts';
+import { BookOpen, Users, Search, Save, Plus, Check, TrendingUp, BarChart3, X, Lock, CloudDownload, LayoutDashboard, GraduationCap, Calendar, Clipboard, LogOut, AlertTriangle, UserPlus, Sparkles, Edit3, Quote, Loader2, RefreshCw, Trash2, Layers, PieChart, Trophy, Target, Clock, Timer } from 'lucide-react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc } from 'firebase/firestore';
 
 // --- Firebase Configuration Setup ---
-// ★★★ 請將您原本的設定貼在下方大括號內 ★★★
 const realFirebaseConfig = {
   apiKey: "AIzaSyChK1IiE6YhHZ_DdxXzpxi8vmBA9A9So9A",
   authDomain: "grade-tracker-9ccb3.firebaseapp.com",
@@ -24,7 +23,6 @@ let db;
 let appId = 'grade-tracker-v1';
 
 try {
-  // 1. 嘗試使用 Canvas 環境變數 (僅供預覽使用)
   if (typeof __firebase_config !== 'undefined') {
     const config = JSON.parse(__firebase_config);
     if (!getApps().length) {
@@ -34,7 +32,6 @@ try {
     }
     if (typeof __app_id !== 'undefined') appId = __app_id;
   } 
-  // 2. 如果沒有環境變數，使用使用者提供的真實設定 (部署使用)
   else if (realFirebaseConfig.apiKey !== "REPLACE_WITH_YOUR_API_KEY") {
     if (!getApps().length) {
       app = initializeApp(realFirebaseConfig);
@@ -42,7 +39,6 @@ try {
       app = getApp();
     }
   } else {
-    // 3. 如果都沒有，拋出警告 (純 UI 模式，無後端)
     console.warn("Firebase not configured. Using mock mode or limited functionality.");
   }
 
@@ -54,9 +50,7 @@ try {
   console.error("Firebase init error:", e);
 }
 
-// --- FULL DATASET (Initial Fallback) ---
-// 這裡的日期只是預設值，網站啟動後會立刻從 Firebase 抓取您最新的完整日期清單覆蓋這裡
-// 因為您說 Firebase 裡的日期是完整的，所以這裡留一個空的範本或舊的也沒關係，它會被取代。
+// --- FULL DATASET ---
 const EXAM_DATES = [
   "04/12", "04/19", "04/26", "05/03", "05/10", "05/17", "05/24", "06/07", "06/14",
   "06/21", "06/28", "06/29", "07/12", "07/19", "07/21", "07/26", "08/02", "08/09", 
@@ -64,14 +58,11 @@ const EXAM_DATES = [
   "10/11", "10/18", "10/25", "11/01", "11/08", "11/15", "11/29", "12/06", "12/13"
 ];
 
-// --- Phase Configuration (階段設定) ---
-// 定義顯示區間：[開始索引, 結束索引 (不包含)]
-// 陣列索引從 0 開始計算
-// 0~18 (前18筆) | 18~36 (中間18筆) | 36~100 (後面所有，包含10週模考)
+// --- Phase Configuration ---
 const PHASES = [
     { id: 'p1', name: '第一階段 (1~18週)', range: [0, 18] },
     { id: 'p2', name: '第二階段 (19~36週)', range: [18, 36] },
-    { id: 'mock', name: '模考衝刺班 (10週)', range: [36, 100] } // 設大一點確保能涵蓋所有剩下的
+    { id: 'mock', name: '模考衝刺班 (10週)', range: [36, 100] } 
 ];
 
 const COLORS = {
@@ -130,9 +121,103 @@ const SingleSubjectChart = ({ data, subjectKey, avgKey, colorKey, title, domain 
     </div>
 );
 
-// Consolidated Data (Filtered: 61 Students, Sorted by ID)
-// ★★★ 已清空本地寫死資料，完全依賴 Firebase 雲端資料庫 ★★★
+// 分佈圖元件
+const DistributionChart = ({ data, colorKey }) => (
+    <div className="h-48 w-full mt-4">
+        <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={data} margin={{ top: 10, right: 0, bottom: 0, left: -20 }}>
+                <CartesianGrid stroke="#f1f5f9" vertical={false} strokeDasharray="3 3" />
+                <XAxis 
+                    dataKey="range" 
+                    tick={{fontSize: 10, fill: '#64748b', fontWeight: 600}} 
+                    tickLine={false} 
+                    axisLine={false} 
+                    dy={5}
+                />
+                <YAxis 
+                    tick={{fontSize: 10, fill: '#64748b'}} 
+                    tickLine={false} 
+                    axisLine={false} 
+                    allowDecimals={false}
+                />
+                <Tooltip 
+                    cursor={{fill: '#f8fafc'}}
+                    contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)', fontSize: '12px' }}
+                />
+                <Bar dataKey="count" name="人數" radius={[4, 4, 0, 0]}>
+                    {data.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.isMyRange ? COLORS[colorKey].hex : '#cbd5e1'} />
+                    ))}
+                </Bar>
+            </BarChart>
+        </ResponsiveContainer>
+    </div>
+);
+
 const RAW_STUDENT_RECORDS = [];
+
+// --- 倒數計時元件 (移動至 Body 且縮小版) ---
+const ExamCountdown = () => {
+    const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+
+    useEffect(() => {
+        // 設定目標時間：2026/3/14 08:00:00
+        const targetDate = new Date('2026-03-14T08:00:00');
+        
+        const calculateTimeLeft = () => {
+            const now = new Date();
+            const difference = targetDate - now;
+
+            if (difference > 0) {
+                const days = Math.floor(difference / (1000 * 60 * 60 * 24));
+                const hours = Math.floor((difference / (1000 * 60 * 60)) % 24);
+                const minutes = Math.floor((difference / 1000 / 60) % 60);
+                const seconds = Math.floor((difference / 1000) % 60);
+                setTimeLeft({ days, hours, minutes, seconds });
+            } else {
+                setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+            }
+        };
+
+        calculateTimeLeft();
+        const timer = setInterval(calculateTimeLeft, 1000); 
+
+        return () => clearInterval(timer);
+    }, []);
+
+    // 質感設計：尺寸微縮 (px-3 py-1.5)，數字 text-base
+    return (
+        <div className="flex items-center gap-2 mt-4 px-3 py-1.5 rounded-xl bg-white/60 border border-white/50 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.05)] backdrop-blur-md group hover:bg-white/80 transition-all duration-500 animate-in fade-in slide-in-from-bottom-2">
+            <div className="flex items-center gap-1.5 text-emerald-600/80">
+                <Target className="w-3.5 h-3.5" />
+            </div>
+            
+            <div className="h-5 w-[1px] bg-gradient-to-b from-slate-100 via-slate-200 to-slate-100 mx-0.5"></div>
+            
+            <div className="flex items-baseline gap-1 text-slate-700 font-mono leading-none">
+                <div className="flex flex-col items-center">
+                    <span className="text-base font-black tracking-tight text-slate-700">{timeLeft.days}</span>
+                    <span className="text-[7px] font-bold text-slate-400 uppercase tracking-wider scale-90">Days</span>
+                </div>
+                <span className="text-slate-300 text-xs relative -top-1.5">:</span>
+                <div className="flex flex-col items-center min-w-[1.2rem]">
+                    <span className="text-base font-black tracking-tight text-slate-700">{String(timeLeft.hours).padStart(2, '0')}</span>
+                    <span className="text-[7px] font-bold text-slate-400 uppercase tracking-wider scale-90">Hr</span>
+                </div>
+                <span className="text-slate-300 text-xs relative -top-1.5">:</span>
+                <div className="flex flex-col items-center min-w-[1.2rem]">
+                    <span className="text-base font-black tracking-tight text-slate-700">{String(timeLeft.minutes).padStart(2, '0')}</span>
+                    <span className="text-[7px] font-bold text-slate-400 uppercase tracking-wider scale-90">Min</span>
+                </div>
+                <span className="text-slate-300 text-xs relative -top-1.5">:</span>
+                <div className="flex flex-col items-center min-w-[1.2rem]">
+                    <span className="text-base font-black tracking-tight bg-gradient-to-br from-emerald-500 to-teal-500 bg-clip-text text-transparent">{String(timeLeft.seconds).padStart(2, '0')}</span>
+                    <span className="text-[7px] font-bold text-emerald-500/60 uppercase tracking-wider scale-90">Sec</span>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 export default function GradeTracker() {
   const [user, setUser] = useState(null);
@@ -157,32 +242,29 @@ export default function GradeTracker() {
   
   const [teacherViewMode, setTeacherViewMode] = useState('single');
   const [batchDate, setBatchDate] = useState('');
-  const [allStudentsData, setAllStudentsData] = useState([]);
+  const [allStudentsData, setAllStudentsData] = useState([]); // 老師端用
+  const [cachedClassData, setCachedClassData] = useState([]); // 家長端用 (緩存的全班資料)
   
   const [loading, setLoading] = useState(false);
   const [searchId, setSearchId] = useState('');
   const [viewData, setViewData] = useState(null);
   const [searchError, setSearchError] = useState('');
   const [activeTab, setActiveTab] = useState('total');
-  
-  // 新增狀態: 用於控制要顯示哪個階段的成績
-  const [activePhase, setActivePhase] = useState('p2'); // 預設顯示第二階段 (最新)
+  const [activePhase, setActivePhase] = useState('p2');
+
+  const [statsModalData, setStatsModalData] = useState(null);
+  const [statsActiveTab, setStatsActiveTab] = useState('total');
 
   useEffect(() => {
     const initAuth = async () => {
       try {
-        if (!auth) {
-            console.log("Waiting for Firebase Auth...");
-            return;
-        }
+        if (!auth) return;
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
            await signInWithCustomToken(auth, __initial_auth_token);
         } else {
            await signInAnonymously(auth);
         }
-      } catch (e) {
-          console.error("Auth init error:", e);
-      }
+      } catch (e) { console.error(e); }
     };
     
     if (auth) {
@@ -204,6 +286,7 @@ export default function GradeTracker() {
       }
   }, [availableDates]);
 
+  // --- Helpers ---
   const loadDates = async () => {
       if (!db) return;
       try {
@@ -229,8 +312,7 @@ export default function GradeTracker() {
   const localComputedAverages = useMemo(() => {
       const avgs = {};
       availableDates.forEach(date => {
-          let t=0, c=0, e=0, m=0;
-          let count=0;
+          let t=0, c=0, e=0, m=0, count=0;
           RAW_STUDENT_RECORDS.forEach(s => {
               const grades = s.grades && s.grades[date];
               if (Array.isArray(grades) && grades.length >= 3) {
@@ -238,102 +320,72 @@ export default function GradeTracker() {
                   const eng = parseFloat(grades[1]) || 0;
                   const chi = parseFloat(grades[2]) || 0;
                   const total = math + eng + chi;
-                  if(total > 0) { 
-                      t += total; 
-                      m += math;
-                      e += eng;
-                      c += chi;
-                      count++; 
-                  }
+                  if(total > 0) { t += total; m += math; e += eng; c += chi; count++; }
               }
           });
-          if(count > 0) {
-            avgs[date] = { 
-                total: (t/count).toFixed(1),
-                chi: (c/count).toFixed(1),
-                eng: (e/count).toFixed(1),
-                math: (m/count).toFixed(1),
-            };
-          }
+          if(count > 0) avgs[date] = { total: (t/count).toFixed(1), chi: (c/count).toFixed(1), eng: (e/count).toFixed(1), math: (m/count).toFixed(1) };
       });
       return avgs;
   }, [availableDates]);
 
   const loadClassAverages = async () => {
-      if (!db) {
-          setClassAverages(localComputedAverages);
-          return;
-      }
+      if (!db) { setClassAverages(localComputedAverages); return; }
       try {
           const docSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'class_averages_v17'));
           let dbAverages = {};
-          if (docSnap.exists()) {
-              dbAverages = docSnap.data().averages || {};
-          }
+          if (docSnap.exists()) dbAverages = docSnap.data().averages || {};
           setClassAverages({ ...localComputedAverages, ...dbAverages });
-      } catch (e) {
-          setClassAverages(localComputedAverages);
-      }
+      } catch (e) { setClassAverages(localComputedAverages); }
   };
 
   const handleManualAverageChange = (date, subject, value) => {
-      setClassAverages(prev => ({
-          ...prev,
-          [date]: {
-              ...prev[date],
-              [subject]: value
+      setClassAverages(prev => {
+          const currentAvg = prev[date] || { chi: '', eng: '', math: '', total: '' };
+          const updatedAvg = { ...currentAvg, [subject]: value };
+          
+          // Auto-calculate total if a subject is changed
+          if (subject !== 'total') {
+              updatedAvg.total = calculateTotal(
+                  subject === 'chi' ? value : updatedAvg.chi,
+                  subject === 'eng' ? value : updatedAvg.eng,
+                  subject === 'math' ? value : updatedAvg.math
+              );
           }
-      }));
+          
+          return { ...prev, [date]: updatedAvg };
+      });
   };
 
   const saveManualClassAverages = async () => {
       if (!db) return;
       try {
           await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'class_averages_v17'), { averages: classAverages }, { merge: true });
-          setStatusMsg("班平均儲存成功！");
-          setTimeout(() => setStatusMsg(''), 2000);
-          setShowAvgModal(false);
-      } catch (e) {
-          console.error(e);
-          setStatusMsg("儲存失敗");
-      }
+          setStatusMsg("班平均儲存成功！"); setTimeout(() => setStatusMsg(''), 2000); setShowAvgModal(false);
+      } catch (e) { setStatusMsg("儲存失敗"); }
   };
 
-  const handleDeleteDate = (dateToDelete) => {
-      setDeleteTarget(dateToDelete);
-  };
+  const handleDeleteDate = (dateToDelete) => setDeleteTarget(dateToDelete);
 
   const confirmDeleteDate = async () => {
       if (!deleteTarget) return;
-      const dateToDelete = deleteTarget;
-      const newList = availableDates.filter(d => d !== dateToDelete);
+      const newList = availableDates.filter(d => d !== deleteTarget);
       setAvailableDates(newList);
       if (db) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: newList }, { merge: true });
-      setStatusMsg(`已刪除日期: ${dateToDelete}`); setTimeout(() => setStatusMsg(''), 2000);
-      setDeleteTarget(null);
+      setStatusMsg(`已刪除日期: ${deleteTarget}`); setTimeout(() => setStatusMsg(''), 2000); setDeleteTarget(null);
   };
 
   const handleLoginSubmit = () => {
       if (passwordInput === 'Ben110705') { 
-          setIsAuthenticated(true); 
-          localStorage.setItem('teacher_auth', 'true');
-          setMode('teacher'); 
-          loadAllStudents();
-      } else { 
-          setLoginError(true); 
-      }
+          setIsAuthenticated(true); localStorage.setItem('teacher_auth', 'true'); setMode('teacher'); loadAllStudents();
+      } else { setLoginError(true); }
   };
 
   const handleLogout = () => {
-      setIsAuthenticated(false);
-      localStorage.removeItem('teacher_auth');
-      setMode('landing');
+      setIsAuthenticated(false); localStorage.removeItem('teacher_auth'); setMode('landing');
   };
 
   const calculateTotal = (chi, eng, math) => {
-      const c = parseFloat(chi) || 0;
-      const e = parseFloat(eng) || 0;
-      const m = parseFloat(math) || 0;
+      const c = parseFloat(chi) || 0; const e = parseFloat(eng) || 0; const m = parseFloat(math) || 0;
       if (chi === '' && eng === '' && math === '') return '';
       return (c + e + m).toFixed(1);
   };
@@ -342,25 +394,18 @@ export default function GradeTracker() {
       setLoading(true);
       try {
           let studentsMap = {};
-          RAW_STUDENT_RECORDS.forEach(s => {
-              studentsMap[s.id] = { ...s, grades: normalizeGrades(s.grades) };
-          });
+          RAW_STUDENT_RECORDS.forEach(s => { studentsMap[s.id] = { ...s, grades: normalizeGrades(s.grades) }; });
           if (db) {
               const querySnapshot = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'students'));
               querySnapshot.forEach(doc => {
                   const data = doc.data();
-                  if (studentsMap[data.id]) {
-                      studentsMap[data.id] = { ...studentsMap[data.id], ...data, grades: { ...studentsMap[data.id].grades, ...data.grades } };
-                  } else {
-                      studentsMap[data.id] = data;
-                  }
+                  if (studentsMap[data.id]) { studentsMap[data.id] = { ...studentsMap[data.id], ...data, grades: { ...studentsMap[data.id].grades, ...data.grades } }; } 
+                  else { studentsMap[data.id] = data; }
               });
           }
           const sortedStudents = Object.values(studentsMap).sort((a,b) => a.id.localeCompare(b.id));
           setAllStudentsData(sortedStudents);
-      } catch (e) {
-          console.error("Load all students error:", e);
-      }
+      } catch (e) { console.error("Load all students error:", e); }
       setLoading(false);
   };
 
@@ -369,14 +414,8 @@ export default function GradeTracker() {
       const normalized = {};
       Object.keys(grades).forEach(date => {
           const g = grades[date];
-          if (Array.isArray(g)) {
-              const m = g[0] || 0;
-              const e = g[1] || 0;
-              const c = g[2] || 0;
-              normalized[date] = { math: m, eng: e, chi: c, total: m + e + c };
-          } else {
-              normalized[date] = g;
-          }
+          if (Array.isArray(g)) { normalized[date] = { math: g[0]||0, eng: g[1]||0, chi: g[2]||0, total: (g[0]||0)+(g[1]||0)+(g[2]||0) }; } 
+          else { normalized[date] = g; }
       });
       return normalized;
   };
@@ -388,43 +427,17 @@ export default function GradeTracker() {
       let data = null;
       if (db) {
           const docSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${id}`));
-          if (docSnap.exists()) {
-            data = docSnap.data();
-          }
+          if (docSnap.exists()) data = docSnap.data();
       }
       if (data) {
-        setCurrentStudentId(data.id); 
-        setStudentName(data.name);
+        setCurrentStudentId(data.id); setStudentName(data.name);
         let loadedGrades = data.grades || {};
         availableDates.forEach(d => { if (!loadedGrades[d]) loadedGrades[d] = { chi: '', eng: '', math: '', total: '' }; });
-        setGrades(loadedGrades); 
-        setStatusMsg(`已載入：${data.name}`);
+        setGrades(loadedGrades); setStatusMsg(`已載入：${data.name}`);
       } else {
-        const localStudent = RAW_STUDENT_RECORDS.find(s => s.id === id);
-        if (localStudent) {
-             setCurrentStudentId(localStudent.id);
-             setStudentName(localStudent.name);
-             const gradesObj = {};
-             availableDates.forEach(d => {
-                 const g = localStudent.grades[d];
-                 if (Array.isArray(g)) {
-                    gradesObj[d] = { math: f1(g[0]), eng: f1(g[1]), chi: f1(g[2]), total: f1((g[0]||0)+(g[1]||0)+(g[2]||0)) };
-                 } else {
-                    gradesObj[d] = { chi: '', eng: '', math: '', total: '' };
-                 }
-             });
-             setGrades(gradesObj);
-             setStatusMsg(`已載入本地資料：${localStudent.name} (請記得儲存以建立雲端檔案)`);
-        } else {
-            setCurrentStudentId(id);
-            setStudentName('');
-            const gradesObj = {};
-            availableDates.forEach(d => {
-                gradesObj[d] = { chi: '', eng: '', math: '', total: '' };
-            });
-            setGrades(gradesObj);
-            setStatusMsg('新學生模式：請輸入姓名並開始建檔。');
-        }
+        setCurrentStudentId(id); setStudentName('');
+        const gradesObj = {}; availableDates.forEach(d => gradesObj[d] = { chi: '', eng: '', math: '', total: '' });
+        setGrades(gradesObj); setStatusMsg('新學生模式');
       }
     } catch (e) { setStatusMsg('讀取錯誤'); }
     setLoading(false);
@@ -433,9 +446,7 @@ export default function GradeTracker() {
   const handleAddNewStudent = () => {
       if(newStudentIdInput.trim()) {
           loadStudentForTeacher(newStudentIdInput.toUpperCase().trim());
-          setShowAddStudentModal(false);
-          setNewStudentIdInput('');
-          setTeacherViewMode('single'); // Switch to single view for new student
+          setShowAddStudentModal(false); setNewStudentIdInput(''); setTeacherViewMode('single');
       }
   };
 
@@ -443,12 +454,7 @@ export default function GradeTracker() {
     setGrades(prev => {
         const currentData = prev[dateKey] || { chi: '', eng: '', math: '', total: '' };
         const updatedData = { ...currentData, [subject]: value };
-        if (subject !== 'total') {
-            const chi = subject === 'chi' ? value : updatedData.chi;
-            const eng = subject === 'eng' ? value : updatedData.eng;
-            const math = subject === 'math' ? value : updatedData.math;
-            updatedData.total = calculateTotal(chi, eng, math);
-        }
+        if (subject !== 'total') updatedData.total = calculateTotal(subject==='chi'?value:updatedData.chi, subject==='eng'?value:updatedData.eng, subject==='math'?value:updatedData.math);
         return { ...prev, [dateKey]: updatedData };
     });
   };
@@ -459,16 +465,14 @@ export default function GradeTracker() {
           const currentGrades = s.grades || {};
           const currentDateGrades = currentGrades[batchDate] || { chi: '', eng: '', math: '', total: '' };
           const updatedDateGrades = { ...currentDateGrades, [subject]: value };
-          if (subject !== 'total') {
-              const chi = subject === 'chi' ? value : updatedDateGrades.chi;
-              const eng = subject === 'eng' ? value : updatedDateGrades.eng;
-              const math = subject === 'math' ? value : updatedDateGrades.math;
-              updatedDateGrades.total = calculateTotal(chi, eng, math);
-          }
+          if (subject !== 'total') updatedDateGrades.total = calculateTotal(subject==='chi'?value:updatedDateGrades.chi, subject==='eng'?value:updatedDateGrades.eng, subject==='math'?value:updatedDateGrades.math);
           return { ...s, grades: { ...currentGrades, [batchDate]: updatedDateGrades } };
       }));
   };
 
+  // --- Keyboard & Paste Logic Handlers ---
+
+  // 1. Batch View Handlers
   const handleKeyDown = (e, studentIndex, subject) => {
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
           e.preventDefault();
@@ -476,21 +480,15 @@ export default function GradeTracker() {
           let nextSubject = subject;
           const subjects = ['chi', 'eng', 'math'];
           const subjectIndex = subjects.indexOf(subject);
-          if (e.key === 'ArrowUp') {
-              nextStudentIndex = Math.max(0, studentIndex - 1);
-          } else if (e.key === 'ArrowDown') {
-              nextStudentIndex = Math.min(allStudentsData.length - 1, studentIndex + 1);
-          } else if (e.key === 'ArrowLeft') {
-              if (subjectIndex > 0) nextSubject = subjects[subjectIndex - 1];
-          } else if (e.key === 'ArrowRight') {
-              if (subjectIndex < 2) nextSubject = subjects[subjectIndex + 1];
-          }
+          
+          if (e.key === 'ArrowUp') nextStudentIndex = Math.max(0, studentIndex - 1);
+          else if (e.key === 'ArrowDown') nextStudentIndex = Math.min(allStudentsData.length - 1, studentIndex + 1);
+          else if (e.key === 'ArrowLeft' && subjectIndex > 0) nextSubject = subjects[subjectIndex - 1];
+          else if (e.key === 'ArrowRight' && subjectIndex < 2) nextSubject = subjects[subjectIndex + 1];
+          
           const nextInputId = `cell-${nextStudentIndex}-${nextSubject}`;
           const nextInput = document.getElementById(nextInputId);
-          if (nextInput) {
-              nextInput.focus();
-              nextInput.select();
-          }
+          if (nextInput) { nextInput.focus(); nextInput.select(); }
       }
   };
 
@@ -500,86 +498,197 @@ export default function GradeTracker() {
       const rows = pasteData.trim().split(/\r\n|\n|\r/);
       const subjects = ['chi', 'eng', 'math'];
       const startSubjectIndex = subjects.indexOf(startSubject);
+      
       if (rows.length === 0) return;
-      const newStudentsData = [...allStudentsData];
-      let updated = false;
-      rows.forEach((row, rIndex) => {
-          const studentIndex = startStudentIndex + rIndex;
-          if (studentIndex >= newStudentsData.length) return;
-          const cols = row.split('\t');
-          const student = { ...newStudentsData[studentIndex] };
-          const currentGrades = student.grades || {};
-          const currentDateGrades = { ...(currentGrades[batchDate] || { chi: '', eng: '', math: '', total: '' }) };
-          cols.forEach((val, cIndex) => {
-              const subjectIndex = startSubjectIndex + cIndex;
-              if (subjectIndex >= 3) return;
-              const subject = subjects[subjectIndex];
-              const cleanVal = val.trim();
-              if (cleanVal) {
+      
+      setAllStudentsData(prev => {
+          const newData = [...prev];
+          let updated = false;
+          rows.forEach((row, rIndex) => {
+              const studentIndex = startStudentIndex + rIndex;
+              if (studentIndex >= newData.length) return;
+              const cols = row.split('\t');
+              const student = { ...newData[studentIndex] };
+              const currentGrades = student.grades || {};
+              const currentDateGrades = { ...(currentGrades[batchDate] || { chi: '', eng: '', math: '', total: '' }) };
+              let rowUpdated = false;
+              cols.forEach((val, cIndex) => {
+                  const subjectIndex = startSubjectIndex + cIndex;
+                  if (subjectIndex >= 3) return;
+                  const subject = subjects[subjectIndex];
+                  const cleanVal = val.trim();
                   currentDateGrades[subject] = cleanVal;
+                  rowUpdated = true;
+              });
+              if (rowUpdated) {
+                  currentDateGrades.total = calculateTotal(currentDateGrades.chi, currentDateGrades.eng, currentDateGrades.math);
+                  student.grades = { ...currentGrades, [batchDate]: currentDateGrades };
+                  newData[studentIndex] = student;
                   updated = true;
               }
           });
-          currentDateGrades.total = calculateTotal(currentDateGrades.chi, currentDateGrades.eng, currentDateGrades.math);
-          student.grades = { ...currentGrades, [batchDate]: currentDateGrades };
-          newStudentsData[studentIndex] = student;
+          if(updated) { setStatusMsg(`已貼上 ${rows.length} 筆資料`); setTimeout(() => setStatusMsg(''), 2000); }
+          return newData;
       });
-      if (updated) {
-          setAllStudentsData(newStudentsData);
-          setStatusMsg(`已貼上 ${rows.length} 筆資料`);
-          setTimeout(() => setStatusMsg(''), 2000);
+  };
+
+  // 2. Single Student View Handlers
+  const handleSingleKeyDown = (e, dateIndex, subject) => {
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+          e.preventDefault();
+          const subjects = ['chi', 'eng', 'math'];
+          let nextDateIndex = dateIndex;
+          let nextSubject = subject;
+          const subjectIndex = subjects.indexOf(subject);
+          const maxDateIndex = availableDates.length - 1;
+
+          if (e.key === 'ArrowUp') nextDateIndex = Math.max(0, dateIndex - 1);
+          else if (e.key === 'ArrowDown') nextDateIndex = Math.min(maxDateIndex, dateIndex + 1);
+          else if (e.key === 'ArrowLeft' && subjectIndex > 0) nextSubject = subjects[subjectIndex - 1];
+          else if (e.key === 'ArrowRight' && subjectIndex < 2) nextSubject = subjects[subjectIndex + 1];
+
+          const nextInputId = `single-${nextDateIndex}-${nextSubject}`;
+          const nextInput = document.getElementById(nextInputId);
+          if (nextInput) { nextInput.focus(); nextInput.select(); }
       }
   };
 
-  const handleDeleteStudent = () => {
-    if (!currentStudentId) return;
-    setStudentToDelete({ id: currentStudentId, name: studentName });
+  const handleSinglePaste = (e, startDateIndex, startSubject) => {
+      e.preventDefault();
+      const pasteData = e.clipboardData.getData('text');
+      const rows = pasteData.trim().split(/\r\n|\n|\r/); 
+      const subjects = ['chi', 'eng', 'math'];
+      const startSubjectIndex = subjects.indexOf(startSubject);
+
+      const reversedDates = [...availableDates].reverse();
+
+      setGrades(prev => {
+          const newGrades = { ...prev };
+          let updated = false;
+
+          rows.forEach((row, rIndex) => {
+              const dateIndex = startDateIndex + rIndex;
+              if (dateIndex >= reversedDates.length) return;
+              
+              const targetDate = reversedDates[dateIndex];
+              const cols = row.split('\t');
+              
+              const currentData = { ...(newGrades[targetDate] || { chi: '', eng: '', math: '', total: '' }) };
+              let rowUpdated = false;
+
+              cols.forEach((val, cIndex) => {
+                  const subjectIndex = startSubjectIndex + cIndex;
+                  if (subjectIndex >= 3) return;
+                  const subject = subjects[subjectIndex];
+                  currentData[subject] = val.trim();
+                  rowUpdated = true;
+              });
+
+              if (rowUpdated) {
+                  currentData.total = calculateTotal(currentData.chi, currentData.eng, currentData.math);
+                  newGrades[targetDate] = currentData;
+                  updated = true;
+              }
+          });
+          
+          if (updated) { setStatusMsg(`已貼上 ${rows.length} 筆資料`); setTimeout(() => setStatusMsg(''), 2000); }
+          return newGrades;
+      });
   };
+
+  // 3. Class Average Modal Handlers
+  const handleAvgKeyDown = (e, dateIndex, subject) => {
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+          e.preventDefault();
+          const subjects = ['chi', 'eng', 'math', 'total'];
+          let nextDateIndex = dateIndex;
+          let nextSubject = subject;
+          const subjectIndex = subjects.indexOf(subject);
+          const maxDateIndex = availableDates.length - 1;
+
+          if (e.key === 'ArrowUp') nextDateIndex = Math.max(0, dateIndex - 1);
+          else if (e.key === 'ArrowDown') nextDateIndex = Math.min(maxDateIndex, dateIndex + 1);
+          else if (e.key === 'ArrowLeft' && subjectIndex > 0) nextSubject = subjects[subjectIndex - 1];
+          else if (e.key === 'ArrowRight' && subjectIndex < 3) nextSubject = subjects[subjectIndex + 1];
+
+          const nextInputId = `avg-${nextDateIndex}-${nextSubject}`;
+          const nextInput = document.getElementById(nextInputId);
+          if (nextInput) { nextInput.focus(); nextInput.select(); }
+      }
+  };
+
+  const handleAvgPaste = (e, startDateIndex, startSubject) => {
+      e.preventDefault();
+      const pasteData = e.clipboardData.getData('text');
+      const rows = pasteData.trim().split(/\r\n|\n|\r/);
+      const subjects = ['chi', 'eng', 'math', 'total'];
+      const startSubjectIndex = subjects.indexOf(startSubject);
+      const reversedDates = [...availableDates].reverse();
+
+      setClassAverages(prev => {
+          const newAvgs = { ...prev };
+          let updated = false;
+
+          rows.forEach((row, rIndex) => {
+              const dateIndex = startDateIndex + rIndex;
+              if (dateIndex >= reversedDates.length) return;
+              
+              const targetDate = reversedDates[dateIndex];
+              const cols = row.split('\t');
+              
+              const currentData = { ...(newAvgs[targetDate] || { chi: '', eng: '', math: '', total: '' }) };
+              let rowUpdated = false;
+
+              cols.forEach((val, cIndex) => {
+                  const subjectIndex = startSubjectIndex + cIndex;
+                  if (subjectIndex >= 4) return;
+                  const subject = subjects[subjectIndex];
+                  if (subject !== 'total') {
+                      currentData[subject] = val.trim();
+                      rowUpdated = true;
+                  }
+              });
+
+              if (rowUpdated) {
+                  currentData.total = calculateTotal(currentData.chi, currentData.eng, currentData.math);
+                  newAvgs[targetDate] = currentData;
+                  updated = true;
+              }
+          });
+          
+          if (updated) { setStatusMsg(`已貼上 ${rows.length} 筆資料`); setTimeout(() => setStatusMsg(''), 2000); }
+          return newAvgs;
+      });
+  };
+
+  const handleDeleteStudent = () => { if (currentStudentId) setStudentToDelete({ id: currentStudentId, name: studentName }); };
 
   const confirmDeleteStudent = async () => {
     if (!studentToDelete) return;
-    setStatusMsg(`正在刪除 ${studentToDelete.name}...`);
     try {
-        if (db) {
-            await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${studentToDelete.id}`));
-        }
+        if (db) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${studentToDelete.id}`));
         setAllStudentsData(prev => prev.filter(s => s.id !== studentToDelete.id));
-        setCurrentStudentId(null);
-        setStudentName('');
-        setGrades({});
-        setStatusMsg(`已刪除學生: ${studentToDelete.name}`);
-        setTimeout(() => setStatusMsg(''), 2000);
-        setStudentToDelete(null);
-    } catch (e) {
-        console.error("Delete Error", e);
-        setStatusMsg("刪除失敗，請稍後再試");
-    }
+        setCurrentStudentId(null); setStudentName(''); setGrades({});
+        setStatusMsg(`已刪除學生`); setTimeout(() => setStatusMsg(''), 2000); setStudentToDelete(null);
+    } catch (e) { setStatusMsg("刪除失敗"); }
   };
 
   const handleSaveGrades = async () => {
     if (!user || !currentStudentId) return;
-    if (!studentName.trim()) {
-        setStatusMsg('請輸入學生姓名！');
-        return;
-    }
+    if (!studentName.trim()) { setStatusMsg('請輸入姓名'); return; }
     setStatusMsg('儲存中...');
     try {
       if (db) {
           await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${currentStudentId}`), { 
-              id: currentStudentId, 
-              name: studentName, 
-              grades: grades, 
-              lastUpdated: new Date().toISOString()
+              id: currentStudentId, name: studentName, grades: grades, lastUpdated: new Date().toISOString()
           }, { merge: true });
-      } else {
-          console.warn("No DB connection, changes only saved locally in RAM.");
       }
       setAllStudentsData(prev => {
           const exists = prev.find(s => s.id === currentStudentId);
           if(exists) return prev.map(s => s.id === currentStudentId ? { ...s, name: studentName, grades } : s);
           return [...prev, { id: currentStudentId, name: studentName, grades }].sort((a,b) => a.id.localeCompare(b.id));
       });
-      setStatusMsg('儲存成功！'); setTimeout(() => setStatusMsg(''), 2000);
+      setStatusMsg('儲存成功'); setTimeout(() => setStatusMsg(''), 2000);
     } catch (e) { setStatusMsg('儲存失敗'); }
   };
 
@@ -589,54 +698,40 @@ export default function GradeTracker() {
           if (db) {
               const batchPromises = allStudentsData.map(student => {
                   return setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${student.id}`), {
-                      id: student.id,
-                      name: student.name,
-                      grades: student.grades,
-                      lastUpdated: new Date().toISOString()
+                      id: student.id, name: student.name, grades: student.grades, lastUpdated: new Date().toISOString()
                   }, { merge: true });
               });
               await Promise.all(batchPromises);
               setStatusMsg("全班成績儲存成功！"); setTimeout(() => setStatusMsg(''), 2000);
-          } else {
-              setStatusMsg("無資料庫連線，僅本地更新");
           }
-      } catch (e) {
-          console.error(e);
-          setStatusMsg("儲存失敗，請重試");
-      }
+      } catch (e) { setStatusMsg("儲存失敗"); }
   };
 
+  // --- 家長查詢邏輯 ---
   const handleParentSearch = async () => {
     if (!user || !searchId.trim()) return;
     setSearchError(''); setViewData(null); setLoading(true);
     try {
       let data = null;
+      let fullClassData = [];
+
       if (db) {
           const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${searchId.toUpperCase()}`);
           const docSnap = await getDoc(docRef);
+          
           if (docSnap.exists()) {
               data = docSnap.data();
-          }
-      }
-      if (!data) {
-          const localStudent = RAW_STUDENT_RECORDS.find(s => s.id === searchId.toUpperCase());
-          if (localStudent) {
-              const gradesObj = {};
-              availableDates.forEach(d => {
-                 const g = localStudent.grades[d];
-                 if (Array.isArray(g)) {
-                    gradesObj[d] = { math: f1(g[0]), eng: f1(g[1]), chi: f1(g[2]), total: f1((g[0]||0)+(g[1]||0)+(g[2]||0)) };
-                 }
-              });
-              data = { id: localStudent.id, name: localStudent.name, grades: gradesObj };
+              if (cachedClassData.length > 0) {
+                  fullClassData = cachedClassData;
+              } else {
+                  const qSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'students'));
+                  qSnap.forEach(d => fullClassData.push(d.data()));
+                  setCachedClassData(fullClassData);
+              }
           }
       }
 
       if (data) {
-        // --- 核心修改：分階段過濾數據 ---
-        // 這裡會先準備所有數據，但在 render 時再根據 activePhase 過濾
-        // 為了讓 SingleSubjectChart 收到正確的資料，我們在這裡先全部計算
-        // 但其實 UI 層級會決定要顯示哪一段
         const allChartData = [];
         const sortedDates = [...availableDates].sort(); 
 
@@ -662,30 +757,116 @@ export default function GradeTracker() {
           }
         }
         
-        // 計算總平均 (基於全部數據)
         const avg = allChartData.length > 0 ? (allChartData.reduce((a,b)=>a+b.total,0)/allChartData.length).toFixed(1) : 0;
         setViewData({ ...data, chartData: allChartData, average: avg });
       } else { setSearchError('查無此學號'); }
-    } catch (e) { setSearchError('系統忙碌，請稍後再試'); }
+    } catch (e) { console.error(e); setSearchError('系統忙碌，請稍後再試'); }
     setLoading(false);
   };
 
-  // Helper to filter data based on active phase
   const getPhaseData = (fullData) => {
       if (!fullData) return [];
       const currentPhaseConfig = PHASES.find(p => p.id === activePhase) || PHASES[0];
       const [start, end] = currentPhaseConfig.range;
-      // 因為 chartData 是動態生成的，可能比 range 長或短
-      // 我們這裡假設 chartData 的順序是跟著 EXAM_DATES 排序的
-      // 但最安全的方式是根據日期索引過濾
-      // 這裡簡化邏輯：直接對過濾後的 chartData 做 slice 可能不準確，因為 chartData 可能有缺漏
-      // 正確做法：根據 EXAM_DATES 的 index 來決定這個 date 是否屬於該 phase
-      
       const targetDates = availableDates.slice(start, end);
       return fullData.filter(d => targetDates.includes(d.date));
   };
 
-  if (!user && !db) return <div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400 text-sm font-mono">系統初始化中，請稍候... (請確認 Firebase 設定)</div>;
+  const calculateRank = (date, subject, myScore) => {
+      if (!cachedClassData.length || !myScore) return '-';
+      const myVal = parseFloat(myScore);
+      if (isNaN(myVal)) return '-';
+
+      const scores = cachedClassData.map(s => {
+          const g = s.grades?.[date];
+          if (!g) return null;
+          const val = parseFloat(g[subject]);
+          return isNaN(val) ? null : val;
+      }).filter(v => v !== null);
+
+      scores.sort((a, b) => b - a);
+      const rank = scores.indexOf(myVal) + 1;
+      return rank > 0 ? rank : '-';
+  };
+
+  const calculateDistribution = (date, subject, myScore) => {
+      if (!cachedClassData.length) return [];
+      
+      const ranges = subject === 'total' 
+         ? [290, 280, 270, 260, 250, 240, 230, 200, 0] 
+         : [100, 90, 80, 70, 60, 0];
+
+      const myVal = parseFloat(myScore);
+      
+      const buckets = ranges.slice(0, ranges.length - 1).map((r, i) => {
+          const nextR = ranges[i+1];
+          let label = `${r}`;
+          if (subject === 'total') {
+              if (r === 290) label = `290+`;
+              else if (nextR === 0) label = `<200`; 
+              else label = `${r}~${nextR + (nextR===200?0:1)}`; 
+          } else {
+              if (r === 100) return null; 
+          }
+          return { min: r, max: 999, count: 0, label, isMyRange: false };
+      }).filter(b => b);
+
+      if (subject !== 'total') {
+          const simpleRanges = [90, 80, 70, 60, 0];
+          const newBuckets = simpleRanges.map(min => {
+              let label = `${min}+`;
+              if (min === 0) label = '<60';
+              else if (min === 90) label = '90-100';
+              else label = `${min}-${min+9}`;
+              return { min, max: min === 90 ? 300 : min + 9, count: 0, label, isMyRange: false };
+          });
+          buckets.length = 0; buckets.push(...newBuckets);
+      } else {
+          const totalRanges = [290, 280, 270, 260, 250, 240, 230, 200, 0];
+           const newBuckets = totalRanges.map((min, idx) => {
+              let label = '';
+              let max = 999;
+              if (min === 290) { label = '290+'; }
+              else if (min === 0) { label = '<200'; max = 199; }
+              else { 
+                  max = totalRanges[idx-1] - 1; 
+                  label = `${min}-${max}`;
+              }
+              return { min, max, count: 0, label, isMyRange: false };
+           });
+           buckets.length = 0; buckets.push(...newBuckets);
+      }
+
+      cachedClassData.forEach(s => {
+          const g = s.grades?.[date];
+          if (!g) return;
+          const val = parseFloat(g[subject]);
+          if (isNaN(val)) return;
+
+          const bucket = buckets.find(b => val >= b.min && val <= b.max);
+          if (bucket) bucket.count++;
+      });
+
+      if (!isNaN(myVal)) {
+          const myBucket = buckets.find(b => myVal >= b.min && myVal <= b.max);
+          if (myBucket) myBucket.isMyRange = true;
+      }
+      return buckets.map(b => ({ range: b.label, count: b.count, isMyRange: b.isMyRange }));
+  };
+
+  const openStatsModal = (date, grades) => {
+      const stats = {
+          date,
+          total: calculateDistribution(date, 'total', grades.total),
+          chi: calculateDistribution(date, 'chi', grades.chi),
+          eng: calculateDistribution(date, 'eng', grades.eng),
+          math: calculateDistribution(date, 'math', grades.math),
+          myGrades: grades
+      };
+      setStatsModalData(stats);
+  };
+
+  if (!user && !db) return <div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400 text-sm font-mono">系統初始化中...</div>;
   if (!user) return <div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400 text-sm font-mono">系統連線中...</div>;
 
   return (
@@ -694,7 +875,10 @@ export default function GradeTracker() {
         <div className="max-w-4xl mx-auto px-4 h-16 flex justify-between items-center">
           <div className="flex items-center space-x-2 cursor-pointer active:scale-95 transition" onClick={() => setMode('landing')}>
             <div className="bg-gradient-to-br from-emerald-400 to-teal-600 text-white p-2.5 rounded-2xl shadow-lg shadow-emerald-200/50"><GraduationCap className="h-5 w-5" /></div>
-            <div><h1 className="text-xl font-black tracking-tight text-slate-800">小六私中A班</h1><p className="text-[11px] text-slate-500 font-bold tracking-widest uppercase">Learning Tracker</p></div>
+            <div>
+                <h1 className="text-xl font-black tracking-tight text-slate-800 leading-none">2025-26六私A班</h1>
+                <p className="text-[11px] text-slate-500 font-bold tracking-widest uppercase mt-0.5">Learning Tracker</p>
+            </div>
           </div>
           <div className="flex bg-slate-100/50 p-1 rounded-full items-center border border-white/50 backdrop-blur-sm">
             <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${mode.includes('teacher') ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{isAuthenticated ? '老師後台' : '老師登入'}</button>
@@ -710,18 +894,19 @@ export default function GradeTracker() {
         {mode === 'landing' && (
           <div className="flex flex-col items-center justify-center py-10 md:py-20 space-y-6 md:space-y-12 animate-in fade-in zoom-in duration-700">
             <div className="text-center space-y-6 md:space-y-8 max-w-lg">
-                <div className="inline-flex items-center justify-center p-4 md:p-6 bg-white rounded-full shadow-2xl shadow-emerald-100 mb-2 ring-4 md:ring-8 ring-white"><Sparkles className="w-8 h-8 md:w-12 md:h-12 text-emerald-500" /></div>
+                <div className="inline-flex items-center justify-center p-4 md:p-6 bg-gradient-to-br from-white to-slate-100 rounded-full shadow-2xl shadow-emerald-100 mb-2 ring-4 md:ring-8 ring-white"><Sparkles className="w-8 h-8 md:w-12 md:h-12 text-emerald-500" /></div>
                 
                 <div className="flex flex-col items-center justify-center">
                     <p className="text-sm text-slate-400 font-bold tracking-[0.2em] uppercase">Making Progress Visible</p>
+                    <ExamCountdown />
                 </div>
             </div>
             <div className="w-full max-w-sm space-y-4 pt-4">
-               <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className="group w-full bg-white p-6 rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white hover:border-emerald-100 flex items-center gap-5 hover:scale-[1.02] transition-all duration-300 active:scale-95">
+               <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className="group w-full bg-gradient-to-br from-white to-slate-100 p-6 rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white hover:border-emerald-100 flex items-center gap-5 hover:scale-[1.02] transition-all duration-300 active:scale-95">
                   <div className="bg-emerald-50 group-hover:bg-emerald-100 w-14 h-14 rounded-2xl flex items-center justify-center text-emerald-600 transition-colors"><LayoutDashboard className="w-7 h-7" /></div>
                   <div className="text-left"><h3 className="text-xl font-bold text-slate-800">老師專用通道</h3><p className="text-xs text-slate-400 mt-1 font-medium">成績管理與班級設定</p></div>
                </button>
-               <button onClick={() => setMode('parent')} className="group w-full bg-white p-6 rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white hover:border-blue-100 flex items-center gap-5 hover:scale-[1.02] transition-all duration-300 active:scale-95">
+               <button onClick={() => setMode('parent')} className="group w-full bg-gradient-to-br from-white to-slate-100 p-6 rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white hover:border-blue-100 flex items-center gap-5 hover:scale-[1.02] transition-all duration-300 active:scale-95">
                   <div className="bg-blue-50 group-hover:bg-blue-100 w-14 h-14 rounded-2xl flex items-center justify-center text-blue-600 transition-colors"><BarChart3 className="w-7 h-7" /></div>
                   <div className="text-left"><h3 className="text-xl font-bold text-slate-800">家長查詢入口</h3><p className="text-xs text-slate-400 mt-1 font-medium">輸入學號查看分析報告</p></div>
                </button>
@@ -731,7 +916,7 @@ export default function GradeTracker() {
 
         {mode === 'teacher_login' && (
             <div className="flex items-center justify-center min-h-[60vh] px-4 animate-in fade-in">
-                <div className="bg-white/80 backdrop-blur-xl p-6 md:p-10 rounded-[2.5rem] shadow-2xl shadow-emerald-100/50 w-full max-w-sm text-center border border-white mx-auto">
+                <div className="bg-gradient-to-br from-white/90 to-slate-100/90 backdrop-blur-xl p-6 md:p-10 rounded-[2.5rem] shadow-2xl shadow-emerald-100/50 w-full max-w-sm text-center border border-white mx-auto">
                     <div className="inline-flex p-4 bg-emerald-50 rounded-2xl mb-8 text-emerald-600"><Lock className="w-8 h-8" /></div>
                     <h2 className="text-2xl font-extrabold text-slate-800 mb-8 tracking-tight">身份驗證</h2>
                     <input type="password" value={passwordInput} onChange={(e) => { setPasswordInput(e.target.value); setLoginError(false); }} onKeyDown={(e) => e.key === 'Enter' && handleLoginSubmit()} className="w-full p-4 bg-slate-50 border-2 border-transparent focus:bg-white focus:border-emerald-200 rounded-2xl text-center text-xl font-bold tracking-[0.2em] text-slate-800 outline-none transition-all mb-4 placeholder:tracking-normal" placeholder="" autoFocus />
@@ -743,8 +928,7 @@ export default function GradeTracker() {
 
         {mode === 'teacher' && (
           <div className="space-y-6 animate-in slide-in-from-bottom-4">
-            <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 space-y-6">
-                {/* 日期管理區塊 */}
+            <div className="bg-gradient-to-br from-white to-slate-50 p-6 rounded-3xl shadow-sm border border-slate-100 space-y-6">
                 <div>
                     <div className="flex justify-between items-center mb-3">
                         <div className="flex items-center gap-2 text-slate-800 font-bold"><Calendar className="w-5 h-5 text-emerald-500"/>管理日期</div>
@@ -762,23 +946,11 @@ export default function GradeTracker() {
                     </div>
                 </div>
 
-                {/* 檢視模式切換 */}
                 <div className="flex bg-slate-100 p-1.5 rounded-2xl">
-                     <button 
-                        onClick={() => setTeacherViewMode('single')}
-                        className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${teacherViewMode==='single' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                      >
-                        個人檢視
-                      </button>
-                      <button 
-                        onClick={() => setTeacherViewMode('batch')}
-                        className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${teacherViewMode==='batch' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                      >
-                        週次檢視 (批量輸入)
-                      </button>
+                     <button onClick={() => setTeacherViewMode('single')} className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${teacherViewMode==='single' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>個人檢視</button>
+                     <button onClick={() => setTeacherViewMode('batch')} className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${teacherViewMode==='batch' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>週次檢視 (批量輸入)</button>
                 </div>
 
-                {/* 學生操作區塊 (Single Mode) */}
                 {teacherViewMode === 'single' && (
                     <div className="pt-4 border-t border-slate-100">
                         <div className="flex gap-3">
@@ -795,23 +967,17 @@ export default function GradeTracker() {
                     </div>
                 )}
 
-                {/* 學生操作區塊 (Batch Mode) */}
                 {teacherViewMode === 'batch' && (
                     <div className="pt-4 border-t border-slate-100">
                         <div className="flex justify-between items-center mb-4">
                             <div className="flex items-center gap-2">
                                 <span className="text-sm font-bold text-slate-500">選擇日期：</span>
-                                <select 
-                                    className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-800 outline-none focus:border-emerald-400"
-                                    value={batchDate}
-                                    onChange={(e) => setBatchDate(e.target.value)}
-                                >
+                                <select className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-800 outline-none focus:border-emerald-400" value={batchDate} onChange={(e) => setBatchDate(e.target.value)}>
                                     {[...availableDates].reverse().map(d => <option key={d} value={d}>{d}</option>)}
                                 </select>
                             </div>
                             <button onClick={handleSaveBatchGrades} className="bg-emerald-500 text-white px-5 py-2 rounded-xl text-xs font-bold shadow-md shadow-emerald-200 hover:bg-emerald-600 transition-all active:scale-95 flex items-center gap-1"><Save className="w-4 h-4"/> 儲存全班</button>
                         </div>
-                        
                         <div className="max-h-[60vh] overflow-x-auto overflow-y-auto rounded-2xl border border-slate-100">
                             <table className="w-full text-sm text-left min-w-[600px]">
                                 <thead className="text-xs text-slate-500 uppercase bg-slate-50 sticky top-0 z-10">
@@ -822,7 +988,7 @@ export default function GradeTracker() {
                                         <th className="px-2 py-3 text-center text-blue-500 bg-slate-50">國文</th>
                                         <th className="px-2 py-3 text-center text-violet-500 bg-slate-50">英文</th>
                                         <th className="px-2 py-3 text-center text-amber-500 bg-slate-50">數學</th>
-                                        <th className="px-2 py-3 text-center font-bold text-emerald-600 bg-slate-50">總分(Auto)</th>
+                                        <th className="px-2 py-3 text-center font-bold text-emerald-600 bg-slate-50">總分</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-50 bg-white">
@@ -830,28 +996,15 @@ export default function GradeTracker() {
                                         const dateGrades = (student.grades && student.grades[batchDate]) || { chi: '', eng: '', math: '', total: '' };
                                         return (
                                             <tr key={student.id} className="hover:bg-slate-50/80">
-                                                <td className="px-2 py-2 text-center">
-                                                    <div className="text-xs font-bold text-slate-400">{sIndex + 1}</div>
-                                                </td>
+                                                <td className="px-2 py-2 text-center"><div className="text-xs font-bold text-slate-400">{sIndex + 1}</div></td>
                                                 <td className="px-4 py-2 font-mono text-xs font-bold text-slate-400">{student.id}</td>
                                                 <td className="px-4 py-2 font-bold text-slate-700">{student.name}</td>
                                                 {['chi', 'eng', 'math'].map((sub, cIndex) => (
                                                     <td key={sub} className="px-1 py-2">
-                                                        <input 
-                                                            id={`cell-${sIndex}-${sub}`}
-                                                            type="text" 
-                                                            className="w-full text-center p-2 rounded-lg bg-slate-50 focus:bg-white border border-transparent focus:border-emerald-200 outline-none text-sm font-bold text-slate-600 transition-all"
-                                                            value={dateGrades[sub]}
-                                                            onChange={(e) => handleBatchGradeChange(student.id, sub, e.target.value)}
-                                                            onKeyDown={(e) => handleKeyDown(e, sIndex, sub)}
-                                                            onPaste={(e) => handlePaste(e, sIndex, sub)}
-                                                            placeholder="-"
-                                                        />
+                                                        <input id={`cell-${sIndex}-${sub}`} type="text" className="w-full text-center p-2 rounded-lg bg-slate-50 focus:bg-white border border-transparent focus:border-emerald-200 outline-none text-sm font-bold text-slate-600 transition-all" value={dateGrades[sub]} onChange={(e) => handleBatchGradeChange(student.id, sub, e.target.value)} onKeyDown={(e) => handleKeyDown(e, sIndex, sub)} onPaste={(e) => handlePaste(e, sIndex, sub)} placeholder="-" />
                                                     </td>
                                                 ))}
-                                                <td className="px-1 py-2 text-center">
-                                                    <div className="py-2 text-sm font-black text-emerald-600">{dateGrades.total}</div>
-                                                </td>
+                                                <td className="px-1 py-2 text-center"><div className="py-2 text-sm font-black text-emerald-600">{dateGrades.total}</div></td>
                                             </tr>
                                         )
                                     })}
@@ -863,18 +1016,11 @@ export default function GradeTracker() {
             </div>
             {statusMsg && <div className="bg-emerald-50 text-emerald-700 px-6 py-4 rounded-2xl flex items-center text-sm font-bold border border-emerald-100 animate-in fade-in shadow-lg shadow-emerald-50"><Check className="w-5 h-5 mr-3" /> {statusMsg}</div>}
             
-            {/* Single Student Edit Mode */}
             {teacherViewMode === 'single' && currentStudentId && !loading && (
-              <div className="bg-white rounded-3xl shadow-xl shadow-slate-200/50 border border-white overflow-hidden animate-in fade-in duration-500">
+              <div className="bg-gradient-to-br from-white to-slate-50 rounded-3xl shadow-xl shadow-slate-200/50 border border-white overflow-hidden animate-in fade-in duration-500">
                 <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 backdrop-blur-sm">
                   <div className="flex-1 mr-4">
-                      <input 
-                        type="text" 
-                        value={studentName} 
-                        onChange={(e) => setStudentName(e.target.value)} 
-                        className="text-2xl font-black text-slate-800 bg-transparent border-b-2 border-transparent focus:border-emerald-400 outline-none w-full placeholder:text-slate-300 transition-all tracking-wide"
-                        placeholder="學生姓名"
-                      />
+                      <input type="text" value={studentName} onChange={(e) => setStudentName(e.target.value)} className="text-2xl font-black text-slate-800 bg-transparent border-b-2 border-transparent focus:border-emerald-400 outline-none w-full placeholder:text-slate-300 transition-all tracking-wide" placeholder="學生姓名"/>
                       <span className="text-slate-400 text-xs font-mono font-bold bg-white px-2 py-0.5 rounded-md border border-slate-200 mt-1 inline-block shadow-sm">{currentStudentId}</span>
                   </div>
                   <div className="flex gap-2">
@@ -890,23 +1036,30 @@ export default function GradeTracker() {
                                 <th className="px-2 py-4 text-center text-blue-500 font-bold">國文</th>
                                 <th className="px-2 py-4 text-center text-violet-500 font-bold">英文</th>
                                 <th className="px-2 py-4 text-center text-amber-500 font-bold">數學</th>
-                                <th className="px-2 py-4 text-center font-black text-emerald-600">總分 (Auto)</th>
+                                <th className="px-2 py-4 text-center font-black text-emerald-600">總分</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50">
-                            {[...availableDates].reverse().map(date => {
+                            {[...availableDates].reverse().map((date, dateIndex) => {
                                 const g = grades[date] || { chi: '', eng: '', math: '', total: '' };
                                 return (
                                     <tr key={date} className="hover:bg-slate-50/50 transition-colors">
                                         <td className="px-4 py-3 font-mono text-sm font-bold text-slate-400">{date}</td>
                                         {['chi', 'eng', 'math'].map(sub => (
                                             <td key={sub} className="px-2 py-4 text-center">
-                                                <input type="text" className="w-full text-center p-2.5 rounded-xl bg-transparent focus:bg-white border border-transparent focus:border-emerald-200 focus:shadow-sm outline-none text-base font-bold transition-all text-slate-600" value={g[sub]} onChange={(e) => handleGradeChange(date, sub, e.target.value)} placeholder="-" />
+                                                <input 
+                                                  id={`single-${dateIndex}-${sub}`}
+                                                  type="text" 
+                                                  className="w-full text-center p-2.5 rounded-xl bg-transparent focus:bg-white border border-transparent focus:border-emerald-200 focus:shadow-sm outline-none text-base font-bold transition-all text-slate-600" 
+                                                  value={g[sub]} 
+                                                  onChange={(e) => handleGradeChange(date, sub, e.target.value)} 
+                                                  onKeyDown={(e) => handleSingleKeyDown(e, dateIndex, sub)}
+                                                  onPaste={(e) => handleSinglePaste(e, dateIndex, sub)}
+                                                  placeholder="-" 
+                                                />
                                             </td>
                                         ))}
-                                        <td className="px-2 py-4 text-center">
-                                            <div className="text-base font-black text-emerald-600 py-2">{g.total}</div>
-                                        </td>
+                                        <td className="px-2 py-4 text-center"><div className="text-base font-black text-emerald-600 py-2">{g.total}</div></td>
                                     </tr>
                                 );
                             })}
@@ -921,10 +1074,10 @@ export default function GradeTracker() {
         {mode === 'parent' && (
           <div className="max-w-md mx-auto space-y-6 animate-in slide-in-from-bottom-8 duration-700">
             {!viewData && (
-            <div className="bg-white/80 backdrop-blur-xl p-10 rounded-[2.5rem] shadow-2xl shadow-emerald-50 border border-white text-center">
+            <div className="bg-gradient-to-br from-white/90 to-slate-100/90 backdrop-blur-xl p-10 rounded-[2.5rem] shadow-2xl shadow-emerald-50 border border-white text-center">
               <h2 className="text-3xl font-black text-slate-800 mb-10 tracking-tight">查詢成績</h2>
               <div className="flex bg-slate-50 p-4 rounded-3xl border border-slate-200 focus-within:bg-white focus-within:ring-4 focus-within:ring-emerald-100 focus-within:border-emerald-200 transition-all shadow-inner mb-8">
-                <input type="text" placeholder="請輸入學號" className="flex-1 bg-transparent border-none px-4 py-2 outline-none text-2xl text-slate-800 placeholder:text-slate-300 uppercase font-bold text-center tracking-[0.2em] placeholder:tracking-normal" value={searchId} onChange={(e) => setSearchId(e.target.value)} />
+                <input type="text" placeholder="" className="flex-1 bg-transparent border-none px-4 py-2 outline-none text-2xl text-slate-800 placeholder:text-slate-300 uppercase font-bold text-center tracking-[0.2em] placeholder:tracking-normal" value={searchId} onChange={(e) => setSearchId(e.target.value)} />
               </div>
               <button onClick={handleParentSearch} disabled={loading} className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 text-white py-5 rounded-3xl font-bold text-xl hover:shadow-xl hover:shadow-emerald-200/50 transition-all active:scale-95 disabled:opacity-50 disabled:active:scale-100 tracking-wide">{loading ? '查詢中...' : '開始查詢'}</button>
               {searchError && <p className="mt-8 text-red-500 text-sm font-bold bg-red-50 inline-block px-5 py-2 rounded-full animate-bounce">{searchError}</p>}
@@ -947,83 +1100,77 @@ export default function GradeTracker() {
                 </div>
 
                 <div className="p-6">
-                  {/* --- New Phase Tabs --- */}
                   <div className="flex bg-slate-50 p-1 mb-4 rounded-xl border border-slate-100 overflow-x-auto">
                       {PHASES.map(phase => (
-                          <button
-                            key={phase.id}
-                            onClick={() => setActivePhase(phase.id)}
-                            className={`flex-1 whitespace-nowrap px-4 py-2 text-xs font-bold rounded-lg transition-all ${activePhase === phase.id ? 'bg-white text-slate-800 shadow-sm border border-slate-100' : 'text-slate-400 hover:text-slate-600'}`}
-                          >
-                              {phase.name}
-                          </button>
+                          <button key={phase.id} onClick={() => setActivePhase(phase.id)} className={`flex-1 whitespace-nowrap px-4 py-2 text-xs font-bold rounded-lg transition-all ${activePhase === phase.id ? 'bg-white text-slate-800 shadow-sm border border-slate-100' : 'text-slate-400 hover:text-slate-600'}`}>{phase.name}</button>
                       ))}
                   </div>
 
-                  {/* 分頁按鈕 - 更新樣式 */}
                   <div className="flex bg-slate-100 p-1.5 rounded-2xl mb-8 shadow-inner">
                       {['總分', '國文', '英文', '數學'].map(tab => {
                           const tabKey = tab === '總分' ? 'total' : tab === '國文' ? 'chi' : tab === '英文' ? 'eng' : 'math';
                           const isActive = activeTab === tabKey;
                           const color = COLORS[tabKey].tailwind;
                           return (
-                              <button 
-                                key={tabKey}
-                                onClick={() => setActiveTab(tabKey)}
-                                className={`flex-1 py-3 text-xs font-bold rounded-xl transition-all duration-300 ${isActive ? 'bg-white text-slate-800 shadow-md transform scale-100' : 'text-slate-400 hover:text-slate-600'}`}
-                              >
-                                {isActive && <span className={`inline-block w-1.5 h-1.5 rounded-full bg-${color}-500 mr-2 mb-0.5`}></span>}
-                                {tab}
+                              <button key={tabKey} onClick={() => setActiveTab(tabKey)} className={`flex-1 py-3 text-xs font-bold rounded-xl transition-all duration-300 ${isActive ? 'bg-white text-slate-800 shadow-md transform scale-100' : 'text-slate-400 hover:text-slate-600'}`}>
+                                {isActive && <span className={`inline-block w-1.5 h-1.5 rounded-full bg-${color}-500 mr-2 mb-0.5`}></span>}{tab}
                               </button>
                           )
                       })}
                   </div>
 
-                  {/* Chart Rendering with Filtered Data */}
                   {(() => {
-                      // Filter logic inside render
                       const filteredData = getPhaseData(viewData.chartData);
-                      
                       return (
                         <>
-                          {activeTab === 'total' && (
-                              <SingleSubjectChart data={filteredData} subjectKey="total" avgKey="avgTotal" colorKey="total" title="總分" domain={[100, 300]} />
-                          )}
-                          {activeTab === 'chi' && (
-                              <SingleSubjectChart data={filteredData} subjectKey="chi" avgKey="avgChi" colorKey="chi" title="國文" domain={[0, 100]} />
-                          )}
-                          {activeTab === 'eng' && (
-                              <SingleSubjectChart data={filteredData} subjectKey="eng" avgKey="avgEng" colorKey="eng" title="英文" domain={[0, 100]} />
-                          )}
-                          {activeTab === 'math' && (
-                              <SingleSubjectChart data={filteredData} subjectKey="math" avgKey="avgMath" colorKey="math" title="數學" domain={[0, 100]} />
-                          )}
+                          {activeTab === 'total' && <SingleSubjectChart data={filteredData} subjectKey="total" avgKey="avgTotal" colorKey="total" title="總分" domain={[100, 300]} />}
+                          {activeTab === 'chi' && <SingleSubjectChart data={filteredData} subjectKey="chi" avgKey="avgChi" colorKey="chi" title="國文" domain={[0, 100]} />}
+                          {activeTab === 'eng' && <SingleSubjectChart data={filteredData} subjectKey="eng" avgKey="avgEng" colorKey="eng" title="英文" domain={[0, 100]} />}
+                          {activeTab === 'math' && <SingleSubjectChart data={filteredData} subjectKey="math" avgKey="avgMath" colorKey="math" title="數學" domain={[0, 100]} />}
                         </>
                       );
                   })()}
                 </div>
                 
-                {/* 成績列表 - 視覺優化 */}
                 <div className="bg-white p-6 border-t border-slate-50">
                     <h4 className="font-bold text-slate-800 mb-6 text-sm flex items-center gap-2 tracking-wide"><Clipboard className="w-4 h-4 text-slate-400"/> 詳細紀錄</h4>
                     <div className="space-y-4">
-                        {/* List also filtered by active phase, reversed */}
-                        {getPhaseData(viewData.chartData).slice().reverse().map((d) => (
-                             <div key={d.date} className="group bg-white p-5 rounded-3xl border border-slate-100 hover:border-emerald-100 hover:shadow-xl hover:shadow-emerald-50/50 transition-all duration-300 flex justify-between items-center">
-                                <div className="flex flex-col gap-2">
-                                    <span className="text-xs font-bold text-slate-400 font-mono group-hover:text-emerald-500 transition-colors tracking-wide">{d.date}</span>
-                                    <div className="flex gap-5 text-xs font-bold text-slate-500">
-                                        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-blue-500"></span>{f1(d.chi)}</span>
-                                        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-violet-500"></span>{f1(d.eng)}</span>
-                                        <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-500"></span>{f1(d.math)}</span>
+                        {getPhaseData(viewData.chartData).slice().reverse().map((d) => {
+                             const totalRank = calculateRank(d.date, 'total', d.total);
+                             return (
+                             <div key={d.date} className="group bg-white p-5 rounded-3xl border border-slate-100 hover:border-emerald-100 hover:shadow-xl hover:shadow-emerald-50/50 transition-all duration-300">
+                                <div className="flex justify-between items-start mb-4">
+                                    <div className="flex flex-col gap-1">
+                                        <span className="text-xs font-bold text-slate-400 font-mono group-hover:text-emerald-500 transition-colors tracking-wide">{d.date}</span>
+                                        <button onClick={() => openStatsModal(d.date, { total: d.total, chi: d.chi, eng: d.eng, math: d.math })} className="text-[10px] bg-slate-50 hover:bg-emerald-50 text-slate-500 hover:text-emerald-600 px-2 py-1 rounded-lg transition-colors font-bold flex items-center gap-1 mt-1 border border-slate-100 w-fit">
+                                            <BarChart3 className="w-3 h-3" /> 查看全班分析
+                                        </button>
+                                    </div>
+                                    <div className="text-right">
+                                        <div className={`text-3xl font-black tracking-tight text-emerald-500`}>{f1(d.total)}</div>
+                                        <div className="flex items-center justify-end gap-2 mt-1">
+                                            {totalRank !== '-' && <span className="bg-yellow-100 text-yellow-700 text-[10px] px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5"><Trophy className="w-3 h-3"/> #{totalRank}</span>}
+                                            {d.avgTotal && <div className="text-[10px] font-bold text-slate-300 uppercase tracking-wide">Avg {f1(d.avgTotal)}</div>}
+                                        </div>
                                     </div>
                                 </div>
-                                <div className="text-right">
-                                    <div className={`text-3xl font-black tracking-tight text-emerald-500`}>{f1(d.total)}</div>
-                                    {d.avgTotal && <div className="text-[10px] font-bold text-slate-300 uppercase tracking-wide mt-1">Avg {f1(d.avgTotal)}</div>}
+                                <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-slate-50">
+                                    {['chi', 'eng', 'math'].map(sub => {
+                                        const subColor = sub === 'chi' ? 'blue' : sub === 'eng' ? 'violet' : 'amber';
+                                        const subLabel = sub === 'chi' ? '國文' : sub === 'eng' ? '英文' : '數學';
+                                        const subScore = d[sub];
+                                        const subRank = calculateRank(d.date, sub, subScore);
+                                        return (
+                                            <div key={sub} className="bg-slate-50/50 rounded-xl p-2 text-center">
+                                                <div className={`text-[10px] font-bold text-${subColor}-500 mb-0.5`}>{subLabel}</div>
+                                                <div className="font-black text-slate-700">{f1(subScore)}</div>
+                                                {subRank !== '-' && <div className="text-[9px] font-bold text-slate-400 mt-0.5">#{subRank}</div>}
+                                            </div>
+                                        )
+                                    })}
                                 </div>
                              </div>
-                        ))}
+                        )})}
                     </div>
                 </div>
               </div>
@@ -1052,7 +1199,7 @@ export default function GradeTracker() {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {[...availableDates].reverse().map(date => {
+                            {[...availableDates].reverse().map((date, dateIndex) => {
                                 const avg = classAverages[date] || { chi: '', eng: '', math: '', total: '' };
                                 return (
                                     <tr key={date} className="bg-white">
@@ -1060,10 +1207,13 @@ export default function GradeTracker() {
                                         {['chi', 'eng', 'math', 'total'].map(sub => (
                                             <td key={sub} className="px-1 py-2">
                                                 <input 
+                                                    id={`avg-${dateIndex}-${sub}`}
                                                     type="number" 
-                                                    className={`w-full text-center p-2.5 rounded-xl bg-slate-50 border border-slate-100 focus:bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none transition-all font-bold ${sub==='total'?'text-emerald-600':'text-slate-600'}`}
+                                                    className={`w-full text-center p-2.5 rounded-xl bg-slate-50 border border-slate-100 focus:bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none transition-all font-bold ${sub==='total'?'text-emerald-600':'text-slate-600'}`} 
                                                     value={avg[sub] || ''} 
-                                                    onChange={(e) => handleManualAverageChange(date, sub, e.target.value)}
+                                                    onChange={(e) => handleManualAverageChange(date, sub, e.target.value)} 
+                                                    onKeyDown={(e) => handleAvgKeyDown(e, dateIndex, sub)}
+                                                    onPaste={(e) => handleAvgPaste(e, dateIndex, sub)}
                                                     placeholder="-" 
                                                 />
                                             </td>
@@ -1082,6 +1232,49 @@ export default function GradeTracker() {
         </div>
       )}
 
+      {/* Stats Analysis Modal (New Feature) */}
+      {statsModalData && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setStatsModalData(null)}>
+            <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col animate-in zoom-in duration-300" onClick={e => e.stopPropagation()}>
+                <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                    <div>
+                        <div className="text-xs font-bold text-slate-400 font-mono mb-1">{statsModalData.date}</div>
+                        <h3 className="text-xl font-black text-slate-800 flex items-center gap-2"><BarChart3 className="w-5 h-5 text-emerald-500"/> 週次成績分析</h3>
+                    </div>
+                    <button onClick={() => setStatsModalData(null)} className="bg-white p-2 rounded-full hover:bg-slate-100 border border-slate-100 transition"><X className="w-5 h-5 text-slate-500"/></button>
+                </div>
+                <div className="p-6 overflow-y-auto flex-1">
+                    <div className="flex bg-slate-100 p-1 rounded-xl mb-6">
+                        {['總分', '國文', '英文', '數學'].map(tab => {
+                            const tabKey = tab === '總分' ? 'total' : tab === '國文' ? 'chi' : tab === '英文' ? 'eng' : 'math';
+                            const isActive = statsActiveTab === tabKey;
+                            return (
+                                <button key={tabKey} onClick={() => setStatsActiveTab(tabKey)} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${isActive ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>
+                                    {tab}
+                                </button>
+                            )
+                        })}
+                    </div>
+                    
+                    <div className="text-center mb-4">
+                        <div className="text-xs font-bold text-slate-400 mb-1">我的成績</div>
+                        <div className={`text-3xl font-black ${COLORS[statsActiveTab].tailwind === 'emerald' ? 'text-emerald-500' : COLORS[statsActiveTab].tailwind === 'blue' ? 'text-blue-500' : COLORS[statsActiveTab].tailwind === 'violet' ? 'text-violet-500' : 'text-amber-500'}`}>
+                            {statsModalData.myGrades[statsActiveTab] || '-'}
+                        </div>
+                    </div>
+
+                    <h4 className="text-xs font-bold text-slate-500 mb-2 pl-2 border-l-4 border-slate-200">成績分佈 (人數)</h4>
+                    <DistributionChart data={statsModalData[statsActiveTab]} colorKey={statsActiveTab} />
+                    
+                    <div className="mt-6 bg-slate-50 rounded-xl p-4 text-xs text-slate-500 leading-relaxed border border-slate-100">
+                        <p className="font-bold mb-1">💡 分析說明：</p>
+                        深色長條圖表示您目前成績所在的區間。此數據基於班級全體同學的成績統計。
+                    </div>
+                </div>
+            </div>
+        </div>
+      )}
+
       {/* Add Student Modal */}
       {showAddStudentModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowAddStudentModal(false)}>
@@ -1090,15 +1283,7 @@ export default function GradeTracker() {
                     <div className="bg-emerald-100 p-4 rounded-2xl text-emerald-600"><UserPlus className="w-8 h-8" /></div>
                     <h3 className="font-black text-2xl text-slate-800">建立新學生</h3>
                 </div>
-                <p className="text-slate-500 mb-3 text-sm font-bold ml-1">請輸入學生學號：</p>
-                <input 
-                    type="text" 
-                    placeholder="例如: 151200" 
-                    className="w-full p-5 bg-slate-50 rounded-2xl border-2 border-transparent focus:bg-white focus:border-emerald-200 text-center font-bold text-2xl text-slate-800 outline-none mb-10 uppercase tracking-widest transition-all" 
-                    value={newStudentIdInput}
-                    onChange={(e) => setNewStudentIdInput(e.target.value)}
-                    autoFocus
-                />
+                <input type="text" placeholder="例如: 151200" className="w-full p-5 bg-slate-50 rounded-2xl border-2 border-transparent focus:bg-white focus:border-emerald-200 text-center font-bold text-2xl text-slate-800 outline-none mb-10 uppercase tracking-widest transition-all" value={newStudentIdInput} onChange={(e) => setNewStudentIdInput(e.target.value)} autoFocus />
                 <div className="flex gap-4">
                     <button onClick={() => setShowAddStudentModal(false)} className="flex-1 px-4 py-4 rounded-2xl bg-slate-100 text-slate-600 hover:bg-slate-200 font-bold text-sm transition-colors">取消</button>
                     <button onClick={handleAddNewStudent} className="flex-1 px-4 py-4 rounded-2xl bg-emerald-500 text-white hover:bg-emerald-600 font-bold text-sm shadow-xl shadow-emerald-200 transition-all active:scale-95">確認新增</button>
@@ -1107,16 +1292,13 @@ export default function GradeTracker() {
         </div>
       )}
 
-      {/* Delete Date Confirmation Modal */}
+      {/* Delete Confirmation Modals */}
       {deleteTarget && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setDeleteTarget(null)}>
             <div className="bg-white rounded-[2.5rem] p-10 shadow-2xl max-w-sm w-full animate-in zoom-in duration-300" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center gap-4 mb-8">
                     <div className="bg-red-100 p-4 rounded-2xl text-red-500"><AlertTriangle className="w-8 h-8" /></div>
-                    <div>
-                        <h3 className="font-black text-2xl text-slate-800">確認刪除</h3>
-                        <p className="text-slate-400 text-xs mt-1 font-bold">此動作無法復原</p>
-                    </div>
+                    <div><h3 className="font-black text-2xl text-slate-800">確認刪除</h3><p className="text-slate-400 text-xs mt-1 font-bold">此動作無法復原</p></div>
                 </div>
                 <p className="text-slate-600 mb-10 text-base font-medium leading-relaxed">確定要刪除 <span className="font-bold text-slate-900 bg-slate-100 px-3 py-1 rounded-lg mx-1 text-lg">{deleteTarget}</span> 的資料嗎？</p>
                 <div className="flex gap-4 justify-end">
@@ -1127,18 +1309,14 @@ export default function GradeTracker() {
         </div>
       )}
 
-      {/* Delete Student Confirmation Modal */}
       {studentToDelete && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setStudentToDelete(null)}>
             <div className="bg-white rounded-[2.5rem] p-10 shadow-2xl max-w-sm w-full animate-in zoom-in duration-300" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center gap-4 mb-8">
                     <div className="bg-red-100 p-4 rounded-2xl text-red-500"><AlertTriangle className="w-8 h-8" /></div>
-                    <div>
-                        <h3 className="font-black text-2xl text-slate-800">確認刪除學生</h3>
-                        <p className="text-slate-400 text-xs mt-1 font-bold">此動作無法復原</p>
-                    </div>
+                    <div><h3 className="font-black text-2xl text-slate-800">確認刪除學生</h3><p className="text-slate-400 text-xs mt-1 font-bold">此動作無法復原</p></div>
                 </div>
-                <p className="text-slate-600 mb-10 text-base font-medium leading-relaxed">確定要刪除學生 <span className="font-bold text-slate-900 bg-slate-100 px-3 py-1 rounded-lg mx-1 text-lg">{studentToDelete.name}</span> 嗎？<br/>這將會移除該生的所有成績紀錄。</p>
+                <p className="text-slate-600 mb-10 text-base font-medium leading-relaxed">確定要刪除 <span className="font-bold text-slate-900 bg-slate-100 px-3 py-1 rounded-lg mx-1 text-lg">{studentToDelete.name}</span> 嗎？</p>
                 <div className="flex gap-4 justify-end">
                     <button onClick={() => setStudentToDelete(null)} className="flex-1 px-4 py-4 rounded-2xl bg-slate-100 text-slate-600 hover:bg-slate-200 font-bold text-sm transition-colors">取消</button>
                     <button onClick={confirmDeleteStudent} className="flex-1 px-4 py-4 rounded-2xl bg-red-500 text-white hover:bg-red-600 font-bold text-sm shadow-xl shadow-red-200 transition-all active:scale-95">確認刪除</button>

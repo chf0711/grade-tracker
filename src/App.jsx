@@ -52,21 +52,31 @@ try {
 }
 
 // --- FULL DATASET ---
-// 更新日期列表，包含模考衝刺班的日期
+// 日期列表
 const EXAM_DATES = [
   "04/12", "04/19", "04/26", "05/03", "05/10", "05/17", "05/24", "06/07", "06/14",
-  "06/21", "06/28", "06/29", "07/12", "07/19", "07/21", "07/26", "08/02", "08/09", // Phase 1 (0-17)
+  "06/21", "06/28", "06/29", "07/12", "07/19", "07/21", "07/26", "08/02", "08/09", // Phase 1
   "08/16", "08/30", "09/06", "09/13", "09/20", "09/27", "09/29", "10/04", 
-  "10/11", "10/18", "10/25", "11/01", "11/08", "11/15", "11/29", "12/06", "12/13", // Phase 2 (18-34)
-  // Mock Phase (35+) - 10 Weeks
+  "10/11", "10/18", "10/25", "11/01", "11/08", "11/15", "11/29", "12/06", "12/13", // Phase 2
+  // Mock Phase (10 Weeks) - 從 12/27 開始跨年
   "12/27", "01/03", "01/10", "01/17", "01/24", "01/31", "02/07", "02/14", "02/21", "02/28"
 ];
 
+// --- Custom Date Sort Helper ---
+// 用於正確排序跨年日期 (學年制：4月開始，隔年3月結束)
+const customDateSort = (a, b) => {
+    const [m1, d1] = a.split('/').map(Number);
+    const [m2, d2] = b.split('/').map(Number);
+    
+    // 將 1, 2, 3 月視為 13, 14, 15 月，確保排在 12 月之後
+    const m1Adj = m1 < 4 ? m1 + 12 : m1;
+    const m2Adj = m2 < 4 ? m2 + 12 : m2;
+    
+    if (m1Adj !== m2Adj) return m1Adj - m2Adj;
+    return d1 - d2;
+};
+
 // --- Phase Configuration ---
-// 修正區間索引：
-// Phase 1: 0 ~ 18 (不含18) -> 04/12 ~ 08/09
-// Phase 2: 18 ~ 35 (不含35) -> 08/16 ~ 12/13
-// Mock: 35 ~ 100 (不含100) -> 12/27 ~ ...
 const PHASES = [
     { id: 'p1', name: '第一階段 (1~18週)', range: [0, 18] },
     { id: 'p2', name: '第二階段 (19~35週)', range: [18, 35] },
@@ -300,17 +310,21 @@ export default function GradeTracker() {
       try {
           const docSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'));
           if (docSnap.exists() && docSnap.data().list) {
-              setAvailableDates(docSnap.data().list);
+              // 確保載入時也使用正確的排序
+              setAvailableDates(docSnap.data().list.sort(customDateSort));
           } else {
-             await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: EXAM_DATES }, { merge: true });
-             setAvailableDates(EXAM_DATES);
+             // 預設列表已經手動排好，但也加上 sort 以防萬一
+             const initialDates = [...EXAM_DATES].sort(customDateSort);
+             await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: initialDates }, { merge: true });
+             setAvailableDates(initialDates);
           }
       } catch(e) {}
   };
 
   const addDate = async () => {
       if (!newDateInput || availableDates.includes(newDateInput)) return;
-      const newList = [...availableDates, newDateInput].sort();
+      // 使用 customDateSort 排序
+      const newList = [...availableDates, newDateInput].sort(customDateSort);
       setAvailableDates(newList);
       setNewDateInput('');
       if (db) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: newList }, { merge: true });
@@ -568,7 +582,14 @@ export default function GradeTracker() {
       const subjects = ['chi', 'eng', 'math'];
       const startSubjectIndex = subjects.indexOf(startSubject);
 
-      const reversedDates = [...availableDates].reverse();
+      // 注意：UI 顯示是 reverse 的，但邏輯索引是正序的 availableDates
+      // 但使用者在 UI 上是"往下貼"，對應到日期是"往舊的日期"貼 (因為 UI 是 New -> Old)
+      // 所以這段邏輯要小心。
+      // 老師端的 "Single View" 表格是 [...availableDates].reverse()
+      // row 0 是最新日期。
+      // 當使用者在 row 0 貼上，往下是 row 1 (次新日期)。
+      
+      const reversedDates = [...availableDates].sort(customDateSort).reverse(); // 確保排序正確後反轉
 
       setGrades(prev => {
           const newGrades = { ...prev };
@@ -631,7 +652,7 @@ export default function GradeTracker() {
       const rows = pasteData.trim().split(/\r\n|\n|\r/);
       const subjects = ['chi', 'eng', 'math', 'total'];
       const startSubjectIndex = subjects.indexOf(startSubject);
-      const reversedDates = [...availableDates].reverse();
+      const reversedDates = [...availableDates].sort(customDateSort).reverse();
 
       setClassAverages(prev => {
           const newAvgs = { ...prev };
@@ -741,7 +762,8 @@ export default function GradeTracker() {
 
       if (data) {
         const allChartData = [];
-        const sortedDates = [...availableDates].sort(); 
+        // ★★★ 關鍵修正：使用自定義排序，確保跨年日期順序正確 (4月...12月...1月...3月) ★★★
+        const sortedDates = [...availableDates].sort(customDateSort); 
 
         for (const date of sortedDates) {
           const weekData = data.grades ? data.grades[date] : null;
@@ -776,7 +798,9 @@ export default function GradeTracker() {
       if (!fullData) return [];
       const currentPhaseConfig = PHASES.find(p => p.id === activePhase) || PHASES[0];
       const [start, end] = currentPhaseConfig.range;
-      const targetDates = availableDates.slice(start, end);
+      // 使用正確排序後的日期來切分 Phase
+      const sortedAvailable = [...availableDates].sort(customDateSort);
+      const targetDates = sortedAvailable.slice(start, end);
       return fullData.filter(d => targetDates.includes(d.date));
   };
 
@@ -946,7 +970,8 @@ export default function GradeTracker() {
                         </div>
                     </div>
                     <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-2 bg-slate-50 rounded-2xl border border-slate-100">
-                        {[...availableDates].reverse().map(d => (
+                        {/* 使用反轉排序顯示，確保最新日期在上面 */}
+                        {[...availableDates].sort(customDateSort).reverse().map(d => (
                             <div key={d} className="flex items-center bg-white px-3 py-1.5 rounded-xl text-xs font-bold text-slate-600 shadow-sm border border-slate-100">
                                 {d} <button onClick={() => handleDeleteDate(d)} className="ml-2 text-slate-300 hover:text-red-500 transition-colors"><X className="w-3 h-3"/></button>
                             </div>
@@ -981,7 +1006,7 @@ export default function GradeTracker() {
                             <div className="flex items-center gap-2">
                                 <span className="text-sm font-bold text-slate-500">選擇日期：</span>
                                 <select className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-800 outline-none focus:border-emerald-400" value={batchDate} onChange={(e) => setBatchDate(e.target.value)}>
-                                    {[...availableDates].reverse().map(d => <option key={d} value={d}>{d}</option>)}
+                                    {[...availableDates].sort(customDateSort).reverse().map(d => <option key={d} value={d}>{d}</option>)}
                                 </select>
                             </div>
                             <button onClick={handleSaveBatchGrades} className="bg-emerald-500 text-white px-5 py-2 rounded-xl text-xs font-bold shadow-md shadow-emerald-200 hover:bg-emerald-600 transition-all active:scale-95 flex items-center gap-1"><Save className="w-4 h-4"/> 儲存全班</button>
@@ -1048,7 +1073,7 @@ export default function GradeTracker() {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50">
-                            {[...availableDates].reverse().map((date, dateIndex) => {
+                            {[...availableDates].sort(customDateSort).reverse().map((date, dateIndex) => {
                                 const g = grades[date] || { chi: '', eng: '', math: '', total: '' };
                                 return (
                                     <tr key={date} className="hover:bg-slate-50/50 transition-colors">
@@ -1207,7 +1232,7 @@ export default function GradeTracker() {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {[...availableDates].reverse().map((date, dateIndex) => {
+                            {[...availableDates].sort(customDateSort).reverse().map((date, dateIndex) => {
                                 const avg = classAverages[date] || { chi: '', eng: '', math: '', total: '' };
                                 return (
                                     <tr key={date} className="bg-white">

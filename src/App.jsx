@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 // 確保安裝了這些套件: npm install recharts lucide-react firebase
+// 注意：xlsx 套件將透過 CDN 動態載入，無需 npm install
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell } from 'recharts';
-import { BookOpen, Users, Search, Save, Plus, Check, TrendingUp, BarChart3, X, Lock, CloudDownload, LayoutDashboard, GraduationCap, Calendar, Clipboard, LogOut, AlertTriangle, UserPlus, Sparkles, Edit3, Quote, Loader2, RefreshCw, Trash2, Layers, PieChart, Trophy, Target, Clock, Timer } from 'lucide-react';
+import { BookOpen, Users, Search, Save, Plus, Check, TrendingUp, BarChart3, X, Lock, CloudDownload, LayoutDashboard, GraduationCap, Calendar, Clipboard, LogOut, AlertTriangle, UserPlus, Sparkles, Edit3, Quote, Loader2, RefreshCw, Trash2, Layers, PieChart, Trophy, Target, Clock, Timer, FileSpreadsheet } from 'lucide-react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc } from 'firebase/firestore';
 
 // --- Firebase Configuration Setup ---
-// 您的設定檔已保留，資料會自動連結
 const realFirebaseConfig = {
   apiKey: "AIzaSyChK1IiE6YhHZ_DdxXzpxi8vmBA9A9So9A",
   authDomain: "grade-tracker-9ccb3.firebaseapp.com",
@@ -52,26 +52,21 @@ try {
 }
 
 // --- FULL DATASET ---
-// 日期列表
 const EXAM_DATES = [
   "04/12", "04/19", "04/26", "05/03", "05/10", "05/17", "05/24", "06/07", "06/14",
   "06/21", "06/28", "06/29", "07/12", "07/19", "07/21", "07/26", "08/02", "08/09", // Phase 1
   "08/16", "08/30", "09/06", "09/13", "09/20", "09/27", "09/29", "10/04", 
-  "10/11", "10/18", "10/25", "11/01", "11/08", "11/15", "11/29", "12/06", "12/13", "12/20", // Phase 2 (加入 12/20)
-  // Mock Phase (10 Weeks) - 從 12/27 開始跨年
+  "10/11", "10/18", "10/25", "11/01", "11/08", "11/15", "11/29", "12/06", "12/13", "12/20", // Phase 2
+  // Mock Phase (10 Weeks)
   "12/27", "01/03", "01/10", "01/17", "01/24", "01/31", "02/07", "02/14", "02/21", "02/28"
 ];
 
 // --- Custom Date Sort Helper ---
-// 用於正確排序跨年日期 (學年制：4月開始，隔年3月結束)
 const customDateSort = (a, b) => {
     const [m1, d1] = a.split('/').map(Number);
     const [m2, d2] = b.split('/').map(Number);
-    
-    // 將 1, 2, 3 月視為 13, 14, 15 月，確保排在 12 月之後
     const m1Adj = m1 < 4 ? m1 + 12 : m1;
     const m2Adj = m2 < 4 ? m2 + 12 : m2;
-    
     if (m1Adj !== m2Adj) return m1Adj - m2Adj;
     return d1 - d2;
 };
@@ -79,16 +74,17 @@ const customDateSort = (a, b) => {
 // --- Phase Configuration ---
 const PHASES = [
     { id: 'p1', name: '第一階段 (1~18週)', range: [0, 18] },
-    { id: 'p2', name: '第二階段 (19~36週)', range: [18, 36] }, // 修正範圍：包含 12/20 (索引35)
-    { id: 'mock', name: '模考衝刺班 (10週)', range: [36, 100] } // 修正起始：從 12/27 (索引36) 開始
+    { id: 'p2', name: '第二階段 (19~36週)', range: [18, 36] },
+    { id: 'mock', name: '模考衝刺班 (10週)', range: [36, 100] } 
 ];
 
+// --- Colors Update ---
 const COLORS = {
     total: { hex: '#10b981', tailwind: 'emerald', label: '總分' },
-    chi:   { hex: '#3b82f6', tailwind: 'blue',    label: '國文' },
-    eng:   { hex: '#8b5cf6', tailwind: 'violet',  label: '英文' },
-    math:  { hex: '#f59e0b', tailwind: 'amber',   label: '數學' },
-    avg:   { hex: '#94a3b8', tailwind: 'slate',   label: '班平均' }
+    chi:   { hex: '#ef4444', tailwind: 'red',     label: '國文' }, 
+    eng:   { hex: '#8b5cf6', tailwind: 'violet',  label: '英文' }, 
+    math:  { hex: '#3b82f6', tailwind: 'blue',    label: '數學' }, 
+    avg:   { hex: '#94a3b8', tailwind: 'slate',   label: '班平均' } 
 };
 
 const f1 = (v) => {
@@ -131,7 +127,7 @@ const SingleSubjectChart = ({ data, subjectKey, avgKey, colorKey, title, domain 
                       }} 
                   />
                   <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: '12px', fontWeight: 600, color: '#64748b', letterSpacing: '0.05em' }}/>
-                  <Line name="班平均" type="monotone" dataKey={avgKey} stroke="#cbd5e1" strokeWidth={2} dot={false} strokeDasharray="6 6" isAnimationActive={false} />
+                  <Line name="班平均" type="monotone" dataKey={avgKey} stroke="#94a3b8" strokeWidth={2.5} dot={false} activeDot={{ r: 4, fill: '#94a3b8' }} strokeDasharray="5 5" isAnimationActive={false} />
                   <Line name={title} type="monotone" dataKey={subjectKey} stroke={COLORS[colorKey].hex} strokeWidth={3} activeDot={{ r: 6, fill: COLORS[colorKey].hex, stroke: '#fff', strokeWidth: 2 }} isAnimationActive={true} animationDuration={1500}/>
               </LineChart>
           </ResponsiveContainer>
@@ -159,7 +155,7 @@ const DistributionChart = ({ data, colorKey }) => (
                     allowDecimals={false}
                 />
                 <Tooltip 
-                    cursor={{fill: '#f8fafc'}}
+                    cursor={false} // 修正：移除背景游標，解決圓角後的直角陰影問題
                     contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)', fontSize: '12px' }}
                 />
                 <Bar dataKey="count" name="人數" radius={[4, 4, 0, 0]}>
@@ -174,18 +170,15 @@ const DistributionChart = ({ data, colorKey }) => (
 
 const RAW_STUDENT_RECORDS = [];
 
-// --- 倒數計時元件 (移動至 Body 且縮小版) ---
+// --- 倒數計時元件 ---
 const ExamCountdown = () => {
     const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
 
     useEffect(() => {
-        // 設定目標時間：2026/3/14 08:00:00
         const targetDate = new Date('2026-03-14T08:00:00');
-        
         const calculateTimeLeft = () => {
             const now = new Date();
             const difference = targetDate - now;
-
             if (difference > 0) {
                 const days = Math.floor(difference / (1000 * 60 * 60 * 24));
                 const hours = Math.floor((difference / (1000 * 60 * 60)) % 24);
@@ -196,22 +189,17 @@ const ExamCountdown = () => {
                 setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0 });
             }
         };
-
         calculateTimeLeft();
         const timer = setInterval(calculateTimeLeft, 1000); 
-
         return () => clearInterval(timer);
     }, []);
 
-    // 質感設計：尺寸微縮 (px-3 py-1.5)，數字 text-base
     return (
-        <div className="flex items-center gap-2 mt-4 px-3 py-1.5 rounded-xl bg-white/60 border border-white/50 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.05)] backdrop-blur-md group hover:bg-white/80 transition-all duration-500 animate-in fade-in slide-in-from-bottom-2">
+        <div className="flex items-center gap-2 mt-4 px-3 py-1.5 rounded-xl bg-white/60 border border-white/50 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.05)] backdrop-blur-md group hover:bg-white/80 transition-all duration-500 animate-in fade-in slide-in-from-bottom-2 justify-center">
             <div className="flex items-center gap-1.5 text-emerald-600/80">
                 <Target className="w-3.5 h-3.5" />
             </div>
-            
             <div className="h-5 w-[1px] bg-gradient-to-b from-slate-100 via-slate-200 to-slate-100 mx-0.5"></div>
-            
             <div className="flex items-baseline gap-1 text-slate-700 font-mono leading-none">
                 <div className="flex flex-col items-center">
                     <span className="text-base font-black tracking-tight text-slate-700">{timeLeft.days}</span>
@@ -260,8 +248,8 @@ export default function GradeTracker() {
   
   const [teacherViewMode, setTeacherViewMode] = useState('single');
   const [batchDate, setBatchDate] = useState('');
-  const [allStudentsData, setAllStudentsData] = useState([]); // 老師端用
-  const [cachedClassData, setCachedClassData] = useState([]); // 家長端用 (緩存的全班資料)
+  const [allStudentsData, setAllStudentsData] = useState([]); 
+  const [cachedClassData, setCachedClassData] = useState([]); 
   
   const [loading, setLoading] = useState(false);
   const [searchId, setSearchId] = useState('');
@@ -272,6 +260,20 @@ export default function GradeTracker() {
 
   const [statsModalData, setStatsModalData] = useState(null);
   const [statsActiveTab, setStatsActiveTab] = useState('total');
+
+  const [xlsxLoaded, setXlsxLoaded] = useState(false);
+
+  useEffect(() => {
+    // Dynamically load XLSX script
+    const script = document.createElement('script');
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+    script.onload = () => setXlsxLoaded(true);
+    document.body.appendChild(script);
+
+    return () => {
+      document.body.removeChild(script);
+    }
+  }, []);
 
   useEffect(() => {
     const initAuth = async () => {
@@ -310,10 +312,8 @@ export default function GradeTracker() {
       try {
           const docSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'));
           if (docSnap.exists() && docSnap.data().list) {
-              // 確保載入時也使用正確的排序
               setAvailableDates(docSnap.data().list.sort(customDateSort));
           } else {
-             // 預設列表已經手動排好，但也加上 sort 以防萬一
              const initialDates = [...EXAM_DATES].sort(customDateSort);
              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: initialDates }, { merge: true });
              setAvailableDates(initialDates);
@@ -323,7 +323,6 @@ export default function GradeTracker() {
 
   const addDate = async () => {
       if (!newDateInput || availableDates.includes(newDateInput)) return;
-      // 使用 customDateSort 排序
       const newList = [...availableDates, newDateInput].sort(customDateSort);
       setAvailableDates(newList);
       setNewDateInput('');
@@ -364,8 +363,6 @@ export default function GradeTracker() {
       setClassAverages(prev => {
           const currentAvg = prev[date] || { chi: '', eng: '', math: '', total: '' };
           const updatedAvg = { ...currentAvg, [subject]: value };
-          
-          // Auto-calculate total if a subject is changed
           if (subject !== 'total') {
               updatedAvg.total = calculateTotal(
                   subject === 'chi' ? value : updatedAvg.chi,
@@ -373,7 +370,6 @@ export default function GradeTracker() {
                   subject === 'math' ? value : updatedAvg.math
               );
           }
-          
           return { ...prev, [date]: updatedAvg };
       });
   };
@@ -492,9 +488,106 @@ export default function GradeTracker() {
       }));
   };
 
-  // --- Keyboard & Paste Logic Handlers ---
+  const handleExcelUpload = (e) => {
+    if (!xlsxLoaded) {
+      setStatusMsg("Excel 元件尚未載入完成，請稍後");
+      return;
+    }
+    const file = e.target.files[0];
+    if (!file) return;
 
-  // 1. Batch View Handlers
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target.result;
+        // Use window.XLSX loaded from CDN
+        const wb = window.XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        // Read raw values
+        const data = window.XLSX.utils.sheet_to_json(ws, { header: 1 });
+        
+        // Remove header row if present
+        let startIndex = 0;
+        if (data[0] && typeof data[0][0] === 'string' && (data[0][0].includes('學號') || data[0][0].includes('ID'))) {
+          startIndex = 1;
+        }
+
+        const newStudentsMap = { ...allStudentsData.reduce((acc, s) => ({...acc, [s.id]: s}), {}) };
+        const newDates = new Set(availableDates);
+        let importCount = 0;
+
+        for (let i = startIndex; i < data.length; i++) {
+          const row = data[i];
+          if (!row[0]) continue; 
+
+          const rawId = String(row[0]).toUpperCase().trim();
+          const rawName = row[1] ? String(row[1]).trim() : '';
+          const rawDate = row[2];
+          const chi = row[3];
+          const eng = row[4];
+          const math = row[5];
+          
+          // Date Formatting: '0103' or 103 -> '01/03'
+          let dateStr = '';
+          if (rawDate) {
+               let dString = String(rawDate).padStart(4, '0'); 
+               if (dString.length === 4) {
+                   dateStr = `${dString.slice(0, 2)}/${dString.slice(2)}`;
+               } else {
+                   dateStr = String(rawDate); 
+               }
+          }
+
+          if (!dateStr) continue;
+
+          if (!newDates.has(dateStr)) {
+              newDates.add(dateStr);
+          }
+
+          // Create or Update Student
+          let student = newStudentsMap[rawId];
+          if (!student) {
+              student = { id: rawId, name: rawName || '未命名', grades: {} };
+              newStudentsMap[rawId] = student;
+          } else {
+              if (rawName) student.name = rawName;
+          }
+
+          if (!student.grades) student.grades = {};
+          
+          const totalVal = calculateTotal(chi, eng, math);
+          
+          student.grades[dateStr] = {
+              chi: String(chi || ''),
+              eng: String(eng || ''),
+              math: String(math || ''),
+              total: totalVal
+          };
+          
+          importCount++;
+        }
+
+        const sortedDates = Array.from(newDates).sort(customDateSort);
+        setAvailableDates(sortedDates);
+        
+        // Save new dates list to DB immediately
+        if (db) {
+            setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: sortedDates }, { merge: true });
+        }
+
+        const sortedStudents = Object.values(newStudentsMap).sort((a,b) => a.id.localeCompare(b.id));
+        setAllStudentsData(sortedStudents);
+        
+        setStatusMsg(`成功匯入 ${importCount} 筆成績！請記得點擊「儲存全班」以同步雲端。`);
+      } catch (error) {
+        console.error("Excel import error:", error);
+        setStatusMsg("匯入失敗，請檢查檔案格式");
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
   const handleKeyDown = (e, studentIndex, subject) => {
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
           e.preventDefault();
@@ -554,7 +647,6 @@ export default function GradeTracker() {
       });
   };
 
-  // 2. Single Student View Handlers
   const handleSingleKeyDown = (e, dateIndex, subject) => {
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
           e.preventDefault();
@@ -581,30 +673,18 @@ export default function GradeTracker() {
       const rows = pasteData.trim().split(/\r\n|\n|\r/); 
       const subjects = ['chi', 'eng', 'math'];
       const startSubjectIndex = subjects.indexOf(startSubject);
-
-      // 注意：UI 顯示是 reverse 的，但邏輯索引是正序的 availableDates
-      // 但使用者在 UI 上是"往下貼"，對應到日期是"往舊的日期"貼 (因為 UI 是 New -> Old)
-      // 所以這段邏輯要小心。
-      // 老師端的 "Single View" 表格是 [...availableDates].reverse()
-      // row 0 是最新日期。
-      // 當使用者在 row 0 貼上，往下是 row 1 (次新日期)。
-      
-      const reversedDates = [...availableDates].sort(customDateSort).reverse(); // 確保排序正確後反轉
+      const reversedDates = [...availableDates].sort(customDateSort).reverse();
 
       setGrades(prev => {
           const newGrades = { ...prev };
           let updated = false;
-
           rows.forEach((row, rIndex) => {
               const dateIndex = startDateIndex + rIndex;
               if (dateIndex >= reversedDates.length) return;
-              
               const targetDate = reversedDates[dateIndex];
               const cols = row.split('\t');
-              
               const currentData = { ...(newGrades[targetDate] || { chi: '', eng: '', math: '', total: '' }) };
               let rowUpdated = false;
-
               cols.forEach((val, cIndex) => {
                   const subjectIndex = startSubjectIndex + cIndex;
                   if (subjectIndex >= 3) return;
@@ -612,20 +692,17 @@ export default function GradeTracker() {
                   currentData[subject] = val.trim();
                   rowUpdated = true;
               });
-
               if (rowUpdated) {
                   currentData.total = calculateTotal(currentData.chi, currentData.eng, currentData.math);
                   newGrades[targetDate] = currentData;
                   updated = true;
               }
           });
-          
           if (updated) { setStatusMsg(`已貼上 ${rows.length} 筆資料`); setTimeout(() => setStatusMsg(''), 2000); }
           return newGrades;
       });
   };
 
-  // 3. Class Average Modal Handlers
   const handleAvgKeyDown = (e, dateIndex, subject) => {
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
           e.preventDefault();
@@ -657,17 +734,13 @@ export default function GradeTracker() {
       setClassAverages(prev => {
           const newAvgs = { ...prev };
           let updated = false;
-
           rows.forEach((row, rIndex) => {
               const dateIndex = startDateIndex + rIndex;
               if (dateIndex >= reversedDates.length) return;
-              
               const targetDate = reversedDates[dateIndex];
               const cols = row.split('\t');
-              
               const currentData = { ...(newAvgs[targetDate] || { chi: '', eng: '', math: '', total: '' }) };
               let rowUpdated = false;
-
               cols.forEach((val, cIndex) => {
                   const subjectIndex = startSubjectIndex + cIndex;
                   if (subjectIndex >= 4) return;
@@ -677,14 +750,12 @@ export default function GradeTracker() {
                       rowUpdated = true;
                   }
               });
-
               if (rowUpdated) {
                   currentData.total = calculateTotal(currentData.chi, currentData.eng, currentData.math);
                   newAvgs[targetDate] = currentData;
                   updated = true;
               }
           });
-          
           if (updated) { setStatusMsg(`已貼上 ${rows.length} 筆資料`); setTimeout(() => setStatusMsg(''), 2000); }
           return newAvgs;
       });
@@ -762,7 +833,6 @@ export default function GradeTracker() {
 
       if (data) {
         const allChartData = [];
-        // ★★★ 關鍵修正：使用自定義排序，確保跨年日期順序正確 (4月...12月...1月...3月) ★★★
         const sortedDates = [...availableDates].sort(customDateSort); 
 
         for (const date of sortedDates) {
@@ -798,7 +868,6 @@ export default function GradeTracker() {
       if (!fullData) return [];
       const currentPhaseConfig = PHASES.find(p => p.id === activePhase) || PHASES[0];
       const [start, end] = currentPhaseConfig.range;
-      // 使用正確排序後的日期來切分 Phase
       const sortedAvailable = [...availableDates].sort(customDateSort);
       const targetDates = sortedAvailable.slice(start, end);
       return fullData.filter(d => targetDates.includes(d.date));
@@ -908,7 +977,9 @@ export default function GradeTracker() {
           <div className="flex items-center space-x-2 cursor-pointer active:scale-95 transition" onClick={() => setMode('landing')}>
             <div className="bg-gradient-to-br from-emerald-400 to-teal-600 text-white p-2.5 rounded-2xl shadow-lg shadow-emerald-200/50"><GraduationCap className="h-5 w-5" /></div>
             <div>
-                <h1 className="text-xl font-black tracking-tight text-slate-800 leading-none">2025-26六私A班</h1>
+                <h1 className="text-xl font-black tracking-tight text-slate-800 leading-none">
+                    2025-26<br className="block sm:hidden" />六私A班
+                </h1>
                 <p className="text-[11px] text-slate-500 font-bold tracking-widest uppercase mt-0.5">Learning Tracker</p>
             </div>
           </div>
@@ -970,7 +1041,6 @@ export default function GradeTracker() {
                         </div>
                     </div>
                     <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-2 bg-slate-50 rounded-2xl border border-slate-100">
-                        {/* 使用反轉排序顯示，確保最新日期在上面 */}
                         {[...availableDates].sort(customDateSort).reverse().map(d => (
                             <div key={d} className="flex items-center bg-white px-3 py-1.5 rounded-xl text-xs font-bold text-slate-600 shadow-sm border border-slate-100">
                                 {d} <button onClick={() => handleDeleteDate(d)} className="ml-2 text-slate-300 hover:text-red-500 transition-colors"><X className="w-3 h-3"/></button>
@@ -985,17 +1055,21 @@ export default function GradeTracker() {
                 </div>
 
                 {teacherViewMode === 'single' && (
-                    <div className="pt-4 border-t border-slate-100">
-                        <div className="flex gap-3">
+                    <div className="pt-6 border-t border-slate-100 flex flex-col md:flex-row gap-4 justify-between items-start md:items-center">
+                        <div className="flex gap-3 w-full md:flex-1">
                             <div className="relative flex-1">
-                                <input id="loadIdInput" type="text" placeholder="輸入學號..." className="w-full p-3 pl-10 rounded-xl bg-slate-50 border-none text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-100 uppercase tracking-widest placeholder:tracking-normal" />
+                                <input id="loadIdInput" type="text" placeholder="輸入學號..." className="w-full p-3 pl-10 rounded-xl bg-slate-50 border-none text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-100 uppercase tracking-widest placeholder:tracking-normal text-center" />
                                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
                             </div>
                             <button onClick={() => document.getElementById('loadIdInput').value && loadStudentForTeacher(document.getElementById('loadIdInput').value.toUpperCase())} className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-5 rounded-xl text-xs font-bold whitespace-nowrap transition-colors">載入</button>
                             <button onClick={() => setShowAddStudentModal(true)} className="bg-emerald-500 hover:bg-emerald-600 text-white px-5 rounded-xl text-xs font-bold flex items-center gap-1 shadow-md shadow-emerald-200 whitespace-nowrap transition-all active:scale-95"><UserPlus className="w-4 h-4"/> 新增</button>
+                            <label className="cursor-pointer bg-blue-500 hover:bg-blue-600 text-white px-5 rounded-xl text-xs font-bold flex items-center gap-1 shadow-md shadow-blue-200 whitespace-nowrap transition-all active:scale-95">
+                                <FileSpreadsheet className="w-4 h-4" /> 匯入 Excel
+                                <input type="file" accept=".xlsx, .xls" className="hidden" onChange={handleExcelUpload} />
+                            </label>
                         </div>
-                        <div className="mt-3 text-right">
-                            <button onClick={() => setShowAvgModal(true)} className="text-xs font-bold text-indigo-500 hover:text-indigo-700 flex items-center justify-end gap-1 ml-auto px-3 py-2 rounded-lg hover:bg-indigo-50 transition-colors"><Edit3 className="w-4 h-4"/> 設定班級平均</button>
+                        <div className="w-full md:w-auto">
+                            <button onClick={() => setShowAvgModal(true)} className="w-full md:w-auto justify-center text-xs font-bold text-indigo-500 hover:text-indigo-700 flex items-center gap-1 px-4 py-3 rounded-xl bg-indigo-50 hover:bg-indigo-100 transition-colors"><Edit3 className="w-4 h-4"/> 設定班級平均</button>
                         </div>
                     </div>
                 )}
@@ -1109,8 +1183,8 @@ export default function GradeTracker() {
             {!viewData && (
             <div className="bg-gradient-to-br from-white/90 to-slate-100/90 backdrop-blur-xl p-10 rounded-[2.5rem] shadow-2xl shadow-emerald-50 border border-white text-center">
               <h2 className="text-3xl font-black text-slate-800 mb-10 tracking-tight">查詢成績</h2>
-              <div className="flex bg-slate-50 p-4 rounded-3xl border border-slate-200 focus-within:bg-white focus-within:ring-4 focus-within:ring-emerald-100 focus-within:border-emerald-200 transition-all shadow-inner mb-8">
-                <input type="text" placeholder="" className="flex-1 bg-transparent border-none px-4 py-2 outline-none text-2xl text-slate-800 placeholder:text-slate-300 uppercase font-bold text-center tracking-[0.2em] placeholder:tracking-normal" value={searchId} onChange={(e) => setSearchId(e.target.value)} />
+              <div className="bg-slate-50 p-4 rounded-3xl border border-slate-200 focus-within:bg-white focus-within:ring-4 focus-within:ring-emerald-100 focus-within:border-emerald-200 transition-all shadow-inner mb-8">
+                <input type="text" placeholder="" className="w-full bg-transparent border-none px-4 py-2 outline-none text-2xl text-slate-800 placeholder:text-slate-300 uppercase font-bold text-center tracking-[0.2em] placeholder:tracking-normal" value={searchId} onChange={(e) => setSearchId(e.target.value)} />
               </div>
               <button onClick={handleParentSearch} disabled={loading} className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 text-white py-5 rounded-3xl font-bold text-xl hover:shadow-xl hover:shadow-emerald-200/50 transition-all active:scale-95 disabled:opacity-50 disabled:active:scale-100 tracking-wide">{loading ? '查詢中...' : '開始查詢'}</button>
               {searchError && <p className="mt-8 text-red-500 text-sm font-bold bg-red-50 inline-block px-5 py-2 rounded-full animate-bounce">{searchError}</p>}
@@ -1133,13 +1207,15 @@ export default function GradeTracker() {
                 </div>
 
                 <div className="p-6">
-                  <div className="flex bg-slate-50 p-1 mb-4 rounded-xl border border-slate-100 overflow-x-auto">
+                  {/* ★★★ 修正：置中 Phase Tabs ★★★ */}
+                  <div className="flex bg-slate-50 p-1 mb-4 rounded-xl border border-slate-100 overflow-x-auto justify-center">
                       {PHASES.map(phase => (
                           <button key={phase.id} onClick={() => setActivePhase(phase.id)} className={`flex-1 whitespace-nowrap px-4 py-2 text-xs font-bold rounded-lg transition-all ${activePhase === phase.id ? 'bg-white text-slate-800 shadow-sm border border-slate-100' : 'text-slate-400 hover:text-slate-600'}`}>{phase.name}</button>
                       ))}
                   </div>
 
-                  <div className="flex bg-slate-100 p-1.5 rounded-2xl mb-8 shadow-inner">
+                  {/* ★★★ 修正：置中 Subject Tabs ★★★ */}
+                  <div className="flex bg-slate-100 p-1.5 rounded-2xl mb-8 shadow-inner justify-center">
                       {['總分', '國文', '英文', '數學'].map(tab => {
                           const tabKey = tab === '總分' ? 'total' : tab === '國文' ? 'chi' : tab === '英文' ? 'eng' : 'math';
                           const isActive = activeTab === tabKey;
@@ -1166,14 +1242,14 @@ export default function GradeTracker() {
                 </div>
                 
                 <div className="bg-white p-6 border-t border-slate-50">
-                    <h4 className="font-bold text-slate-800 mb-6 text-sm flex items-center gap-2 tracking-wide"><Clipboard className="w-4 h-4 text-slate-400"/> 詳細紀錄</h4>
+                    <h4 className="font-bold text-slate-800 mb-6 text-sm flex items-center justify-center gap-2 tracking-wide"><Clipboard className="w-4 h-4 text-slate-400"/> 詳細紀錄</h4>
                     <div className="space-y-4">
                         {getPhaseData(viewData.chartData).slice().reverse().map((d) => {
                              const totalRank = calculateRank(d.date, 'total', d.total);
                              return (
                              <div key={d.date} className="group bg-white p-5 rounded-3xl border border-slate-100 hover:border-emerald-100 hover:shadow-xl hover:shadow-emerald-50/50 transition-all duration-300">
                                 <div className="flex justify-between items-start mb-4">
-                                    <div className="flex flex-col gap-1">
+                                    <div className="flex flex-col gap-1 items-start">
                                         <span className="text-xs font-bold text-slate-400 font-mono group-hover:text-emerald-500 transition-colors tracking-wide">{d.date}</span>
                                         <button onClick={() => openStatsModal(d.date, { total: d.total, chi: d.chi, eng: d.eng, math: d.math })} className="text-[10px] bg-slate-50 hover:bg-emerald-50 text-slate-500 hover:text-emerald-600 px-2 py-1 rounded-lg transition-colors font-bold flex items-center gap-1 mt-1 border border-slate-100 w-fit">
                                             <BarChart3 className="w-3 h-3" /> 查看全班分析
@@ -1189,7 +1265,8 @@ export default function GradeTracker() {
                                 </div>
                                 <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-slate-50">
                                     {['chi', 'eng', 'math'].map(sub => {
-                                        const subColor = sub === 'chi' ? 'blue' : sub === 'eng' ? 'violet' : 'amber';
+                                        // 更新列表卡片顏色
+                                        const subColor = sub === 'chi' ? 'red' : sub === 'eng' ? 'violet' : 'blue';
                                         const subLabel = sub === 'chi' ? '國文' : sub === 'eng' ? '英文' : '數學';
                                         const subScore = d[sub];
                                         const subRank = calculateRank(d.date, sub, subScore);
@@ -1225,9 +1302,9 @@ export default function GradeTracker() {
                         <thead className="text-xs text-slate-400 uppercase sticky top-0 bg-slate-50/95 backdrop-blur z-10">
                             <tr>
                                 <th className="px-4 py-4 font-bold tracking-wider">日期</th>
-                                <th className="px-2 py-4 text-center text-blue-500">國文</th>
+                                <th className="px-2 py-4 text-center text-red-500">國文</th>
                                 <th className="px-2 py-4 text-center text-violet-500">英文</th>
-                                <th className="px-2 py-4 text-center text-amber-500">數學</th>
+                                <th className="px-2 py-4 text-center text-blue-500">數學</th>
                                 <th className="px-2 py-4 text-center text-emerald-600 font-bold">總分</th>
                             </tr>
                         </thead>
@@ -1277,7 +1354,8 @@ export default function GradeTracker() {
                     <button onClick={() => setStatsModalData(null)} className="bg-white p-2 rounded-full hover:bg-slate-100 border border-slate-100 transition"><X className="w-5 h-5 text-slate-500"/></button>
                 </div>
                 <div className="p-6 overflow-y-auto flex-1">
-                    <div className="flex bg-slate-100 p-1 rounded-xl mb-6">
+                    {/* ★★★ 修正：置中 Stats Tabs ★★★ */}
+                    <div className="flex bg-slate-100 p-1 rounded-xl mb-6 justify-center">
                         {['總分', '國文', '英文', '數學'].map(tab => {
                             const tabKey = tab === '總分' ? 'total' : tab === '國文' ? 'chi' : tab === '英文' ? 'eng' : 'math';
                             const isActive = statsActiveTab === tabKey;
@@ -1291,7 +1369,7 @@ export default function GradeTracker() {
                     
                     <div className="text-center mb-4">
                         <div className="text-xs font-bold text-slate-400 mb-1">我的成績</div>
-                        <div className={`text-3xl font-black ${COLORS[statsActiveTab].tailwind === 'emerald' ? 'text-emerald-500' : COLORS[statsActiveTab].tailwind === 'blue' ? 'text-blue-500' : COLORS[statsActiveTab].tailwind === 'violet' ? 'text-violet-500' : 'text-amber-500'}`}>
+                        <div className={`text-3xl font-black ${COLORS[statsActiveTab].tailwind === 'emerald' ? 'text-emerald-500' : COLORS[statsActiveTab].tailwind === 'red' ? 'text-red-500' : COLORS[statsActiveTab].tailwind === 'violet' ? 'text-violet-500' : 'text-blue-500'}`}>
                             {statsModalData.myGrades[statsActiveTab] || '-'}
                         </div>
                     </div>
@@ -1299,8 +1377,8 @@ export default function GradeTracker() {
                     <h4 className="text-xs font-bold text-slate-500 mb-2 pl-2 border-l-4 border-slate-200">成績分佈 (人數)</h4>
                     <DistributionChart data={statsModalData[statsActiveTab]} colorKey={statsActiveTab} />
                     
-                    <div className="mt-6 bg-slate-50 rounded-xl p-4 text-xs text-slate-500 leading-relaxed border border-slate-100">
-                        <p className="font-bold mb-1">💡 分析說明：</p>
+                    <div className="mt-6 bg-slate-50 rounded-xl p-4 text-xs text-slate-500 leading-relaxed border border-slate-100 text-center">
+                        <p className="font-bold mb-1">💡 分析說明</p>
                         深色長條圖表示您目前成績所在的區間。此數據基於班級全體同學的成績統計。
                     </div>
                 </div>

@@ -1,11 +1,22 @@
 import React, { useState, useEffect, useMemo } from 'react';
 // 確保安裝了這些套件: npm install recharts lucide-react firebase
-// 注意：xlsx 套件將透過 CDN 動態載入，無需 npm install
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell } from 'recharts';
 import { BookOpen, Users, Search, Save, Plus, Check, TrendingUp, BarChart3, X, Lock, CloudDownload, LayoutDashboard, GraduationCap, Calendar, Clipboard, LogOut, AlertTriangle, UserPlus, Sparkles, Edit3, Quote, Loader2, RefreshCw, Trash2, Layers, PieChart, Trophy, Target, Clock, Timer, FileSpreadsheet } from 'lucide-react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc } from 'firebase/firestore';
+
+// --- Global Constants (Moved to top to avoid ReferenceError) ---
+const EXAM_DATES = [
+  "04/12", "04/19", "04/26", "05/03", "05/10", "05/17", "05/24", "06/07", "06/14",
+  "06/21", "06/28", "06/29", "07/12", "07/19", "07/21", "07/26", "08/02", "08/09", // Phase 1
+  "08/16", "08/30", "09/06", "09/13", "09/20", "09/27", "09/29", "10/04", 
+  "10/11", "10/18", "10/25", "11/01", "11/08", "11/15", "11/29", "12/06", "12/13", "12/20", // Phase 2
+  // Mock Phase (10 Weeks)
+  "12/27", "01/03", "01/10", "01/17", "01/24", "01/31", "02/07", "02/14", "02/21", "02/28"
+];
+
+const RAW_STUDENT_RECORDS = []; // Defined globally
 
 // --- Firebase Configuration Setup ---
 const realFirebaseConfig = {
@@ -51,16 +62,6 @@ try {
   console.error("Firebase init error:", e);
 }
 
-// --- FULL DATASET ---
-const EXAM_DATES = [
-  "04/12", "04/19", "04/26", "05/03", "05/10", "05/17", "05/24", "06/07", "06/14",
-  "06/21", "06/28", "06/29", "07/12", "07/19", "07/21", "07/26", "08/02", "08/09", // Phase 1
-  "08/16", "08/30", "09/06", "09/13", "09/20", "09/27", "09/29", "10/04", 
-  "10/11", "10/18", "10/25", "11/01", "11/08", "11/15", "11/29", "12/06", "12/13", "12/20", // Phase 2
-  // Mock Phase (10 Weeks)
-  "12/27", "01/03", "01/10", "01/17", "01/24", "01/31", "02/07", "02/14", "02/21", "02/28"
-];
-
 // --- Custom Date Sort Helper ---
 const customDateSort = (a, b) => {
     const [m1, d1] = a.split('/').map(Number);
@@ -93,7 +94,7 @@ const f1 = (v) => {
     return isNaN(num) ? '' : num.toFixed(1);
 };
 
-// 用於渲染單一圖表的元件
+// --- Components ---
 const SingleSubjectChart = ({ data, subjectKey, avgKey, colorKey, title, domain }) => (
     <div className="mb-6">
         <div className="h-56 md:h-64 w-full -ml-2">
@@ -135,17 +136,19 @@ const SingleSubjectChart = ({ data, subjectKey, avgKey, colorKey, title, domain 
     </div>
 );
 
-// 分佈圖元件
 const DistributionChart = ({ data, colorKey }) => (
-    <div className="h-48 w-full mt-4">
+    <div className="h-56 w-full mt-4">
         <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data} margin={{ top: 10, right: 0, bottom: 0, left: -20 }}>
+            <BarChart data={data} margin={{ top: 10, right: 0, bottom: 20, left: -20 }}>
                 <CartesianGrid stroke="#f1f5f9" vertical={false} strokeDasharray="3 3" />
                 <XAxis 
                     dataKey="range" 
-                    tick={{fontSize: 10, fill: '#64748b', fontWeight: 600}} 
+                    tick={{fontSize: 9, fill: '#64748b', fontWeight: 600}} 
                     tickLine={false} 
                     axisLine={false} 
+                    interval={0}
+                    angle={-45} 
+                    textAnchor="end"
                     dy={5}
                 />
                 <YAxis 
@@ -155,7 +158,7 @@ const DistributionChart = ({ data, colorKey }) => (
                     allowDecimals={false}
                 />
                 <Tooltip 
-                    cursor={false} // 修正：移除背景游標，解決圓角後的直角陰影問題
+                    cursor={false}
                     contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)', fontSize: '12px' }}
                 />
                 <Bar dataKey="count" name="人數" radius={[4, 4, 0, 0]}>
@@ -168,9 +171,7 @@ const DistributionChart = ({ data, colorKey }) => (
     </div>
 );
 
-const RAW_STUDENT_RECORDS = [];
-
-// --- 倒數計時元件 ---
+// --- Countdown Component ---
 const ExamCountdown = () => {
     const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
 
@@ -271,7 +272,9 @@ export default function GradeTracker() {
     document.body.appendChild(script);
 
     return () => {
-      document.body.removeChild(script);
+      if (document.body.contains(script)) {
+        document.body.removeChild(script);
+      }
     }
   }, []);
 
@@ -500,22 +503,24 @@ export default function GradeTracker() {
     reader.onload = (evt) => {
       try {
         const bstr = evt.target.result;
-        // Use window.XLSX loaded from CDN
         const wb = window.XLSX.read(bstr, { type: 'binary' });
         const wsname = wb.SheetNames[0];
         const ws = wb.Sheets[wsname];
-        // Read raw values
         const data = window.XLSX.utils.sheet_to_json(ws, { header: 1 });
         
-        // Remove header row if present
         let startIndex = 0;
         if (data[0] && typeof data[0][0] === 'string' && (data[0][0].includes('學號') || data[0][0].includes('ID'))) {
           startIndex = 1;
         }
 
-        const newStudentsMap = { ...allStudentsData.reduce((acc, s) => ({...acc, [s.id]: s}), {}) };
+        const newStudentsMap = allStudentsData.reduce((acc, s) => {
+             acc[s.id] = { ...s, grades: { ...s.grades } };
+             return acc;
+        }, {});
+        
         const newDates = new Set(availableDates);
         let importCount = 0;
+        let lastImportedDate = '';
 
         for (let i = startIndex; i < data.length; i++) {
           const row = data[i];
@@ -528,7 +533,6 @@ export default function GradeTracker() {
           const eng = row[4];
           const math = row[5];
           
-          // Date Formatting: '0103' or 103 -> '01/03'
           let dateStr = '';
           if (rawDate) {
                let dString = String(rawDate).padStart(4, '0'); 
@@ -544,8 +548,8 @@ export default function GradeTracker() {
           if (!newDates.has(dateStr)) {
               newDates.add(dateStr);
           }
+          lastImportedDate = dateStr;
 
-          // Create or Update Student
           let student = newStudentsMap[rawId];
           if (!student) {
               student = { id: rawId, name: rawName || '未命名', grades: {} };
@@ -553,8 +557,6 @@ export default function GradeTracker() {
           } else {
               if (rawName) student.name = rawName;
           }
-
-          if (!student.grades) student.grades = {};
           
           const totalVal = calculateTotal(chi, eng, math);
           
@@ -571,7 +573,12 @@ export default function GradeTracker() {
         const sortedDates = Array.from(newDates).sort(customDateSort);
         setAvailableDates(sortedDates);
         
-        // Save new dates list to DB immediately
+        if (lastImportedDate) {
+            setBatchDate(lastImportedDate);
+        } else if (sortedDates.length > 0 && !batchDate) {
+             setBatchDate(sortedDates[sortedDates.length - 1]);
+        }
+        
         if (db) {
             setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: sortedDates }, { merge: true });
         }
@@ -579,7 +586,7 @@ export default function GradeTracker() {
         const sortedStudents = Object.values(newStudentsMap).sort((a,b) => a.id.localeCompare(b.id));
         setAllStudentsData(sortedStudents);
         
-        setStatusMsg(`成功匯入 ${importCount} 筆成績！請記得點擊「儲存全班」以同步雲端。`);
+        setStatusMsg(`成功匯入 ${importCount} 筆成績！日期：${lastImportedDate}`);
       } catch (error) {
         console.error("Excel import error:", error);
         setStatusMsg("匯入失敗，請檢查檔案格式");
@@ -893,49 +900,41 @@ export default function GradeTracker() {
   const calculateDistribution = (date, subject, myScore) => {
       if (!cachedClassData.length) return [];
       
-      const ranges = subject === 'total' 
-         ? [290, 280, 270, 260, 250, 240, 230, 200, 0] 
-         : [100, 90, 80, 70, 60, 0];
-
       const myVal = parseFloat(myScore);
-      
-      const buckets = ranges.slice(0, ranges.length - 1).map((r, i) => {
-          const nextR = ranges[i+1];
-          let label = `${r}`;
-          if (subject === 'total') {
-              if (r === 290) label = `290+`;
-              else if (nextR === 0) label = `<200`; 
-              else label = `${r}~${nextR + (nextR===200?0:1)}`; 
-          } else {
-              if (r === 100) return null; 
-          }
-          return { min: r, max: 999, count: 0, label, isMyRange: false };
-      }).filter(b => b);
+      let buckets = [];
 
-      if (subject !== 'total') {
-          const simpleRanges = [90, 80, 70, 60, 0];
-          const newBuckets = simpleRanges.map(min => {
-              let label = `${min}+`;
-              if (min === 0) label = '<60';
-              else if (min === 90) label = '90-100';
-              else label = `${min}-${min+9}`;
-              return { min, max: min === 90 ? 300 : min + 9, count: 0, label, isMyRange: false };
-          });
-          buckets.length = 0; buckets.push(...newBuckets);
-      } else {
-          const totalRanges = [290, 280, 270, 260, 250, 240, 230, 200, 0];
-           const newBuckets = totalRanges.map((min, idx) => {
-              let label = '';
-              let max = 999;
-              if (min === 290) { label = '290+'; }
-              else if (min === 0) { label = '<200'; max = 199; }
-              else { 
-                  max = totalRanges[idx-1] - 1; 
-                  label = `${min}-${max}`;
-              }
+      if (subject === 'total') {
+          // 總分 10分一個區間
+          const thresholds = [
+              290, 280, 270, 260, 250, 240, 230, 220, 210, 200, 
+              190, 180, 170, 160, 150, 0
+          ];
+          
+          buckets = thresholds.slice(0, thresholds.length - 1).map((min, i) => {
+              const next = thresholds[i+1];
+              let label = `${min}-${min+9}`;
+              let max = min + 9;
+              
+              if (min === 290) { label = '290-300'; max = 300; }
+              else if (min === 150) { label = '<160'; max = 159; }
+              
               return { min, max, count: 0, label, isMyRange: false };
-           });
-           buckets.length = 0; buckets.push(...newBuckets);
+          });
+      } else {
+          // 單科 5分一個區間
+          const thresholds = [
+              100, 95, 90, 85, 80, 75, 70, 65, 60, 0
+          ];
+          
+          buckets = thresholds.map((min, i) => {
+              let label = `${min}-${min+4}`;
+              let max = min + 4;
+
+              if (min === 100) { label = '100'; max = 100; }
+              else if (min === 0) { label = '<60'; max = 59; }
+              
+              return { min, max, count: 0, label, isMyRange: false };
+          });
       }
 
       cachedClassData.forEach(s => {
@@ -1183,7 +1182,7 @@ export default function GradeTracker() {
             {!viewData && (
             <div className="bg-gradient-to-br from-white/90 to-slate-100/90 backdrop-blur-xl p-10 rounded-[2.5rem] shadow-2xl shadow-emerald-50 border border-white text-center">
               <h2 className="text-3xl font-black text-slate-800 mb-10 tracking-tight">查詢成績</h2>
-              <div className="bg-slate-50 p-4 rounded-3xl border border-slate-200 focus-within:bg-white focus-within:ring-4 focus-within:ring-emerald-100 focus-within:border-emerald-200 transition-all shadow-inner mb-8">
+              <div className="w-full bg-slate-50 p-4 rounded-3xl border border-slate-200 focus-within:bg-white focus-within:ring-4 focus-within:ring-emerald-100 focus-within:border-emerald-200 transition-all shadow-inner mb-8">
                 <input type="text" placeholder="" className="w-full bg-transparent border-none px-4 py-2 outline-none text-2xl text-slate-800 placeholder:text-slate-300 uppercase font-bold text-center tracking-[0.2em] placeholder:tracking-normal" value={searchId} onChange={(e) => setSearchId(e.target.value)} />
               </div>
               <button onClick={handleParentSearch} disabled={loading} className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 text-white py-5 rounded-3xl font-bold text-xl hover:shadow-xl hover:shadow-emerald-200/50 transition-all active:scale-95 disabled:opacity-50 disabled:active:scale-100 tracking-wide">{loading ? '查詢中...' : '開始查詢'}</button>
@@ -1207,14 +1206,12 @@ export default function GradeTracker() {
                 </div>
 
                 <div className="p-6">
-                  {/* ★★★ 修正：置中 Phase Tabs ★★★ */}
                   <div className="flex bg-slate-50 p-1 mb-4 rounded-xl border border-slate-100 overflow-x-auto justify-center">
                       {PHASES.map(phase => (
                           <button key={phase.id} onClick={() => setActivePhase(phase.id)} className={`flex-1 whitespace-nowrap px-4 py-2 text-xs font-bold rounded-lg transition-all ${activePhase === phase.id ? 'bg-white text-slate-800 shadow-sm border border-slate-100' : 'text-slate-400 hover:text-slate-600'}`}>{phase.name}</button>
                       ))}
                   </div>
 
-                  {/* ★★★ 修正：置中 Subject Tabs ★★★ */}
                   <div className="flex bg-slate-100 p-1.5 rounded-2xl mb-8 shadow-inner justify-center">
                       {['總分', '國文', '英文', '數學'].map(tab => {
                           const tabKey = tab === '總分' ? 'total' : tab === '國文' ? 'chi' : tab === '英文' ? 'eng' : 'math';
@@ -1265,7 +1262,6 @@ export default function GradeTracker() {
                                 </div>
                                 <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-slate-50">
                                     {['chi', 'eng', 'math'].map(sub => {
-                                        // 更新列表卡片顏色
                                         const subColor = sub === 'chi' ? 'red' : sub === 'eng' ? 'violet' : 'blue';
                                         const subLabel = sub === 'chi' ? '國文' : sub === 'eng' ? '英文' : '數學';
                                         const subScore = d[sub];

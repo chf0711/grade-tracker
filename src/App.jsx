@@ -7,6 +7,7 @@ import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken }
 import { getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc } from 'firebase/firestore';
 
 // --- Firebase Configuration Setup ---
+// 您的設定檔已保留，資料會自動連結
 const realFirebaseConfig = {
   apiKey: "AIzaSyChK1IiE6YhHZ_DdxXzpxi8vmBA9A9So9A",
   authDomain: "grade-tracker-9ccb3.firebaseapp.com",
@@ -51,18 +52,25 @@ try {
 }
 
 // --- FULL DATASET ---
+// 更新日期列表，包含模考衝刺班的日期
 const EXAM_DATES = [
   "04/12", "04/19", "04/26", "05/03", "05/10", "05/17", "05/24", "06/07", "06/14",
-  "06/21", "06/28", "06/29", "07/12", "07/19", "07/21", "07/26", "08/02", "08/09", 
+  "06/21", "06/28", "06/29", "07/12", "07/19", "07/21", "07/26", "08/02", "08/09", // Phase 1 (0-17)
   "08/16", "08/30", "09/06", "09/13", "09/20", "09/27", "09/29", "10/04", 
-  "10/11", "10/18", "10/25", "11/01", "11/08", "11/15", "11/29", "12/06", "12/13"
+  "10/11", "10/18", "10/25", "11/01", "11/08", "11/15", "11/29", "12/06", "12/13", // Phase 2 (18-34)
+  // Mock Phase (35+) - 10 Weeks
+  "12/27", "01/03", "01/10", "01/17", "01/24", "01/31", "02/07", "02/14", "02/21", "02/28"
 ];
 
 // --- Phase Configuration ---
+// 修正區間索引：
+// Phase 1: 0 ~ 18 (不含18) -> 04/12 ~ 08/09
+// Phase 2: 18 ~ 35 (不含35) -> 08/16 ~ 12/13
+// Mock: 35 ~ 100 (不含100) -> 12/27 ~ ...
 const PHASES = [
     { id: 'p1', name: '第一階段 (1~18週)', range: [0, 18] },
-    { id: 'p2', name: '第二階段 (19~36週)', range: [18, 36] },
-    { id: 'mock', name: '模考衝刺班 (10週)', range: [36, 100] } 
+    { id: 'p2', name: '第二階段 (19~35週)', range: [18, 35] },
+    { id: 'mock', name: '模考衝刺班 (10週)', range: [35, 100] } 
 ];
 
 const COLORS = {

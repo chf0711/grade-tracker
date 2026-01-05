@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell } from 'recharts';
-import { Search, Save, Plus, Check, BarChart3, X, Lock, LayoutDashboard, GraduationCap, Calendar, Clipboard, LogOut, AlertTriangle, UserPlus, Sparkles, Edit3, Trash2, Trophy, Target, FileSpreadsheet, Moon, Sun, ChevronRight, ArrowLeft } from 'lucide-react';
+import { Search, Save, Plus, Check, BarChart3, X, Lock, LayoutDashboard, GraduationCap, Calendar, Clipboard, LogOut, AlertTriangle, UserPlus, Sparkles, Edit3, Trash2, Trophy, Target, FileSpreadsheet, Moon, Sun, ChevronRight, ArrowLeft, PieChart } from 'lucide-react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc } from 'firebase/firestore';
@@ -72,14 +72,12 @@ const f1 = (v) => {
     return isNaN(num) ? '' : num.toFixed(1);
 };
 
-// Check if a specific date falls into the Mock Phase (Phase 3)
 const isMockDate = (date, allDates) => {
     const sorted = [...allDates].sort(customDateSort);
     const idx = sorted.indexOf(date);
-    return idx >= 36; // Based on PHASES definition
+    return idx >= 36;
 };
 
-// Get max score for a subject on a given date
 const getMaxScore = (date, subject, allDates) => {
     if (subject === 'total') return 300;
     if (subject === 'chi') return 100;
@@ -110,7 +108,6 @@ const SingleSubjectChart = ({ data, subjectKey, avgKey, colorKey, title, domain,
                       }} 
                   />
                   <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: '12px', fontWeight: 500, color: '#94a3b8' }}/>
-                  {/* Fixed Average Line: Solid line with opacity, no strokeDasharray, custom activeDot to prevent "hole" look */}
                   <Line name="班平均" type="monotone" dataKey={avgKey} stroke="#94a3b8" strokeWidth={2} strokeOpacity={0.6} dot={false} activeDot={{ r: 4, fill: '#94a3b8', stroke: 'none' }} isAnimationActive={false} />
                   <Line name={title} type="monotone" dataKey={subjectKey} stroke={COLORS[colorKey].hex} strokeWidth={3} activeDot={{ r: 6, strokeWidth: 0 }} isAnimationActive={true} animationDuration={1500}/>
               </LineChart>
@@ -122,7 +119,6 @@ const SingleSubjectChart = ({ data, subjectKey, avgKey, colorKey, title, domain,
 const DistributionChart = ({ data, colorKey, isDarkMode }) => (
     <div className="h-56 w-full mt-6">
         <ResponsiveContainer width="100%" height="100%">
-            {/* Increased bottom margin to prevent labels being cut off */}
             <BarChart data={data} margin={{ top: 10, right: 0, bottom: 40, left: -20 }}>
                 <CartesianGrid stroke={isDarkMode ? "#334155" : "#f1f5f9"} vertical={false} strokeDasharray="3 3" />
                 <XAxis dataKey="range" tick={{fontSize: 9, fill: '#94a3b8', fontWeight: 500}} tickLine={false} axisLine={false} interval={0} angle={-45} textAnchor="end" dy={10} />
@@ -446,11 +442,9 @@ export default function App() {
         const ws = wb.Sheets[wb.SheetNames[0]];
         const data = window.XLSX.utils.sheet_to_json(ws, { header: 1 });
         
-        // Find Header Row dynamically
         let headerRowIndex = -1;
         const colMap = { id: -1, name: -1, date: -1, chi: -1, eng: -1, math: -1 };
 
-        // Search first 10 rows for headers
         for (let i = 0; i < Math.min(data.length, 10); i++) {
             const row = data[i];
             const rowStr = row.map(c => String(c).trim());
@@ -485,7 +479,6 @@ export default function App() {
           const rawId = String(row[colMap.id]).toUpperCase().trim();
           const rawName = colMap.name !== -1 && row[colMap.name] ? String(row[colMap.name]).trim() : '';
           
-          // Date parsing
           let dateStr = '';
           if (colMap.date !== -1 && row[colMap.date]) {
                const rawDate = row[colMap.date];
@@ -496,7 +489,6 @@ export default function App() {
 
           if (!dateStr) continue;
 
-          // Scores
           const chi = colMap.chi !== -1 ? row[colMap.chi] : '';
           const eng = colMap.eng !== -1 ? row[colMap.eng] : '';
           const math = colMap.math !== -1 ? row[colMap.math] : '';
@@ -784,54 +776,43 @@ export default function App() {
       let buckets = [];
       const maxScore = getMaxScore(date, subject, allDates);
       
-      // Determine floor based on max score (to avoid too many buckets)
-      // For 120/100 -> 60 floor. For 80 -> 40 floor. Total 300 -> 150 floor.
-      const floor = maxScore === 300 ? 150 : (maxScore === 80 ? 40 : 60);
+      // Generate 10-point buckets dynamically based on max score
+      // Examples: 
+      // 120 -> 110-120, 100-109...
+      // 100 -> 90-100, 80-89...
       
-      // Generate 10-point interval buckets
-      let currentMax = maxScore;
-      // We want bands like 110-120, 100-109, etc.
-      // Special case: Top bucket usually includes the Max.
+      const thresholds = [];
+      // Create thresholds going down by 10 from max score
+      // Special case: Total (300) goes down to 150
+      // Special case: Subjects usually go down to 60 or 40
       
-      // We'll generate buckets down to the floor
-      while (currentMax > floor) {
-          const min = currentMax - 9; // e.g., 100 -> 91?
-          // Let's use strict 10s: 110-119, 100-109. 
-          // But top score (120) needs to be captured.
-          // Let's use thresholds approach for cleaner logic
-          // 120 -> [110, 100, 90, 80, 70, 60]
-          
-          break; // Moving to thresholds approach below
-      }
-
-      let thresholds = [];
       if (maxScore === 300) {
-          thresholds = [290, 280, 270, 260, 250, 240, 230, 220, 210, 200, 190, 180, 170, 160, 150];
-      } else if (maxScore === 120) {
-          thresholds = [110, 100, 90, 80, 70, 60];
-      } else if (maxScore === 80) {
-          thresholds = [70, 60, 50, 40];
-      } else { // 100
-          thresholds = [90, 80, 70, 60];
+          for (let i = 290; i >= 150; i -= 10) thresholds.push(i);
+      } else {
+          // For single subjects
+          // Determine floor: 60 for 100/120, 40 for 80
+          const floor = maxScore === 80 ? 40 : 60;
+          // Determine start: For 100 -> 90. For 120 -> 110. For 80 -> 70.
+          const start = maxScore - 10;
+          for (let i = start; i >= floor; i -= 10) thresholds.push(i);
       }
 
       buckets = thresholds.map((min, i) => {
           let label = `${min}-${min+9}`;
           let max = min + 9;
           
-          // Handle top bucket visual adjustment (e.g. 110-120)
-          if (i === 0 && min + 10 === maxScore) {
-              label = `${min}-${maxScore}`;
+          // Fix top label
+          if (i === 0) {
+              label = `${min}-${maxScore}`; // e.g. 110-120 or 90-100
               max = maxScore;
-          } else if (i === 0 && min + 10 > maxScore) {
-               // Rare case, just keep 9
           }
           
           return { min, max, count: 0, label, isMyRange: false };
       });
       
       // Add "Below X" bucket
-      buckets.push({ min: 0, max: thresholds[thresholds.length-1]-1, count: 0, label: `<${thresholds[thresholds.length-1]}`, isMyRange: false });
+      const bottomThreshold = thresholds[thresholds.length-1];
+      buckets.push({ min: 0, max: bottomThreshold-1, count: 0, label: `<${bottomThreshold}`, isMyRange: false });
 
       cachedClassData.forEach(s => {
           const g = s.grades?.[date];
@@ -883,7 +864,7 @@ export default function App() {
                 <button onClick={() => setMode('parent')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-slate-700 text-emerald-400' : 'bg-white text-emerald-600 shadow-sm') : 'text-slate-400 hover:text-slate-500'}`}>家長</button>
             </div>
             {isAuthenticated && (
-                <button onClick={handleLogout} className="ml-1 p-2 text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-full transition-colors"><LogOut className="w-4 h-4"/></button>
+                <button onClick={handleLogout} className="ml-1 p-2 text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-full transition-colors" title="登出"><LogOut className="w-5 h-5"/></button>
             )}
           </div>
         </div>
@@ -919,7 +900,7 @@ export default function App() {
                 <div className={`backdrop-blur-xl p-8 rounded-[2rem] w-full max-w-sm text-center border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-white/80 border-white shadow-xl shadow-slate-200/50'}`}>
                     <div className={`inline-flex p-3 rounded-2xl mb-6 ${darkMode ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}><Lock className="w-6 h-6" /></div>
                     <h2 className={`text-xl font-bold mb-6 ${darkMode ? 'text-white' : 'text-slate-800'}`}>身份驗證</h2>
-                    <input type="password" value={passwordInput} onChange={(e) => { setPasswordInput(e.target.value); setLoginError(false); }} onKeyDown={(e) => e.key === 'Enter' && handleLoginSubmit()} className={`w-full p-3.5 rounded-xl text-center text-lg font-bold tracking-[0.3em] outline-none transition-all mb-4 placeholder:tracking-normal border-2 ${darkMode ? 'bg-slate-950 border-transparent text-white focus:border-emerald-500/50' : 'bg-slate-50 border-transparent text-slate-800 focus:bg-white focus:border-emerald-200'}`} placeholder="輸入密碼" autoFocus />
+                    <input type="password" value={passwordInput} onChange={(e) => { setPasswordInput(e.target.value); setLoginError(false); }} onKeyDown={(e) => e.key === 'Enter' && handleLoginSubmit()} className={`w-full p-4 rounded-2xl text-center text-xl font-bold tracking-widest outline-none transition-all mb-6 placeholder:text-base placeholder:tracking-normal placeholder:font-medium border-2 ${darkMode ? 'bg-slate-950 border-transparent text-white focus:border-emerald-500/50 placeholder:text-slate-600' : 'bg-slate-50 border-transparent text-slate-800 focus:bg-white focus:border-emerald-200 placeholder:text-slate-400'}`} placeholder="輸入密碼" autoFocus />
                     {loginError && <p className="text-red-500 text-xs font-bold mb-4">密碼錯誤</p>}
                     <button onClick={handleLoginSubmit} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3.5 rounded-xl font-bold shadow-lg shadow-emerald-600/20 active:scale-[0.98] transition-all">登入</button>
                 </div>
@@ -1072,7 +1053,7 @@ export default function App() {
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-400 to-blue-500 opacity-80"></div>
               <h2 className={`text-2xl font-bold mb-8 tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>查詢成績</h2>
               <div className={`w-full p-2 rounded-2xl border transition-all mb-6 ${darkMode ? 'bg-slate-950 border-white/10 focus-within:ring-2 focus-within:ring-emerald-500/20' : 'bg-slate-50 border-slate-200 focus-within:bg-white focus-within:ring-2 focus-within:ring-emerald-100'}`}>
-                <input type="text" placeholder="請輸入學號" className={`w-full bg-transparent border-none px-4 py-3 outline-none text-xl uppercase font-bold text-center tracking-[0.1em] placeholder:text-sm placeholder:tracking-normal placeholder:font-medium ${darkMode ? 'text-white placeholder:text-slate-600' : 'text-slate-800 placeholder:text-slate-400'}`} value={searchId} onChange={(e) => setSearchId(e.target.value)} />
+                <input type="text" placeholder="請輸入學號" className={`w-full bg-transparent border-none px-4 py-3 outline-none text-xl uppercase font-bold text-center tracking-widest placeholder:text-base placeholder:tracking-normal placeholder:font-medium ${darkMode ? 'text-white placeholder:text-slate-600' : 'text-slate-800 placeholder:text-slate-400'}`} value={searchId} onChange={(e) => setSearchId(e.target.value)} />
               </div>
               <button onClick={handleParentSearch} disabled={loading} className="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 text-white py-4 rounded-2xl font-bold text-lg hover:shadow-lg hover:shadow-emerald-500/20 transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 tracking-wide">{loading ? '查詢中...' : '開始查詢'}</button>
               {searchError && <p className="mt-6 text-red-500 text-xs font-bold bg-red-500/10 inline-block px-4 py-2 rounded-full animate-pulse">{searchError}</p>}
@@ -1142,10 +1123,13 @@ export default function App() {
                              return (
                              <div key={d.date} className={`group p-5 rounded-3xl border transition-all duration-300 ${darkMode ? 'bg-slate-950/50 border-white/5 hover:border-emerald-500/20' : 'bg-white border-slate-100 hover:border-emerald-100 hover:shadow-lg hover:shadow-emerald-50/20'}`}>
                                 <div className="flex justify-between items-start mb-4">
-                                    <div className="flex flex-col gap-1 items-start">
-                                        <span className="text-xs font-bold text-slate-400 font-mono">{d.date}</span>
-                                        <button onClick={() => openStatsModal(d.date, { total: d.total, chi: d.chi, eng: d.eng, math: d.math })} className={`text-[10px] px-2 py-1 rounded-lg transition-colors font-bold flex items-center gap-1 mt-1 border w-fit ${darkMode ? 'bg-slate-900 text-slate-400 border-white/5 hover:bg-slate-800 hover:text-white' : 'bg-slate-50 text-slate-500 border-slate-100 hover:bg-emerald-50 hover:text-emerald-600'}`}>
-                                            <BarChart3 className="w-3 h-3" /> 班級分佈
+                                    <div className="flex flex-col gap-2 items-start">
+                                        <span className="text-sm font-bold text-slate-400 font-mono">{d.date}</span>
+                                        {/* ENHANCED BUTTON */}
+                                        <button onClick={() => openStatsModal(d.date, { total: d.total, chi: d.chi, eng: d.eng, math: d.math })} className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition-all hover:scale-105 active:scale-95 ${darkMode ? 'bg-indigo-500/20 text-indigo-300' : 'bg-indigo-50 text-indigo-600'}`}>
+                                            <BarChart3 className="w-3.5 h-3.5" /> 
+                                            落點分析
+                                            <ChevronRight className="w-3 h-3 opacity-50" />
                                         </button>
                                     </div>
                                     <div className="text-right">
@@ -1268,7 +1252,7 @@ export default function App() {
               <div className={`rounded-[2.5rem] p-8 shadow-2xl max-w-sm w-full animate-in zoom-in duration-300 ${darkMode ? 'bg-slate-900 border border-white/10' : 'bg-white'}`} onClick={e => e.stopPropagation()}>
                   <div className="flex items-center gap-4 mb-8">
                       <div className="bg-emerald-500/10 p-4 rounded-2xl text-emerald-500"><UserPlus className="w-8 h-8" /></div>
-                      <h3 className={`font-bold text-2xl ${darkMode ? 'text-white' : 'text-slate-800'}`}>建立新學生</h3>
+                      <h3 className={`font-bold text-xl ${darkMode ? 'text-white' : 'text-slate-800'}`}>建立新學生</h3>
                   </div>
                   <input type="text" placeholder="例如: 151200" className={`w-full p-4 rounded-2xl border-2 border-transparent text-center font-bold text-xl outline-none mb-8 uppercase tracking-widest transition-all ${darkMode ? 'bg-slate-950 text-white focus:border-emerald-500/50' : 'bg-slate-50 text-slate-800 focus:bg-white focus:border-emerald-200'}`} value={newStudentIdInput} onChange={(e) => setNewStudentIdInput(e.target.value)} autoFocus />
                   <div className="flex gap-3">

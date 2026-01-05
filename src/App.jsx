@@ -415,7 +415,13 @@ export default function App() {
       } catch (e) { setClassAverages(localComputedAverages); }
   };
 
-  useEffect(() => { setClassAverages(prev => ({ ...prev, ...localComputedAverages })); }, [localComputedAverages]);
+  // Fix: Only sync local averages to state if we actually have student data to compute from.
+  // Otherwise, we risk overwriting fetched DB averages with zeros on page load (parent mode).
+  useEffect(() => {
+      if (allStudentsData.length > 0) {
+          setClassAverages(prev => ({ ...prev, ...localComputedAverages }));
+      }
+  }, [localComputedAverages, allStudentsData.length]);
 
   const handleManualAverageChange = (date, classId, subject, value) => {
       setClassAverages(prev => {
@@ -1384,7 +1390,7 @@ export default function App() {
                                             {d.class && <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold opacity-60 ${darkMode ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-600'}`}>{d.class}</span>}
                                         </div>
                                         {/* ENHANCED BUTTON */}
-                                        <button onClick={() => openStatsModal(d.date, { total: d.total, chi: d.chi, eng: d.eng, math: d.math }, d.class)} className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all hover:scale-105 active:scale-95 shadow-md shadow-violet-200/50 dark:shadow-none bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white border border-white/10`}>
+                                        <button onClick={() => openStatsModal(d.date, { total: d.total, chi: d.chi, eng: d.eng, math: d.math }, d.class)} className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all hover:scale-105 active:scale-95 shadow-md shadow-slate-200/50 dark:shadow-none bg-slate-700 text-white hover:bg-slate-600 border border-white/10`}>
                                             <BarChart2 className="w-3.5 h-3.5" /> 
                                             查看落點分析
                                             <ChevronRight className="w-3 h-3 opacity-80" />

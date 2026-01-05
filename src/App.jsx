@@ -129,8 +129,9 @@ const SingleSubjectChart = ({ data, subjectKey, avgKey, colorKey, title, domain,
                       }} 
                   />
                   <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: '12px', fontWeight: 500, color: '#94a3b8' }}/>
-                  <Line name="班平均" type="monotone" dataKey={avgKey} stroke="#94a3b8" strokeWidth={2} strokeOpacity={0.6} dot={false} activeDot={{ r: 4, fill: '#94a3b8', stroke: 'none' }} isAnimationActive={false} />
-                  <Line name={title} type="monotone" dataKey={subjectKey} stroke={COLORS[colorKey].hex} strokeWidth={3} activeDot={{ r: 6, strokeWidth: 0 }} isAnimationActive={true} animationDuration={1500}/>
+                  {/* Added connectNulls={true} to ensure the average line is drawn even if there are gaps */}
+                  <Line name="班平均" type="monotone" dataKey={avgKey} stroke="#94a3b8" strokeWidth={2} strokeOpacity={0.6} dot={false} activeDot={{ r: 4, fill: '#94a3b8', stroke: 'none' }} isAnimationActive={false} connectNulls={true} />
+                  <Line name={title} type="monotone" dataKey={subjectKey} stroke={COLORS[colorKey].hex} strokeWidth={3} activeDot={{ r: 6, strokeWidth: 0 }} isAnimationActive={true} animationDuration={1500} connectNulls={true} />
               </LineChart>
           </ResponsiveContainer>
         </div>
@@ -1383,7 +1384,7 @@ export default function App() {
                                             {d.class && <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold opacity-60 ${darkMode ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-600'}`}>{d.class}</span>}
                                         </div>
                                         {/* ENHANCED BUTTON */}
-                                        <button onClick={() => openStatsModal(d.date, { total: d.total, chi: d.chi, eng: d.eng, math: d.math }, d.class)} className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all hover:scale-105 active:scale-95 shadow-md shadow-violet-200/50 dark:shadow-none bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white border border-white/10`}>
+                                        <button onClick={() => openStatsModal(d.date, { total: d.total, chi: d.chi, eng: d.eng, math: d.math }, d.class)} className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all hover:scale-105 active:scale-95 shadow-md shadow-violet-200/50 dark:shadow-none bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white border border-white/10`}>
                                             <BarChart2 className="w-3.5 h-3.5" /> 
                                             查看落點分析
                                             <ChevronRight className="w-3 h-3 opacity-80" />

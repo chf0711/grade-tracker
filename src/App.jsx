@@ -116,7 +116,7 @@ const SingleSubjectChart = ({ data, subjectKey, avgKey, colorKey, title, domain,
         <div className="h-56 md:h-64 w-full -ml-2">
           <ResponsiveContainer width="100%" height="100%">
               <LineChart data={data} margin={{ top: 20, right: 20, bottom: 0, left: 0 }}>
-                  <CartesianGrid stroke={isDarkMode ? "#334155" : "#f1f5f9"} vertical={false} strokeDasharray="3 3" />
+                  <CartesianGrid stroke={isDarkMode ? "#334155" : "#e2e8f0"} vertical={false} strokeDasharray="3 3" />
                   <XAxis dataKey="date" tick={{fontSize: 10, fill: '#94a3b8', fontWeight: 500, fontFamily: 'system-ui'}} tickLine={false} axisLine={false} dy={10} interval="preserveStartEnd" />
                   <YAxis domain={domain} tick={{fontSize: 10, fill: '#94a3b8', fontWeight: 500, fontFamily: 'system-ui'}} tickLine={false} axisLine={false} width={28} />
                   <Tooltip 
@@ -141,13 +141,13 @@ const DistributionChart = ({ data, colorKey, isDarkMode }) => (
     <div className="h-56 w-full mt-6">
         <ResponsiveContainer width="100%" height="100%">
             <BarChart data={data} margin={{ top: 10, right: 0, bottom: 40, left: -20 }}>
-                <CartesianGrid stroke={isDarkMode ? "#334155" : "#f1f5f9"} vertical={false} strokeDasharray="3 3" />
+                <CartesianGrid stroke={isDarkMode ? "#334155" : "#e2e8f0"} vertical={false} strokeDasharray="3 3" />
                 <XAxis dataKey="range" tick={{fontSize: 9, fill: '#94a3b8', fontWeight: 500}} tickLine={false} axisLine={false} interval={0} angle={-45} textAnchor="end" dy={10} />
                 <YAxis tick={{fontSize: 10, fill: '#94a3b8'}} tickLine={false} axisLine={false} allowDecimals={false} />
-                <Tooltip cursor={{fill: isDarkMode ? '#334155' : '#f1f5f9', opacity: 0.4}} contentStyle={{ borderRadius: '12px', border: 'none', backgroundColor: isDarkMode ? '#1e293b' : '#fff', color: isDarkMode ? '#fff' : '#000', fontSize: '12px' }} />
+                <Tooltip cursor={{fill: isDarkMode ? '#334155' : '#cbd5e1', opacity: 0.4}} contentStyle={{ borderRadius: '12px', border: 'none', backgroundColor: isDarkMode ? '#1e293b' : '#fff', color: isDarkMode ? '#fff' : '#000', fontSize: '12px' }} />
                 <Bar dataKey="count" name="人數" radius={[4, 4, 0, 0]}>
                     {data.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.isMyRange ? COLORS[colorKey].hex : (isDarkMode ? '#475569' : '#e2e8f0')} />
+                        <Cell key={`cell-${index}`} fill={entry.isMyRange ? COLORS[colorKey].hex : (isDarkMode ? '#475569' : '#cbd5e1')} />
                     ))}
                 </Bar>
             </BarChart>
@@ -883,6 +883,7 @@ export default function App() {
               if (cachedClassData.length > 0) fullClassData = cachedClassData;
               else {
                   const qSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'students'));
+                  fullClassData = [];
                   qSnap.forEach(d => fullClassData.push(d.data()));
                   setCachedClassData(fullClassData);
               }
@@ -963,7 +964,7 @@ export default function App() {
           return isNaN(val) ? null : val;
       }).filter(v => v !== null);
 
-      if (scores.length === 0) return '-';
+      if (scores.length < 100) return null;
 
       // Sort descending
       scores.sort((a, b) => b - a);
@@ -971,6 +972,7 @@ export default function App() {
       const total = scores.length;
       
       // PR formula: floor( (total - rank) / total * 100 )
+      // Standard for entrance exams in TW
       const pr = Math.floor(((total - rank) / total) * 100);
       return pr;
   };
@@ -1037,9 +1039,9 @@ export default function App() {
   if (!user) return <div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400 text-sm font-mono tracking-widest uppercase">Connecting...</div>;
 
   return (
-    <div className={`min-h-screen font-sans antialiased transition-colors duration-500 ease-in-out pb-32 ${darkMode ? 'bg-slate-950 text-slate-200' : 'bg-slate-50 text-slate-600'}`}>
+    <div className={`min-h-screen font-sans antialiased transition-colors duration-500 ease-in-out pb-32 ${darkMode ? 'bg-slate-950 text-slate-200' : 'bg-slate-100 text-slate-600'}`}>
       {/* Header */}
-      <header className={`fixed top-0 w-full backdrop-blur-xl z-30 border-b transition-all duration-300 ${darkMode ? 'bg-slate-950/70 border-white/5' : 'bg-white/70 border-white/40'}`}>
+      <header className={`fixed top-0 w-full backdrop-blur-xl z-30 border-b transition-all duration-300 ${darkMode ? 'bg-slate-950/70 border-white/5' : 'bg-slate-100/80 border-white/40'}`}>
         <div className="max-w-4xl mx-auto px-6 h-16 flex justify-between items-center">
           <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setMode('landing')}>
             <div className={`p-2 rounded-xl shadow-lg transition-transform group-hover:scale-105 duration-300 ${darkMode ? 'bg-emerald-500/10 text-emerald-400 shadow-emerald-500/10' : 'bg-white text-emerald-600 shadow-emerald-200/50'}`}><GraduationCap className="h-5 w-5" /></div>
@@ -1051,7 +1053,7 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={toggleDarkMode} className={`p-2 rounded-full transition-colors active:scale-95 duration-200 ${darkMode ? 'text-yellow-400 hover:bg-white/5' : 'text-slate-400 hover:bg-slate-100'}`}>
+            <button onClick={toggleDarkMode} className={`p-2 rounded-full transition-colors active:scale-95 duration-200 ${darkMode ? 'text-yellow-400 hover:bg-white/5' : 'text-slate-400 hover:bg-slate-200'}`}>
                 {darkMode ? <Moon className="w-4 h-4 fill-current"/> : <Sun className="w-4 h-4"/>}
             </button>
             <div className={`flex p-1 rounded-full border backdrop-blur-md ${darkMode ? 'bg-white/5 border-white/5' : 'bg-white/50 border-white/40'}`}>
@@ -1077,12 +1079,12 @@ export default function App() {
             <ExamCountdown isDarkMode={darkMode} />
              
             <div className="w-full max-w-sm space-y-4 mt-12">
-               <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className={`group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 hover:scale-[1.01] active:scale-[0.98] transition-all duration-300 ${darkMode ? 'bg-slate-900/40 border-white/10 hover:border-emerald-500/30' : 'bg-white/80 border-white hover:border-emerald-200 shadow-sm'}`}>
+               <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className={`group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 hover:scale-[1.01] active:scale-[0.98] transition-all duration-300 ${darkMode ? 'bg-slate-900/40 border-white/10 hover:border-emerald-500/30' : 'bg-white border-white hover:border-emerald-200 shadow-sm'}`}>
                   <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-colors ${darkMode ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}><LayoutDashboard className="w-6 h-6" /></div>
                   <div className="text-left flex-1"><h3 className={`text-lg font-bold ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}>老師通道</h3><p className="text-xs text-slate-400 mt-0.5">管理成績與設定</p></div>
                   <ChevronRight className="w-5 h-5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
                </button>
-               <button onClick={() => { setViewData(null); setSearchError(''); setMode('parent'); }} className={`group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 hover:scale-[1.01] active:scale-[0.98] transition-all duration-300 ${darkMode ? 'bg-slate-900/40 border-white/10 hover:border-blue-500/30' : 'bg-white/80 border-white hover:border-blue-200 shadow-sm'}`}>
+               <button onClick={() => { setViewData(null); setSearchError(''); setMode('parent'); }} className={`group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 hover:scale-[1.01] active:scale-[0.98] transition-all duration-300 ${darkMode ? 'bg-slate-900/40 border-white/10 hover:border-blue-500/30' : 'bg-white border-white hover:border-blue-200 shadow-sm'}`}>
                   <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-colors ${darkMode ? 'bg-blue-500/10 text-blue-400' : 'bg-blue-50 text-blue-600'}`}><BarChart3 className="w-6 h-6" /></div>
                   <div className="text-left flex-1"><h3 className={`text-lg font-bold ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}>家長查詢</h3><p className="text-xs text-slate-400 mt-0.5">輸入學號查看分析</p></div>
                   <ChevronRight className="w-5 h-5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
@@ -1182,8 +1184,10 @@ export default function App() {
                                 </thead>
                                 <tbody className={`divide-y ${darkMode ? 'divide-slate-800' : 'divide-slate-50'}`}>
                                     {allStudentsData.filter(s => {
-                                        // Default empty class to A班 for filtering
-                                        const currentClass = s.grades?.[batchDate]?.class || 'A班';
+                                        // Only show students who have a grade record for this specific date
+                                        if (!s.grades || !s.grades[batchDate]) return false;
+                                        
+                                        const currentClass = s.grades[batchDate].class || 'A班';
                                         return currentClass === teacherClassFilter;
                                     }).map((student, sIndex) => {
                                         const dateGrades = (student.grades && student.grades[batchDate]) || { chi: '', eng: '', math: '', total: '', class: 'A班' };
@@ -1373,7 +1377,7 @@ export default function App() {
                                         <div className={`text-3xl font-bold tracking-tighter text-emerald-500`}>{f1(d.total)}</div>
                                         <div className="flex items-center justify-end gap-2 mt-1">
                                             {totalRank !== '-' && <span className="bg-amber-100 text-amber-700 text-[10px] px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5"><Trophy className="w-3 h-3"/> #{totalRank}</span>}
-                                            {globalPR !== '-' && <span className="bg-purple-100 text-purple-700 text-[10px] px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">本部PR {globalPR}</span>}
+                                            {globalPR !== null && globalPR !== '-' && <span className="bg-purple-100 text-purple-700 text-[10px] px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">本部PR {globalPR}</span>}
                                         </div>
                                         {d.avgTotal && <div className="text-[10px] font-bold text-slate-400 tracking-wide text-right mt-1">Avg {f1(d.avgTotal)}</div>}
                                     </div>

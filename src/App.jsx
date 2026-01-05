@@ -60,10 +60,10 @@ const PHASES = [
 
 const COLORS = {
     total: { hex: '#10b981', tailwind: 'emerald', label: '總分' },
-    chi:   { hex: '#f43f5e', tailwind: 'rose',     label: '國文' }, 
-    eng:   { hex: '#8b5cf6', tailwind: 'violet',   label: '英文' }, 
-    math:  { hex: '#3b82f6', tailwind: 'blue',     label: '數學' }, 
-    avg:   { hex: '#94a3b8', tailwind: 'slate',    label: '班平均' } 
+    chi:   { hex: '#f43f5e', tailwind: 'rose',      label: '國文' }, 
+    eng:   { hex: '#8b5cf6', tailwind: 'violet',    label: '英文' }, 
+    math:  { hex: '#3b82f6', tailwind: 'blue',      label: '數學' }, 
+    avg:   { hex: '#94a3b8', tailwind: 'slate',     label: '班平均' } 
 };
 
 const f1 = (v) => {
@@ -441,7 +441,7 @@ export default function App() {
         const wb = window.XLSX.read(bstr, { type: 'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const data = window.XLSX.utils.sheet_to_json(ws, { header: 1 });
-        
+         
         let headerRowIndex = -1;
         const colMap = { id: -1, name: -1, date: -1, chi: -1, eng: -1, math: -1 };
 
@@ -876,10 +876,11 @@ export default function App() {
             <div className={`p-8 rounded-full mb-8 shadow-2xl ring-1 backdrop-blur-3xl ${darkMode ? 'bg-slate-900/50 shadow-emerald-900/10 ring-white/10' : 'bg-white shadow-emerald-100/60 ring-white'}`}>
                 <Sparkles className="w-10 h-10 text-emerald-500" />
             </div>
-            <h2 className={`text-3xl font-bold tracking-tighter mb-2 text-center ${darkMode ? 'text-white' : 'text-slate-800'}`}>Make Progress Visible</h2>
+            {/* Modified line below: reduced font size */}
+            <h2 className={`text-3xl md:text-4xl font-black tracking-tighter mb-3 text-center bg-clip-text text-transparent bg-gradient-to-r ${darkMode ? 'from-emerald-300 via-teal-200 to-cyan-300' : 'from-emerald-600 via-teal-600 to-blue-600'}`}>Make Progress Visible</h2>
             <p className="text-slate-400 text-sm font-medium tracking-wide mb-8">2025-2026 Learning Journey</p>
             <ExamCountdown isDarkMode={darkMode} />
-            
+             
             <div className="w-full max-w-sm space-y-4 mt-12">
                <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className={`group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 hover:scale-[1.01] active:scale-[0.98] transition-all duration-300 ${darkMode ? 'bg-slate-900/40 border-white/10 hover:border-emerald-500/30' : 'bg-white/80 border-white hover:border-emerald-200 shadow-sm'}`}>
                   <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-colors ${darkMode ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}><LayoutDashboard className="w-6 h-6" /></div>
@@ -999,7 +1000,7 @@ export default function App() {
                 )}
             </div>
             {statusMsg && <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/90 text-white px-5 py-3 rounded-full flex items-center text-xs font-bold shadow-2xl backdrop-blur-md animate-in slide-in-from-bottom-5 fade-in z-50"><Check className="w-4 h-4 mr-2 text-emerald-400" /> {statusMsg}</div>}
-            
+             
             {teacherViewMode === 'single' && currentStudentId && !loading && (
               <div className={`rounded-[2rem] shadow-xl border overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500 ${darkMode ? 'bg-slate-900/60 border-white/5 shadow-emerald-900/5' : 'bg-white border-white shadow-slate-200/50'}`}>
                 <div className={`p-6 border-b flex justify-between items-center backdrop-blur-sm ${darkMode ? 'border-white/5 bg-slate-900/50' : 'border-slate-50 bg-white/50'}`}>
@@ -1102,19 +1103,21 @@ export default function App() {
                       let maxDomain = 100;
                       if (activeTab === 'total') maxDomain = 300;
                       else if (activeTab === 'math' && activePhase === 'mock') maxDomain = 120;
-                      // Eng is 80 in mock but 100 fits in 100 domain, so 100 is safe.
+                      
+                      // Specific domain for English in Mock phase
+                      const engDomain = activePhase === 'mock' ? [0, 80] : [0, 100];
                       
                       return (
                         <>
                           {activeTab === 'total' && <SingleSubjectChart data={filteredData} subjectKey="total" avgKey="avgTotal" colorKey="total" title="總分" domain={[0, 300]} isDarkMode={darkMode} />}
                           {activeTab === 'chi' && <SingleSubjectChart data={filteredData} subjectKey="chi" avgKey="avgChi" colorKey="chi" title="國文" domain={[0, 100]} isDarkMode={darkMode} />}
-                          {activeTab === 'eng' && <SingleSubjectChart data={filteredData} subjectKey="eng" avgKey="avgEng" colorKey="eng" title="英文" domain={[0, 100]} isDarkMode={darkMode} />}
+                          {activeTab === 'eng' && <SingleSubjectChart data={filteredData} subjectKey="eng" avgKey="avgEng" colorKey="eng" title="英文" domain={engDomain} isDarkMode={darkMode} />}
                           {activeTab === 'math' && <SingleSubjectChart data={filteredData} subjectKey="math" avgKey="avgMath" colorKey="math" title="數學" domain={[0, maxDomain]} isDarkMode={darkMode} />}
                         </>
                       );
                   })()}
                 </div>
-                
+                 
                 <div className={`p-6 border-t ${darkMode ? 'bg-slate-900 border-white/5' : 'bg-white border-slate-50'}`}>
                     <h4 className={`font-bold mb-6 text-xs flex items-center justify-center gap-2 tracking-widest uppercase ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>詳細紀錄</h4>
                     <div className="space-y-4">

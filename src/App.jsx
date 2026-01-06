@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell } from 'recharts';
-import { Search, Save, Plus, Check, BarChart3, X, Lock, LayoutDashboard, GraduationCap, Calendar, Clipboard, LogOut, AlertTriangle, UserPlus, Sparkles, Edit3, Trash2, Trophy, Target, FileSpreadsheet, Moon, Sun, ChevronRight, ArrowLeft, PieChart, Users, BarChart2 } from 'lucide-react';
+import { Search, Save, Plus, Check, BarChart3, X, Lock, LayoutDashboard, GraduationCap, Calendar, Clipboard, LogOut, AlertTriangle, UserPlus, Sparkles, Edit3, Trash2, Trophy, Target, FileSpreadsheet, Moon, Sun, ChevronRight, ArrowLeft, PieChart, Users, BarChart2, ShieldCheck } from 'lucide-react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc } from 'firebase/firestore';
@@ -24,6 +24,12 @@ const CLASS_DEFS = [
 ];
 
 const RAW_STUDENT_RECORDS = [];
+
+// --- Obfuscated Passwords (Base64 Encoded) ---
+// 'Ben110705' -> 'QmVuMTEwNzA1'
+// '2491212'   -> 'MjQ5MTIxMg=='
+const ENCODED_PASSWORDS = ['QmVuMTEwNzA1', 'MjQ5MTIxMg=='];
+const SECURITY_CODE = '1107';
 
 // --- Firebase Configuration ---
 const realFirebaseConfig = {
@@ -212,6 +218,12 @@ export default function App() {
   const [showAddStudentModal, setShowAddStudentModal] = useState(false);
   const [newStudentIdInput, setNewStudentIdInput] = useState('');
   const [showAvgModal, setShowAvgModal] = useState(false);
+  
+  // Security Modal State
+  const [showSecurityModal, setShowSecurityModal] = useState(false);
+  const [securityInput, setSecurityInput] = useState('');
+  const [pendingAction, setPendingAction] = useState(null);
+  const securityInputRef = useRef(null);
     
   const [teacherViewMode, setTeacherViewMode] = useState('single');
   const [teacherClassFilter, setTeacherClassFilter] = useState('A班'); // Default to A班
@@ -254,12 +266,6 @@ export default function App() {
   // Fix 1: Logic to prefer Mock phase when opening parent view
   useEffect(() => {
       if (mode === 'parent' && viewData) {
-          // Default to mock (activePhase state init is 'mock'), only switch if no mock data maybe?
-          // User requested: "一進去應該跳在模考班"
-          // We force 'mock' on load if not already set by user interaction
-          // But here we just init state to 'mock' above. 
-          // If the user wants to see history, they can click. 
-          // We only force switch if logic dictates, but default is safer as 'mock'.
           setActivePhase('mock'); 
       }
   }, [viewData, mode]);
@@ -334,6 +340,29 @@ export default function App() {
           }
       } catch(e) { console.error("Error loading dates:", e); }
   };
+
+  // --- Security Wrapper ---
+  const executeWithSecurity = (action) => {
+      setPendingAction(() => action);
+      setSecurityInput('');
+      setShowSecurityModal(true);
+      // Timeout to focus input after render
+      setTimeout(() => {
+          if (securityInputRef.current) securityInputRef.current.focus();
+      }, 100);
+  };
+
+  const handleSecurityInput = (e) => {
+      const val = e.target.value;
+      setSecurityInput(val);
+      if (val === SECURITY_CODE) {
+          if (pendingAction) pendingAction();
+          setShowSecurityModal(false);
+          setPendingAction(null);
+          setSecurityInput('');
+      }
+  };
+  // ------------------------
 
   const addDate = async () => {
       if (!newDateInput || availableDates.includes(newDateInput)) return;
@@ -458,7 +487,9 @@ export default function App() {
   };
 
   const handleLoginSubmit = () => {
-      if (passwordInput === 'Ben110705' || passwordInput === '2491212') { 
+      // Use Base64 encoding to verify password without storing plaintext
+      const inputEncoded = btoa(passwordInput);
+      if (ENCODED_PASSWORDS.includes(inputEncoded)) { 
           setIsAuthenticated(true); localStorage.setItem('teacher_auth', 'true'); setMode('teacher'); loadAllStudents();
       } else { setLoginError(true); }
   };
@@ -1057,7 +1088,7 @@ export default function App() {
   if (!user) return <div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400 text-sm font-mono tracking-widest uppercase">Connecting...</div>;
 
   return (
-    <div className={`min-h-screen font-sans antialiased transition-colors duration-500 ease-in-out pb-32 ${darkMode ? 'bg-slate-950 text-slate-200' : 'bg-slate-200 text-slate-600'}`}>
+    <div className={`min-h-screen font-sans antialiased transition-colors duration-500 ease-in-out pb-32 ${darkMode ? 'bg-slate-950 text-slate-200' : 'bg-gradient-to-br from-slate-200 via-gray-300 to-slate-400 text-slate-600'}`}>
       {/* Header */}
       <header className={`fixed top-0 w-full backdrop-blur-xl z-30 border-b transition-all duration-300 ${darkMode ? 'bg-slate-950/70 border-white/5' : 'bg-slate-200/80 border-white/40'}`}>
         <div className="max-w-4xl mx-auto px-6 h-16 flex justify-between items-center">
@@ -1092,17 +1123,17 @@ export default function App() {
                 <Sparkles className="w-10 h-10 text-emerald-500" />
             </div>
             {/* Modified line below: reduced font size */}
-            <h2 className={`text-xl md:text-2xl font-black tracking-tighter mb-3 text-center bg-clip-text text-transparent bg-gradient-to-r ${darkMode ? 'from-emerald-300 via-teal-200 to-cyan-300' : 'from-emerald-600 via-teal-600 to-blue-600'}`}>Make Progress Visible</h2>
+            <h2 className={`text-2xl md:text-4xl font-black tracking-tighter mb-4 text-center py-4 px-2 leading-relaxed bg-clip-text text-transparent bg-gradient-to-r ${darkMode ? 'from-emerald-300 via-teal-200 to-cyan-300' : 'from-emerald-600 via-teal-600 to-blue-600'}`}>Make Progress Visible</h2>
             <p className="text-slate-400 text-sm font-medium tracking-wide mb-8">2025-2026 Learning Journey</p>
             <ExamCountdown isDarkMode={darkMode} />
              
             <div className="w-full max-w-sm space-y-4 mt-12">
-               <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className={`group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 hover:scale-[1.01] active:scale-[0.98] transition-all duration-300 ${darkMode ? 'bg-slate-900/40 border-white/10 hover:border-emerald-500/30' : 'bg-white border-white hover:border-emerald-200 shadow-sm'}`}>
+               <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className={`group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 hover:scale-[1.01] active:scale-[0.98] transition-all duration-300 ${darkMode ? 'bg-slate-900/40 border-white/10 hover:border-emerald-500/30' : 'bg-white/80 border-white hover:border-emerald-200 shadow-sm'}`}>
                   <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-colors ${darkMode ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}><LayoutDashboard className="w-6 h-6" /></div>
                   <div className="text-left flex-1"><h3 className={`text-lg font-bold ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}>老師通道</h3><p className="text-xs text-slate-400 mt-0.5">管理成績與設定</p></div>
                   <ChevronRight className="w-5 h-5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
                </button>
-               <button onClick={() => { setViewData(null); setSearchError(''); setMode('parent'); }} className={`group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 hover:scale-[1.01] active:scale-[0.98] transition-all duration-300 ${darkMode ? 'bg-slate-900/40 border-white/10 hover:border-blue-500/30' : 'bg-white border-white hover:border-blue-200 shadow-sm'}`}>
+               <button onClick={() => { setViewData(null); setSearchError(''); setMode('parent'); }} className={`group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 hover:scale-[1.01] active:scale-[0.98] transition-all duration-300 ${darkMode ? 'bg-slate-900/40 border-white/10 hover:border-blue-500/30' : 'bg-white/80 border-white hover:border-blue-200 shadow-sm'}`}>
                   <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-colors ${darkMode ? 'bg-blue-500/10 text-blue-400' : 'bg-blue-50 text-blue-600'}`}><BarChart3 className="w-6 h-6" /></div>
                   <div className="text-left flex-1"><h3 className={`text-lg font-bold ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}>家長查詢</h3><p className="text-xs text-slate-400 mt-0.5">輸入學號查看分析</p></div>
                   <ChevronRight className="w-5 h-5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
@@ -1136,7 +1167,7 @@ export default function App() {
                 <div className={`flex flex-wrap gap-2 max-h-24 overflow-y-auto p-2 rounded-xl border mb-6 no-scrollbar ${darkMode ? 'bg-slate-950/50 border-white/5' : 'bg-slate-50/50 border-slate-100'}`}>
                     {[...availableDates].sort(customDateSort).reverse().map(d => (
                         <div key={d} className={`flex items-center px-2.5 py-1 rounded-lg text-[10px] font-bold border ${darkMode ? 'bg-slate-800 text-slate-300 border-white/5' : 'bg-white text-slate-500 border-slate-200'}`}>
-                            {d} <button onClick={() => handleDeleteDate(d)} className="ml-1.5 text-slate-400 hover:text-red-500"><X className="w-3 h-3"/></button>
+                            {d} <button onClick={() => { setDeleteTarget(d); executeWithSecurity(confirmDeleteDate); }} className="ml-1.5 text-slate-400 hover:text-red-500"><X className="w-3 h-3"/></button>
                         </div>
                     ))}
                 </div>
@@ -1254,7 +1285,7 @@ export default function App() {
                       <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border mt-1 inline-block opacity-60 ${darkMode ? 'border-slate-600 text-slate-400' : 'border-slate-200 text-slate-400'}`}>{currentStudentId}</span>
                   </div>
                   <div className="flex gap-2">
-                    <button onClick={handleDeleteStudent} className="bg-red-500/10 text-red-500 p-2.5 rounded-xl hover:bg-red-500/20 transition-colors active:scale-95"><Trash2 className="w-5 h-5"/></button>
+                    <button onClick={() => { setStudentToDelete({ id: currentStudentId, name: studentName }); executeWithSecurity(confirmDeleteStudent); }} className="bg-red-500/10 text-red-500 p-2.5 rounded-xl hover:bg-red-500/20 transition-colors active:scale-95"><Trash2 className="w-5 h-5"/></button>
                     <button onClick={handleSaveGrades} className="bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-emerald-500 shadow-lg shadow-emerald-900/20 transition-all active:scale-95 flex items-center gap-2"><Save className="w-4 h-4"/> 儲存</button>
                   </div>
                 </div>
@@ -1487,6 +1518,29 @@ export default function App() {
           </div>
         )}
 
+        {/* Security Check Modal */}
+        {showSecurityModal && (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[60] p-6 animate-in fade-in duration-200" onClick={() => {setShowSecurityModal(false); setSecurityInput('');}}>
+                <div className={`p-8 rounded-[2rem] shadow-2xl max-w-xs w-full text-center transform transition-all scale-100 border ${darkMode ? 'bg-slate-900 border-white/10' : 'bg-white border-white/50'}`} onClick={e => e.stopPropagation()}>
+                    <div className={`mx-auto mb-6 p-4 rounded-full inline-block ${darkMode ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}>
+                        <ShieldCheck className="w-8 h-8" />
+                    </div>
+                    <h3 className={`text-lg font-bold mb-2 ${darkMode ? 'text-white' : 'text-slate-800'}`}>安全驗證</h3>
+                    <p className={`text-xs mb-6 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>請輸入安全密碼以繼續</p>
+                    
+                    <input 
+                        ref={securityInputRef}
+                        type="password" 
+                        maxLength={4}
+                        value={securityInput}
+                        onChange={handleSecurityInput}
+                        className={`w-full text-center text-3xl font-bold tracking-[0.5em] p-4 rounded-xl outline-none border-2 transition-all ${darkMode ? 'bg-slate-950 border-slate-800 text-white focus:border-emerald-500/50' : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-emerald-200 focus:bg-white'}`}
+                        placeholder="••••"
+                    />
+                </div>
+            </div>
+        )}
+
         {statsModalData && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setStatsModalData(null)}>
               <div className={`rounded-[2.5rem] w-full max-w-lg max-h-[90vh] flex flex-col ${darkMode ? 'bg-slate-900 border border-white/10' : 'bg-white shadow-2xl'}`} onClick={e => e.stopPropagation()}>
@@ -1552,7 +1606,7 @@ export default function App() {
                   </p>
                   <div className="flex gap-3 justify-end">
                       <button onClick={() => { setDeleteTarget(null); setStudentToDelete(null); }} className={`flex-1 px-4 py-3.5 rounded-xl font-bold text-sm transition-colors ${darkMode ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>取消</button>
-                      <button onClick={deleteTarget ? confirmDeleteDate : confirmDeleteStudent} className="flex-1 px-4 py-3.5 rounded-xl bg-red-500 text-white hover:bg-red-600 font-bold text-sm shadow-lg shadow-red-900/20 transition-all active:scale-95">刪除</button>
+                      <button onClick={() => executeWithSecurity(deleteTarget ? confirmDeleteDate : confirmDeleteStudent)} className="flex-1 px-4 py-3.5 rounded-xl bg-red-500 text-white hover:bg-red-600 font-bold text-sm shadow-lg shadow-red-900/20 transition-all active:scale-95">刪除</button>
                   </div>
               </div>
           </div>

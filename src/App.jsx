@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell } from 'recharts';
-import { Search, Save, Plus, Check, BarChart3, X, Lock, LayoutDashboard, GraduationCap, Calendar, Clipboard, LogOut, AlertTriangle, UserPlus, Sparkles, Edit3, Trash2, Trophy, Target, FileSpreadsheet, Moon, Sun, ChevronRight, ArrowLeft, PieChart, Users, BarChart2, ShieldCheck, ArrowDownWideNarrow } from 'lucide-react';
+import { Search, Save, Plus, Check, BarChart3, X, Lock, LayoutDashboard, GraduationCap, Calendar, Clipboard, LogOut, AlertTriangle, UserPlus, Sparkles, Edit3, Trash2, Trophy, Target, FileSpreadsheet, Moon, Sun, ChevronRight, ArrowLeft, PieChart, Users, BarChart2, ShieldCheck, ArrowDownWideNarrow, Percent } from 'lucide-react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc } from 'firebase/firestore';
 
 // --- Global Constants ---
-// 這些是考試的「起始日」(通常是週六)
 const DEFAULT_EXAM_STARTS = [
   "04/12", "04/19", "04/26", "05/03", "05/10", "05/17", "05/24", "06/07", "06/14",
   "06/21", "06/28", "06/29", "07/12", "07/19", "07/21", "07/26", "08/02", "08/09", 
@@ -77,7 +76,6 @@ const customDateSort = (a, b) => {
     } catch (e) { return 0; }
 };
 
-// ** NEW CORE LOGIC **: Normalize dates to group Saturday/Sunday together (Weekend ID)
 const getWeekendID = (dateStr) => {
     if (!dateStr || !dateStr.includes('/')) return dateStr;
     try {
@@ -97,7 +95,6 @@ const getWeekendID = (dateStr) => {
     } catch (e) { return dateStr; }
 };
 
-// ** NEW CORE LOGIC **: Calculate Sunday date from a Saturday string
 const getSundayDate = (satDateStr) => {
     try {
         const [mStr, dStr] = satDateStr.split('/');
@@ -110,9 +107,8 @@ const getSundayDate = (satDateStr) => {
     } catch(e) { return satDateStr; }
 }
 
-// ** NEW CORE LOGIC **: Display Label for Weekend (e.g. "01/03-04")
 const getWeekendDisplayLabel = (dateStr) => {
-    const satID = getWeekendID(dateStr); // Ensure we start from Saturday
+    const satID = getWeekendID(dateStr); 
     if (!satID || !satID.includes('/')) return dateStr;
     try {
         const [mStr, dStr] = satID.split('/');
@@ -153,7 +149,7 @@ const isMockDate = (date, allDates) => {
     if (!date) return false;
     const sorted = [...allDates].sort(customDateSort);
     const idx = sorted.indexOf(date);
-    return idx >= 36;
+    return idx >= 36 || date.includes('12/20') || date.includes('09/29');
 };
 
 const getMaxScore = (date, subject, allDates) => {
@@ -192,7 +188,6 @@ const SingleSubjectChart = ({ data, subjectKey, avgKey, colorKey, title, domain,
                       }} 
                   />
                   <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: '12px', fontWeight: 500, color: isDarkMode ? '#94a3b8' : '#475569' }}/>
-                  {/* Added connectNulls={true} to ensure the average line is drawn even if there are gaps */}
                   <Line name="班平均" type="monotone" dataKey={avgKey} stroke="#94a3b8" strokeWidth={2} strokeOpacity={0.6} dot={false} activeDot={{ r: 4, fill: '#94a3b8', stroke: 'none' }} isAnimationActive={false} connectNulls={true} />
                   <Line name={title} type="monotone" dataKey={subjectKey} stroke={COLORS[colorKey].hex} strokeWidth={3} activeDot={{ r: 6, strokeWidth: 0 }} isAnimationActive={true} animationDuration={1500} connectNulls={true} />
               </LineChart>
@@ -219,8 +214,16 @@ const DistributionChart = ({ data, colorKey, isDarkMode }) => (
     </div>
 );
 
-// --- Memoized Table Row Component for Performance ---
-const BatchRow = React.memo(({ student, sIndex, batchDate, dateGrades, prValue, darkMode, handleBatchGradeChange, handleKeyDown, handlePaste }) => {
+const BatchRow = React.memo(({ student, sIndex, batchDate, dateGrades, prValue, probValue, darkMode, handleBatchGradeChange, handleKeyDown, handlePaste }) => {
+    
+    let probColor = 'text-slate-400';
+    if (probValue !== '-') {
+        const p = parseInt(probValue);
+        if (p >= 80) probColor = 'text-emerald-500';
+        else if (p >= 50) probColor = 'text-amber-500';
+        else probColor = 'text-rose-500';
+    }
+
     return (
         <tr className={`${darkMode ? 'hover:bg-slate-800/50' : 'hover:bg-white/50'} transition-colors`}>
             <td className="px-3 py-2 text-xs font-bold text-slate-500">{sIndex + 1}</td>
@@ -251,6 +254,11 @@ const BatchRow = React.memo(({ student, sIndex, batchDate, dateGrades, prValue, 
             ))}
             <td className="px-1 py-1 text-center"><div className="text-sm font-bold text-emerald-500">{dateGrades.total}</div></td>
             <td className="px-1 py-1 text-center"><div className={`text-xs font-bold ${darkMode ? 'text-purple-300' : 'text-purple-600'}`}>{prValue !== '-' ? prValue : ''}</div></td>
+            <td className="px-1 py-1 text-center">
+                <div className={`text-xs font-black ${probColor} inline-block px-2 py-0.5 rounded-full`}>
+                    {probValue !== '-' ? `${probValue}%` : ''}
+                </div>
+            </td>
         </tr>
     );
 });
@@ -312,19 +320,19 @@ export default function App() {
   const [newStudentIdInput, setNewStudentIdInput] = useState('');
   const [showAvgModal, setShowAvgModal] = useState(false);
   
-  // Security Modal State
   const [showSecurityModal, setShowSecurityModal] = useState(false);
   const [securityInput, setSecurityInput] = useState('');
   const [pendingAction, setPendingAction] = useState(null);
   const securityInputRef = useRef(null);
     
   const [teacherViewMode, setTeacherViewMode] = useState('single');
-  const [teacherClassFilter, setTeacherClassFilter] = useState('A班'); // Default to A班
-  const [avgSettingsClassFilter, setAvgSettingsClassFilter] = useState('A班'); // For Avg Modal
-  const [batchDate, setBatchDate] = useState(''); // This now stores the SATURDAY date ID
+  const [teacherClassFilter, setTeacherClassFilter] = useState('A班'); 
+  const [avgSettingsClassFilter, setAvgSettingsClassFilter] = useState('A班'); 
+  const [batchDate, setBatchDate] = useState(''); 
   const [allStudentsData, setAllStudentsData] = useState([]); 
   const [cachedClassData, setCachedClassData] = useState([]); 
   const [sortByPR, setSortByPR] = useState(false);
+  const [sortByProb, setSortByProb] = useState(false);
     
   const [loading, setLoading] = useState(false);
   const [searchId, setSearchId] = useState('');
@@ -332,55 +340,165 @@ export default function App() {
   const [searchError, setSearchError] = useState('');
   const [activeTab, setActiveTab] = useState('total');
   
-  // Fix 1: Default to 'mock' phase for parents
   const [activePhase, setActivePhase] = useState('mock');
 
   const [statsModalData, setStatsModalData] = useState(null);
   const [statsActiveTab, setStatsActiveTab] = useState('total');
 
+  // --- OPTIMIZATION: State for probabilities to debounce updates ---
+  const [admissionProbabilities, setAdmissionProbabilities] = useState({});
+
   const [xlsxLoaded, setXlsxLoaded] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
 
-  // Check auth state on mount
   useEffect(() => {
       const storedAuth = localStorage.getItem('teacher_auth');
       if (storedAuth === 'true') setIsAuthenticated(true);
   }, []);
 
-  // --- Logic to check if student has prior history (P1 or P2) ---
   const hasPriorHistory = useMemo(() => {
       if (!viewData || !viewData.chartData) return true;
       const sortedAllDates = [...availableDates].sort(customDateSort);
       return viewData.chartData.some(d => {
-          // Check if date is in available dates list (mapped by weekend ID)
           const weekendID = getWeekendID(d.date);
           const idx = sortedAllDates.indexOf(weekendID);
           return idx >= 0 && idx < 36;
       });
   }, [viewData, availableDates]);
 
-  // Fix 1: Logic to prefer Mock phase when opening parent view
+  // --- OPTIMIZATION: Debounced Calculation Effect ---
+  // This moves the heavy O(N^2) or O(N*M) calculation out of the render cycle
+  useEffect(() => {
+      if (allStudentsData.length === 0) return;
+
+      const timer = setTimeout(() => {
+          // 1. Prepare ranking lists
+          const scoresByDate = {}; 
+          const mathScoresByDate = {}; 
+          
+          availableDates.forEach(d => {
+              scoresByDate[d] = [];
+              mathScoresByDate[d] = [];
+          });
+          
+          // Build Score Arrays
+          allStudentsData.forEach(s => {
+              if (!s.grades) return;
+              Object.entries(s.grades).forEach(([date, g]) => {
+                  const weekendID = getWeekendID(date);
+                  if (g.total && !isNaN(parseFloat(g.total))) {
+                      if (!scoresByDate[weekendID]) scoresByDate[weekendID] = [];
+                      scoresByDate[weekendID].push(parseFloat(g.total));
+                  }
+                  if (g.math && !isNaN(parseFloat(g.math))) {
+                      if (!mathScoresByDate[weekendID]) mathScoresByDate[weekendID] = [];
+                      mathScoresByDate[weekendID].push(parseFloat(g.math));
+                  }
+              });
+          });
+
+          // Sort scores for ranking
+          Object.keys(scoresByDate).forEach(d => scoresByDate[d].sort((a, b) => b - a));
+          Object.keys(mathScoresByDate).forEach(d => mathScoresByDate[d].sort((a, b) => b - a));
+
+          // 2. Pre-process student grades into fast lookup maps
+          const studentGradeMaps = {};
+          allStudentsData.forEach(s => {
+              if (!s.grades) return;
+              const map = {};
+              Object.entries(s.grades).forEach(([date, g]) => {
+                  map[getWeekendID(date)] = g;
+              });
+              studentGradeMaps[s.id] = map;
+          });
+
+          const probs = {};
+          
+          // 3. Calculate probs using fast lookups
+          allStudentsData.forEach(s => {
+              let weightedPRSum = 0;
+              let totalWeight = 0;
+              let mathPRSum = 0;
+              let mathWeight = 0;
+              
+              const myGrades = studentGradeMaps[s.id] || {};
+
+              availableDates.forEach((date, index) => {
+                  const weekendID = getWeekendID(date);
+                  
+                  // Fast Map Lookup
+                  const grade = myGrades[weekendID];
+                  let myTotal = null;
+                  let myMath = null;
+
+                  if (grade) {
+                      myTotal = parseFloat(grade.total);
+                      myMath = parseFloat(grade.math);
+                  }
+                  
+                  if (myTotal !== null && !isNaN(myTotal) && scoresByDate[weekendID] && scoresByDate[weekendID].length >= 5) {
+                      const scores = scoresByDate[weekendID];
+                      // Use binary search or simpler approximation if needed, but indexOf is okay for < 500
+                      const rank = scores.indexOf(myTotal) + 1;
+                      const pr = Math.floor(((scores.length - rank) / scores.length) * 100);
+                      
+                      // Weighting logic
+                      const isMock = index >= 36 || date.includes('09/29') || weekendID.includes('09/29') || date.includes('12/20') || weekendID.includes('12/20'); 
+                      const weight = isMock ? 2.5 : 1; 
+                      
+                      weightedPRSum += pr * weight;
+                      totalWeight += weight;
+                  }
+
+                  if (myMath !== null && !isNaN(myMath) && mathScoresByDate[weekendID] && mathScoresByDate[weekendID].length >= 5) {
+                      const scores = mathScoresByDate[weekendID];
+                      const rank = scores.indexOf(myMath) + 1;
+                      const pr = Math.floor(((scores.length - rank) / scores.length) * 100);
+                      mathPRSum += pr;
+                      mathWeight++;
+                  }
+              });
+
+              if (totalWeight === 0) {
+                  probs[s.id] = '-';
+              } else {
+                  const avgPR = weightedPRSum / totalWeight;
+                  const avgMathPR = mathWeight > 0 ? mathPRSum / mathWeight : 0;
+                  
+                  let prob = 0;
+                  if (avgPR < 52) {
+                      prob = Math.pow(avgPR / 52, 1.5) * 50;
+                  } else {
+                      prob = 50 + ((avgPR - 52) / 48) * 49;
+                  }
+                  
+                  if (avgMathPR > 80) prob += 4;
+                  else if (avgMathPR > 60) prob += 2;
+                  
+                  probs[s.id] = Math.min(99, Math.max(1, prob.toFixed(0)));
+              }
+          });
+          
+          setAdmissionProbabilities(probs);
+      }, 500); // 500ms delay to prevent blocking typing
+
+      return () => clearTimeout(timer);
+  }, [allStudentsData, availableDates]);
+
   useEffect(() => {
       if (mode === 'parent' && viewData) {
           setActivePhase('mock'); 
       }
   }, [viewData, mode]);
 
-  // --- CRITICAL FIX: Reset viewData when entering parent mode to prevent black screen from old state ---
-  // Also forcing reset via button click to be double sure
-  useEffect(() => {
-      if (mode === 'parent') {
-          setViewData(null);
-          setSearchError('');
-      }
-  }, [mode]);
+  // Removed problematic useEffect that cleared viewData on every mode change causing blank screen
+  // Instead, handle reset in the click handlers directly
 
   useEffect(() => {
     const checkTime = () => {
       const now = new Date();
       const hour = now.getHours();
       const min = now.getMinutes();
-      // Fix 3: Dark mode starts at 17:30
       if (hour > 17 || (hour === 17 && min >= 30) || hour < 6) {
           setDarkMode(true);
       } else {
@@ -422,7 +540,6 @@ export default function App() {
       if (availableDates.length > 0 && !batchDate) setBatchDate(availableDates[availableDates.length - 1]);
   }, [availableDates]);
 
-  // --- Logic Helpers ---
   const loadDates = async () => {
       if (!db) return;
       try {
@@ -437,12 +554,10 @@ export default function App() {
       } catch(e) { console.error("Error loading dates:", e); }
   };
 
-  // --- Security Wrapper ---
   const executeWithSecurity = (action) => {
       setPendingAction(() => action);
       setSecurityInput('');
       setShowSecurityModal(true);
-      // Timeout to focus input after render
       setTimeout(() => {
           if (securityInputRef.current) securityInputRef.current.focus();
       }, 100);
@@ -458,7 +573,6 @@ export default function App() {
           setSecurityInput('');
       }
   };
-  // ------------------------
 
   const addDate = async () => {
       if (!newDateInput || availableDates.includes(newDateInput)) return;
@@ -469,26 +583,20 @@ export default function App() {
       setStatusMsg(`已新增: ${newDateInput}`); setTimeout(() => setStatusMsg(''), 2000);
   };
 
-  // --- Revised Average Calculation (Groups by Class) ---
   const localComputedAverages = useMemo(() => {
       const avgs = {};
       const validClassKeys = CLASS_DEFS.map(c => c.id);
       
       availableDates.forEach(date => {
           const groups = {};
-          // Initialize for all known classes
           CLASS_DEFS.forEach(c => {
               groups[c.id] = { t:0, c:0, e:0, m:0, count:0 };
           });
-          // Also track 'all' implicitly (Weekend Group)
           groups['all'] = { t:0, c:0, e:0, m:0, count:0 };
           
-          // Use Weekend ID for grouping
           const currentWeekendID = getWeekendID(date);
 
           allStudentsData.forEach(s => {
-             // Look through ALL student grades, not just 'date' key
-             // Because Sunday students will have data on Sunday date, but belong to this 'date' (Saturday) group
              Object.keys(s.grades || {}).forEach(gradeDate => {
                  if (getWeekendID(gradeDate) === currentWeekendID) {
                       const grades = s.grades[gradeDate];
@@ -501,7 +609,6 @@ export default function App() {
                       if (!validClassKeys.includes(studentClass)) studentClass = 'A班';
 
                       if (grades.total !== '' && total > 0) {
-                          // Standard Class Average (Class Specific)
                           if (groups[studentClass]) {
                               groups[studentClass].t += total;
                               groups[studentClass].m += math;
@@ -509,7 +616,6 @@ export default function App() {
                               groups[studentClass].c += chi;
                               groups[studentClass].count++;
                           }
-                          // Global Average (Weekend Group) - Though currently not used for display, good for data
                           groups['all'].t += total;
                           groups['all'].m += math;
                           groups['all'].e += eng;
@@ -542,13 +648,10 @@ export default function App() {
           const docSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'class_averages_v18'));
           let dbAverages = {};
           if (docSnap.exists()) dbAverages = docSnap.data().averages || {};
-          // Merge local computed with potential db overrides
           setClassAverages({ ...localComputedAverages, ...dbAverages });
       } catch (e) { setClassAverages(localComputedAverages); }
   };
 
-  // Fix: Only sync local averages to state if we actually have student data to compute from.
-  // Otherwise, we risk overwriting fetched DB averages with zeros on page load (parent mode).
   useEffect(() => {
       if (allStudentsData.length > 0) {
           setClassAverages(prev => ({ ...prev, ...localComputedAverages }));
@@ -590,7 +693,6 @@ export default function App() {
   };
 
   const handleLoginSubmit = () => {
-      // Use Base64 encoding to verify password without storing plaintext
       const inputEncoded = btoa(passwordInput);
       if (ENCODED_PASSWORDS.includes(inputEncoded)) { 
           setIsAuthenticated(true); localStorage.setItem('teacher_auth', 'true'); setMode('teacher'); loadAllStudents();
@@ -624,13 +726,9 @@ export default function App() {
       Object.keys(grades).forEach(date => {
           const g = grades[date];
           let normalizedG;
-          // Handle potential legacy array format
           if (Array.isArray(g)) { normalizedG = { math: g[0]||0, eng: g[1]||0, chi: g[2]||0, total: (g[0]||0)+(g[1]||0)+(g[2]||0), class: 'A班' }; } 
           else { normalizedG = { ...g }; }
-          
-          // MIGRATION LOGIC: Default to A班 if no class is set
           if (!normalizedG.class) normalizedG.class = 'A班';
-          
           normalized[date] = normalizedG;
       });
       return normalized;
@@ -648,12 +746,9 @@ export default function App() {
       if (data) {
         setCurrentStudentId(data.id); setStudentName(data.name);
         let loadedGrades = data.grades || {};
-        // Use weekend IDs (Sat) to init grades for teacher view
         availableDates.forEach(d => { 
-             // Find if student has grade in this weekend
              const weekendID = getWeekendID(d);
              const existingGradeKey = Object.keys(loadedGrades).find(k => getWeekendID(k) === weekendID);
-             
              if (!existingGradeKey) {
                  loadedGrades[d] = { chi: '', eng: '', math: '', total: '', class: 'A班' }; 
              }
@@ -684,29 +779,19 @@ export default function App() {
     });
   };
 
-  // Performance optimized callback
   const handleBatchGradeChange = useCallback((studentId, subject, value) => {
       setAllStudentsData(prev => prev.map(s => {
           if (s.id !== studentId) return s;
           const currentGrades = s.grades || {};
-          
-          // Logic to find if student has a grade record for this weekend batch
-          // We use batchDate (which is the Saturday/Start ID) to find the record
           let targetDate = batchDate;
           const existingKey = Object.keys(currentGrades).find(k => getWeekendID(k) === getWeekendID(batchDate));
-          
-          if (existingKey) {
-             targetDate = existingKey;
-          } else {
-             // NEW: If creating new entry, check class filter.
-             // If filter is Sunday class, use Sunday date.
+          if (existingKey) targetDate = existingKey;
+          else {
              if (teacherClassFilter === '日A班' || teacherClassFilter === '日B班') {
                  targetDate = getSundayDate(batchDate);
              }
           }
-
           const currentDateGrades = currentGrades[targetDate] || { chi: '', eng: '', math: '', total: '', class: teacherClassFilter }; 
-          
           let updatedDateGrades;
           if (subject === 'class') {
               updatedDateGrades = { ...currentDateGrades, class: value };
@@ -718,7 +803,6 @@ export default function App() {
                   subject==='math'?value:updatedDateGrades.math
               );
           }
-          
           return { ...s, grades: { ...currentGrades, [targetDate]: updatedDateGrades } };
       }));
   }, [batchDate, teacherClassFilter]); 
@@ -739,11 +823,9 @@ export default function App() {
         let headerRowIndex = -1;
         const colMap = { id: -1, name: -1, date: -1, chi: -1, eng: -1, math: -1, class: -1 };
 
-        // 強化版表頭偵測
         for (let i = 0; i < Math.min(data.length, 10); i++) {
             const row = data[i];
             const rowStr = row.map(c => String(c).trim());
-            // 只要包含其中一個關鍵字就認定為表頭
             if (rowStr.some(c => c.includes('學號') || c.includes('ID') || c.includes('姓名') || c.includes('Name'))) {
                 headerRowIndex = i;
                 rowStr.forEach((cell, idx) => {
@@ -768,7 +850,7 @@ export default function App() {
         const newDates = new Set(availableDates);
         let importCount = 0;
         let lastImportedDate = '';
-        let hasError = false; // Flag for validation error
+        let hasError = false; 
 
         for (let i = headerRowIndex + 1; i < data.length; i++) {
           const row = data[i];
@@ -776,7 +858,6 @@ export default function App() {
           
           const rawId = String(row[colMap.id]).toUpperCase().trim();
           
-          // Strict ID Validation: Must contain numbers, max 10 chars (simple check)
           if (rawId.length > 15 || !/\d/.test(rawId)) {
                alert(`匯入失敗：第 ${i+1} 列學號格式錯誤 (${rawId})`);
                hasError = true;
@@ -785,27 +866,19 @@ export default function App() {
 
           const rawName = colMap.name !== -1 && row[colMap.name] ? String(row[colMap.name]).trim() : '';
           
-          // --- 日期格式嚴格標準化 START ---
           let dateStr = '';
           if (colMap.date !== -1 && row[colMap.date]) {
                const rawDate = row[colMap.date];
                let dString = String(rawDate).trim();
-               
-               // 1. 處理Excel數值型日期 (例如 45395) - 略過不處理，假設是字串
-               // 2. 處理常見符號
                dString = dString.replace(/\./g, '/').replace(/-/g, '/');
-               
-               // 3. 補零邏輯
                const parts = dString.split('/');
                if (parts.length >= 2) {
-                   // 格式: 1/3, 01/3, 2025/1/3
                    const m = parseInt(parts[parts.length - 2], 10);
                    const d = parseInt(parts[parts.length - 1], 10);
                    if (!isNaN(m) && !isNaN(d)) {
                        dateStr = `${String(m).padStart(2, '0')}/${String(d).padStart(2, '0')}`;
                    }
                } else if (dString.length === 3 || dString.length === 4) {
-                   // 格式: 412, 0412
                    const m = dString.length === 3 ? dString.slice(0,1) : dString.slice(0,2);
                    const d = dString.slice(-2);
                    dateStr = `${String(m).padStart(2, '0')}/${String(d).padStart(2, '0')}`;
@@ -813,35 +886,29 @@ export default function App() {
                    dateStr = dString; 
                }
           }
-          // --- 日期格式嚴格標準化 END ---
 
-          // Strict Date Validation: If date column exists but parsing failed, abort!
           if (colMap.date !== -1 && row[colMap.date] && (!dateStr || !dateStr.includes('/'))) {
               alert(`匯入失敗：第 ${i+1} 列日期格式錯誤`);
               hasError = true;
               break;
           }
 
-          if (!dateStr || !dateStr.includes('/')) continue; // 跳過無效日期
+          if (!dateStr || !dateStr.includes('/')) continue; 
 
-          // 讀取分數
           const getVal = (idx) => (idx !== -1 && row[idx] !== undefined && row[idx] !== null) ? String(row[idx]).trim() : '';
           const chi = getVal(colMap.chi);
           const eng = getVal(colMap.eng);
           const math = getVal(colMap.math);
           
-          // --- 班級格式嚴格標準化 START ---
           let className = (colMap.class !== -1 && row[colMap.class]) ? String(row[colMap.class]).trim() : 'A班';
           if (/^[a-zA-Z]$/.test(className)) className = className.toUpperCase() + '班';
           else if (className === '日A' || className === '日B') className = className + '班';
           else if (className.includes('A') && !className.includes('班') && !className.includes('日')) className = className + '班';
           else if (className.includes('B') && !className.includes('班') && !className.includes('日')) className = className + '班';
           else if (className.includes('C') && !className.includes('班') && !className.includes('日')) className = className + '班';
-          // --- 班級格式嚴格標準化 END ---
 
-          // WEEKEND GROUP LOGIC (NEW): Normalize date to Saturday for storage key check, BUT store actual date
           const weekendID = getWeekendID(dateStr);
-          if (!newDates.has(weekendID)) newDates.add(weekendID); // Ensure Saturday date is in available list
+          if (!newDates.has(weekendID)) newDates.add(weekendID); 
           
           lastImportedDate = weekendID;
 
@@ -853,7 +920,6 @@ export default function App() {
               student.name = rawName;
           }
           
-          // Store Grade with ACTUAL date from Excel
           student.grades[dateStr] = {
               chi: chi, 
               eng: eng, 
@@ -866,12 +932,12 @@ export default function App() {
 
         if (hasError) {
              setStatusMsg("匯入已取消");
-             return; // Abort everything
+             return; 
         }
 
         const sortedDates = Array.from(newDates).sort(customDateSort);
         setAvailableDates(sortedDates);
-        if (lastImportedDate) setBatchDate(lastImportedDate); // 自動切換到剛匯入的日期
+        if (lastImportedDate) setBatchDate(lastImportedDate); 
         else if (sortedDates.length > 0 && !batchDate) setBatchDate(sortedDates[sortedDates.length - 1]);
         
         if (db) setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: sortedDates }, { merge: true });
@@ -1068,9 +1134,7 @@ export default function App() {
     if (!user || !searchId.trim()) return;
     setSearchError(''); setViewData(null); setLoading(true);
     try {
-      // 確保日期列表是最新的，避免查詢時資料對不上
       await loadDates(); 
-      
       let data = null;
       let fullClassData = [];
       if (db) {
@@ -1091,28 +1155,21 @@ export default function App() {
         const allChartData = [];
         const sortedDates = [...availableDates].sort(customDateSort); 
         for (const date of sortedDates) {
-          // Weekend Group Logic for Parent View
           const weekendID = getWeekendID(date);
           const weekData = (data.grades && data.grades[date]) ? data.grades[date] : 
                            (data.grades && data.grades[weekendID]) ? data.grades[weekendID] : null;
 
           const weekClass = weekData ? (weekData.class || 'A班') : 'A班';
           
-          // Get average specific to that class for the weekend group (stored under Saturday key)
           const avgData = (classAverages[weekendID] && classAverages[weekendID][weekClass]) ? classAverages[weekendID][weekClass] : {};
           
           if (weekData && weekData.total) {
              const t = parseFloat(weekData.total);
              if (!isNaN(t) && t > 0) {
-                 
-                 // Display Date Logic
-                 let displayDate = weekendID; // Default to Saturday/Start date
-                 
-                 // If Sunday Class, FORCE display date to Sunday
+                 let displayDate = weekendID;
                  if (weekClass === '日A班' || weekClass === '日B班') {
                      displayDate = getSundayDate(weekendID);
                  } 
-                 
                  allChartData.push({
                      date: displayDate, 
                      total: t, chi: parseFloat(weekData.chi)||0, eng: parseFloat(weekData.eng)||0, math: parseFloat(weekData.math)||0,
@@ -1144,11 +1201,9 @@ export default function App() {
       if (isNaN(myVal)) return '-';
       
       const targetClass = myClass || 'A班';
-      // Grouping Logic: find students in same weekend group but SPECIFIC class
       const currentWeekendID = getWeekendID(date);
 
       const comparisonSet = cachedClassData.filter(s => {
-          // Iterate through student's grades to find if they have a grade in this weekend group
           return Object.keys(s.grades || {}).some(gradeDate => {
              if (getWeekendID(gradeDate) !== currentWeekendID) return false;
              const g = s.grades[gradeDate];
@@ -1157,7 +1212,6 @@ export default function App() {
       });
 
       const scores = comparisonSet.map(s => {
-           // Find the specific grade entry for this weekend group
            const entryDate = Object.keys(s.grades || {}).find(gradeDate => getWeekendID(gradeDate) === currentWeekendID);
            if (!entryDate) return null;
            const g = s.grades[entryDate];
@@ -1177,7 +1231,6 @@ export default function App() {
 
       const currentWeekendID = getWeekendID(date);
 
-      // Get all scores for this weekend group across ALL classes (Sat + Sun + All Classes)
       const scores = cachedClassData.map(s => {
            const entryDate = Object.keys(s.grades || {}).find(gradeDate => getWeekendID(gradeDate) === currentWeekendID);
            if (!entryDate) return null;
@@ -1188,7 +1241,6 @@ export default function App() {
 
       if (scores.length < 100) return null;
 
-      // Sort descending
       scores.sort((a, b) => b - a);
       const rank = scores.indexOf(myVal) + 1;
       const total = scores.length;
@@ -1248,11 +1300,8 @@ export default function App() {
       return buckets.map(b => ({ range: b.label, count: b.count, isMyRange: b.isMyRange }));
   };
 
-  // Helper to compute PR for batch view
-  // Uses allStudentsData (current state)
   const getBatchStudentPR = (student, batchDate) => {
       if (!student.grades) return '-';
-      // Find grade record for this weekend group
       const currentWeekendID = getWeekendID(batchDate);
       let targetDate = batchDate;
       const existingKey = Object.keys(student.grades).find(k => getWeekendID(k) === currentWeekendID);
@@ -1263,7 +1312,6 @@ export default function App() {
       const myVal = parseFloat(g.total);
       if (isNaN(myVal)) return '-';
 
-      // Collect all scores for this weekend from all students
       const allScores = [];
       allStudentsData.forEach(s => {
           if (!s.grades) return;
@@ -1300,14 +1348,12 @@ export default function App() {
 
   return (
     <div className={`min-h-screen font-sans antialiased transition-colors duration-500 ease-in-out pb-32 relative overflow-x-hidden ${darkMode ? 'bg-gradient-to-br from-[#020617] via-[#1e293b] to-[#020617] text-slate-200' : 'bg-gradient-to-br from-emerald-100 via-slate-50 to-emerald-100 text-slate-800'}`}>
-      {/* Texture Overlay */}
       <div className={`fixed inset-0 pointer-events-none z-0 ${darkMode ? 'opacity-30 mix-blend-overlay' : 'opacity-40'}`} style={{
           background: darkMode 
             ? 'radial-gradient(circle at 50% -20%, rgba(14, 165, 233, 0.15), transparent 50%), radial-gradient(circle at 100% 100%, rgba(16, 185, 129, 0.1), transparent 40%)' 
             : 'radial-gradient(circle at 0% 0%, rgba(52,211,153,0.15) 0%, transparent 50%), radial-gradient(circle at 100% 100%, rgba(99,102,241,0.05) 0%, transparent 40%)'
       }}></div>
 
-      {/* Header */}
       <header className={`fixed top-0 w-full backdrop-blur-2xl z-30 border-b transition-all duration-300 ${darkMode ? 'bg-[#0f172a]/70 border-white/5 shadow-[0_8px_32px_0_rgba(0,0,0,0.36)]' : 'bg-white/60 border-white/40 shadow-sm'}`}>
         <div className="max-w-4xl mx-auto px-6 h-16 flex justify-between items-center relative z-10">
           <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setMode('landing')}>
@@ -1340,7 +1386,6 @@ export default function App() {
             <div className={`p-5 rounded-full mb-6 shadow-2xl ring-1 backdrop-blur-3xl transition-transform duration-700 hover:scale-105 ${darkMode ? 'bg-[#0f172a]/40 border-white/10 shadow-emerald-500/20 ring-1 ring-emerald-500/20' : 'bg-white/60 border-white/60 shadow-[0_20px_40px_rgba(16,185,129,0.15)]'}`}>
                 <Sparkles className={`w-10 h-10 ${darkMode ? 'text-emerald-400 drop-shadow-[0_0_15px_rgba(52,211,153,0.5)]' : 'text-emerald-600'}`} />
             </div>
-            {/* Slogan with matching serif font and consistent gradient */}
             <h2 className={`text-xl md:text-3xl font-black font-serif tracking-tighter mb-4 text-center py-6 px-4 leading-normal bg-clip-text text-transparent bg-gradient-to-r ${darkMode ? 'from-emerald-300 via-teal-200 to-cyan-300 drop-shadow-sm' : 'from-emerald-800 via-teal-700 to-slate-700'}`}>Make Progress Visible</h2>
             <p className="text-slate-400 text-xs font-medium tracking-wide mb-6">2025-2026 Learning Journey</p>
             <ExamCountdown isDarkMode={darkMode} />
@@ -1428,6 +1473,9 @@ export default function App() {
                                 <button onClick={() => setSortByPR(!sortByPR)} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByPR ? 'bg-purple-600 text-white shadow-purple-500/30' : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
                                     <ArrowDownWideNarrow className="w-3.5 h-3.5" /> PR排序
                                 </button>
+                                <button onClick={() => setSortByProb(!sortByProb)} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByProb ? 'bg-emerald-600 text-white shadow-emerald-500/30' : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
+                                    <Percent className="w-3.5 h-3.5" /> 機率排序
+                                </button>
                                 <button onClick={handleSaveBatchGrades} className="bg-emerald-600 text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-md shadow-emerald-600/20 hover:bg-emerald-500 transition-all active:scale-[0.98] flex items-center gap-1"><Save className="w-3.5 h-3.5"/> 儲存</button>
                             </div>
                         </div>
@@ -1453,6 +1501,7 @@ export default function App() {
                                         <th className="px-2 py-3 text-center text-blue-500">數學</th>
                                         <th className="px-2 py-3 text-center font-bold text-emerald-500">總分</th>
                                         <th className="px-2 py-3 text-center font-bold text-purple-500">PR</th>
+                                        <th className="px-2 py-3 text-center font-bold text-slate-500">錄取機率</th>
                                     </tr>
                                 </thead>
                                 <tbody className={`divide-y ${darkMode ? 'divide-slate-800' : 'divide-slate-100'}`}>
@@ -1480,6 +1529,12 @@ export default function App() {
                                                 const valB = prB === '-' ? -1 : prB;
                                                 return valB - valA;
                                             });
+                                        } else if (sortByProb) {
+                                            displayedStudents.sort((a, b) => {
+                                                const probA = admissionProbabilities[a.id] === '-' ? -1 : admissionProbabilities[a.id];
+                                                const probB = admissionProbabilities[b.id] === '-' ? -1 : admissionProbabilities[b.id];
+                                                return probB - probA;
+                                            });
                                         }
 
                                         return displayedStudents.map((student, sIndex) => {
@@ -1492,6 +1547,7 @@ export default function App() {
 
                                             const dateGrades = student.grades?.[targetDate] || { chi: '', eng: '', math: '', total: '', class: 'A班' };
                                             const prVal = getBatchStudentPR(student, batchDate);
+                                            const probVal = admissionProbabilities[student.id] || '-';
 
                                             return (
                                             <BatchRow 
@@ -1501,6 +1557,7 @@ export default function App() {
                                                 batchDate={batchDate} 
                                                 dateGrades={dateGrades} 
                                                 prValue={prVal}
+                                                probValue={probVal}
                                                 darkMode={darkMode} 
                                                 handleBatchGradeChange={handleBatchGradeChange} 
                                                 handleKeyDown={handleKeyDown} 
@@ -1514,8 +1571,10 @@ export default function App() {
                     </div>
                 )}
             </div>
+            {/* ... other modals ... */}
             {statusMsg && <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/90 text-white px-5 py-3 rounded-full flex items-center text-xs font-bold shadow-2xl backdrop-blur-md z-50 border border-white/10"><Check className="w-4 h-4 mr-2 text-emerald-400" /> {statusMsg}</div>}
               
+            {/* ... Single View ... */}
             {teacherViewMode === 'single' && currentStudentId && !loading && (
               <div className={`rounded-[2rem] shadow-2xl border overflow-hidden backdrop-blur-md ${darkMode ? 'bg-[#0f172a]/70 border-white/10 ring-1 ring-white/5' : 'bg-white/80 border-white/60'}`}>
                 <div className={`p-6 border-b flex justify-between items-center ${darkMode ? 'border-white/5 bg-[#0f172a]/50' : 'border-slate-50 bg-white/50'}`}>
@@ -1571,8 +1630,8 @@ export default function App() {
           </div>
         )}
 
+        {/* ... Parent View ... */}
         {mode === 'parent' && (
-          // 移除所有可能導致黑屏的動畫 class
           <div className="max-w-md mx-auto space-y-6 pt-10"> 
             {!viewData && (
             <div className={`backdrop-blur-2xl p-8 rounded-[2.5rem] shadow-2xl border text-center relative overflow-hidden ${darkMode ? 'bg-[#0f172a]/70 border-white/10 shadow-black/40 ring-1 ring-white/5' : 'bg-white/70 border-white/60 shadow-[0_20px_50px_rgba(16,185,129,0.1)]'}`}>
@@ -1625,13 +1684,9 @@ export default function App() {
 
                   {(() => {
                       const filteredData = getPhaseData(viewData.chartData);
-                      
-                      // Determine max score for the current view to set Y-axis domain
                       let maxDomain = 100;
                       if (activeTab === 'total') maxDomain = 300;
                       else if (activeTab === 'math' && activePhase === 'mock') maxDomain = 120;
-                      
-                      // Specific domain for English in Mock phase
                       const engDomain = activePhase === 'mock' ? [0, 80] : [0, 100];
                       
                       return (
@@ -1659,7 +1714,6 @@ export default function App() {
                                             <span className="text-sm font-bold text-slate-400 font-mono">{d.date}</span>
                                             {d.class && <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold opacity-60 ${darkMode ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-600'}`}>{d.class}</span>}
                                         </div>
-                                        {/* ENHANCED BUTTON */}
                                         <button onClick={() => openStatsModal(d.date, { total: d.total, chi: d.chi, eng: d.eng, math: d.math }, d.class)} className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all hover:scale-105 active:scale-95 shadow-md shadow-slate-200/50 dark:shadow-none bg-slate-700 text-white hover:bg-slate-600 border border-white/10`}>
                                             <BarChart2 className="w-3.5 h-3.5" /> 
                                             查看落點分析

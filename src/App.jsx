@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell } from 'recharts';
-import { Search, Save, Plus, Check, BarChart3, X, Lock, LayoutDashboard, GraduationCap, Calendar, Clipboard, LogOut, AlertTriangle, UserPlus, Sparkles, Edit3, Trash2, Trophy, Target, FileSpreadsheet, Moon, Sun, ChevronRight, ArrowLeft, PieChart, Users, BarChart2, ShieldCheck } from 'lucide-react';
+import { Search, Save, Plus, Check, BarChart3, X, Lock, LayoutDashboard, GraduationCap, Calendar, Clipboard, LogOut, AlertTriangle, UserPlus, Sparkles, Edit3, Trash2, Trophy, Target, FileSpreadsheet, Moon, Sun, ChevronRight, ArrowLeft, PieChart, Users, BarChart2, ShieldCheck, ArrowDownWideNarrow } from 'lucide-react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc } from 'firebase/firestore';
 
 // --- Global Constants ---
-const DEFAULT_EXAM_DATES = [
+// 這些是考試的「起始日」(通常是週六)
+const DEFAULT_EXAM_STARTS = [
   "04/12", "04/19", "04/26", "05/03", "05/10", "05/17", "05/24", "06/07", "06/14",
   "06/21", "06/28", "06/29", "07/12", "07/19", "07/21", "07/26", "08/02", "08/09", 
   "08/16", "08/30", "09/06", "09/13", "09/20", "09/27", "09/29", "10/04", 
@@ -78,6 +79,58 @@ const customDateSort = (a, b) => {
     } catch (e) { return 0; }
 };
 
+// ** NEW CORE LOGIC **: Normalize dates to group Saturday/Sunday together (Weekend ID)
+const getWeekendID = (dateStr) => {
+    if (!dateStr || !dateStr.includes('/')) return dateStr;
+    try {
+        const [mStr, dStr] = dateStr.split('/');
+        const m = parseInt(mStr, 10);
+        const d = parseInt(dStr, 10);
+        const y = m >= 4 ? 2025 : 2026; 
+        const dateObj = new Date(y, m - 1, d);
+        const dayOfWeek = dateObj.getDay(); // 0 = Sun
+        
+        if (dayOfWeek === 0) { // Sunday -> move back to Saturday
+            const satDate = new Date(dateObj);
+            satDate.setDate(dateObj.getDate() - 1);
+            return `${String(satDate.getMonth() + 1).padStart(2, '0')}/${String(satDate.getDate()).padStart(2, '0')}`;
+        }
+        return dateStr;
+    } catch (e) { return dateStr; }
+};
+
+// ** NEW CORE LOGIC **: Calculate Sunday date from a Saturday string
+const getSundayDate = (satDateStr) => {
+    try {
+        const [mStr, dStr] = satDateStr.split('/');
+        const m = parseInt(mStr, 10);
+        const d = parseInt(dStr, 10);
+        const y = m >= 4 ? 2025 : 2026;
+        const dateObj = new Date(y, m - 1, d);
+        dateObj.setDate(dateObj.getDate() + 1); // Add 1 day
+        return `${String(dateObj.getMonth() + 1).padStart(2, '0')}/${String(dateObj.getDate()).padStart(2, '0')}`;
+    } catch(e) { return satDateStr; }
+}
+
+// ** NEW CORE LOGIC **: Display Label for Weekend (e.g. "01/03-04")
+const getWeekendDisplayLabel = (dateStr) => {
+    const satID = getWeekendID(dateStr); // Ensure we start from Saturday
+    if (!satID || !satID.includes('/')) return dateStr;
+    try {
+        const [mStr, dStr] = satID.split('/');
+        const m = parseInt(mStr, 10);
+        const d = parseInt(dStr, 10);
+        const y = m >= 4 ? 2025 : 2026;
+        const dateObj = new Date(y, m - 1, d);
+        
+        const sunDate = new Date(dateObj);
+        sunDate.setDate(dateObj.getDate() + 1);
+        const sunD = String(sunDate.getDate()).padStart(2, '0');
+        
+        return `${String(m).padStart(2,'0')}/${String(d).padStart(2,'0')}-${sunD}`;
+    } catch (e) { return dateStr; }
+};
+
 const PHASES = [
     { id: 'p1', name: '第一階段', range: [0, 18] },
     { id: 'p2', name: '第二階段', range: [18, 36] },
@@ -134,14 +187,13 @@ const SingleSubjectChart = ({ data, subjectKey, avgKey, colorKey, title, domain,
                   <Tooltip 
                       contentStyle={{ 
                           borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)', 
-                          boxShadow: '0 10px 40px -10px rgba(0,0,0,0.5)', 
+                          boxShadow: isDarkMode ? '0 10px 40px -10px rgba(0,0,0,0.5)' : '0 20px 25px -5px rgba(0, 0, 0, 0.1)', 
                           padding: '12px 16px', fontSize: '13px', fontWeight: '500',
                           backgroundColor: isDarkMode ? 'rgba(30, 41, 59, 0.95)' : 'rgba(255, 255, 255, 0.95)',
                           color: isDarkMode ? '#f8fafc' : '#1e293b'
                       }} 
                   />
                   <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: '12px', fontWeight: 500, color: isDarkMode ? '#94a3b8' : '#475569' }}/>
-                  {/* Added connectNulls={true} to ensure the average line is drawn even if there are gaps */}
                   <Line name="班平均" type="monotone" dataKey={avgKey} stroke="#94a3b8" strokeWidth={2} strokeOpacity={0.6} dot={false} activeDot={{ r: 4, fill: '#94a3b8', stroke: 'none' }} isAnimationActive={false} connectNulls={true} />
                   <Line name={title} type="monotone" dataKey={subjectKey} stroke={COLORS[colorKey].hex} strokeWidth={3} activeDot={{ r: 6, strokeWidth: 0 }} isAnimationActive={true} animationDuration={1500} connectNulls={true} />
               </LineChart>
@@ -169,7 +221,7 @@ const DistributionChart = ({ data, colorKey, isDarkMode }) => (
 );
 
 // --- Memoized Table Row Component for Performance ---
-const BatchRow = React.memo(({ student, sIndex, batchDate, dateGrades, darkMode, handleBatchGradeChange, handleKeyDown, handlePaste }) => {
+const BatchRow = React.memo(({ student, sIndex, batchDate, dateGrades, prValue, darkMode, handleBatchGradeChange, handleKeyDown, handlePaste }) => {
     return (
         <tr className={`${darkMode ? 'hover:bg-slate-800' : 'hover:bg-white/50'} transition-colors`}>
             <td className="px-3 py-2 text-xs font-bold text-slate-500">{sIndex + 1}</td>
@@ -199,6 +251,7 @@ const BatchRow = React.memo(({ student, sIndex, batchDate, dateGrades, darkMode,
                 </td>
             ))}
             <td className="px-1 py-1 text-center"><div className="text-sm font-bold text-emerald-500">{dateGrades.total}</div></td>
+            <td className="px-1 py-1 text-center"><div className={`text-xs font-bold ${darkMode ? 'text-purple-300' : 'text-purple-600'}`}>{prValue !== '-' ? prValue : ''}</div></td>
         </tr>
     );
 });
@@ -250,7 +303,7 @@ export default function App() {
   const [currentStudentId, setCurrentStudentId] = useState(null);
   const [grades, setGrades] = useState({});
   const [classAverages, setClassAverages] = useState({}); 
-  const [availableDates, setAvailableDates] = useState(DEFAULT_EXAM_DATES);
+  const [availableDates, setAvailableDates] = useState(DEFAULT_EXAM_STARTS);
   const [newDateInput, setNewDateInput] = useState('');
     
   const [statusMsg, setStatusMsg] = useState('');
@@ -269,9 +322,10 @@ export default function App() {
   const [teacherViewMode, setTeacherViewMode] = useState('single');
   const [teacherClassFilter, setTeacherClassFilter] = useState('A班'); // Default to A班
   const [avgSettingsClassFilter, setAvgSettingsClassFilter] = useState('A班'); // For Avg Modal
-  const [batchDate, setBatchDate] = useState('');
+  const [batchDate, setBatchDate] = useState(''); // This now stores the SATURDAY date ID
   const [allStudentsData, setAllStudentsData] = useState([]); 
   const [cachedClassData, setCachedClassData] = useState([]); 
+  const [sortByPR, setSortByPR] = useState(false);
     
   const [loading, setLoading] = useState(false);
   const [searchId, setSearchId] = useState('');
@@ -299,7 +353,9 @@ export default function App() {
       if (!viewData || !viewData.chartData) return true;
       const sortedAllDates = [...availableDates].sort(customDateSort);
       return viewData.chartData.some(d => {
-          const idx = sortedAllDates.indexOf(d.date);
+          // Check if date is in available dates list (mapped by weekend ID)
+          const weekendID = getWeekendID(d.date);
+          const idx = sortedAllDates.indexOf(weekendID);
           return idx >= 0 && idx < 36;
       });
   }, [viewData, availableDates]);
@@ -376,7 +432,7 @@ export default function App() {
               const loadedDates = docSnap.data().list.sort(customDateSort);
               setAvailableDates(loadedDates);
           } else {
-             const initialDates = [...DEFAULT_EXAM_DATES].sort(customDateSort);
+             const initialDates = [...DEFAULT_EXAM_STARTS].sort(customDateSort);
              setAvailableDates(initialDates);
           }
       } catch(e) { console.error("Error loading dates:", e); }
@@ -425,37 +481,44 @@ export default function App() {
           CLASS_DEFS.forEach(c => {
               groups[c.id] = { t:0, c:0, e:0, m:0, count:0 };
           });
-          // Also track 'all' implicitly
+          // Also track 'all' implicitly (Weekend Group)
           groups['all'] = { t:0, c:0, e:0, m:0, count:0 };
+          
+          // Use Weekend ID for grouping
+          const currentWeekendID = getWeekendID(date);
 
           allStudentsData.forEach(s => {
-              const grades = s.grades && s.grades[date];
-              if (grades) {
-                  const math = parseFloat(grades.math) || 0;
-                  const eng = parseFloat(grades.eng) || 0;
-                  const chi = parseFloat(grades.chi) || 0;
-                  const total = parseFloat(grades.total) || 0;
-                  // Use specific class or default to A班 if not set or invalid
-                  let studentClass = grades.class || 'A班'; 
-                  if (!validClassKeys.includes(studentClass)) studentClass = 'A班';
+             // Look through ALL student grades, not just 'date' key
+             // Because Sunday students will have data on Sunday date, but belong to this 'date' (Saturday) group
+             Object.keys(s.grades || {}).forEach(gradeDate => {
+                 if (getWeekendID(gradeDate) === currentWeekendID) {
+                      const grades = s.grades[gradeDate];
+                      const math = parseFloat(grades.math) || 0;
+                      const eng = parseFloat(grades.eng) || 0;
+                      const chi = parseFloat(grades.chi) || 0;
+                      const total = parseFloat(grades.total) || 0;
+                      
+                      let studentClass = grades.class || 'A班'; 
+                      if (!validClassKeys.includes(studentClass)) studentClass = 'A班';
 
-                  if (grades.total !== '' && total > 0) {
-                      // Add to class group
-                      if (groups[studentClass]) {
-                          groups[studentClass].t += total;
-                          groups[studentClass].m += math;
-                          groups[studentClass].e += eng;
-                          groups[studentClass].c += chi;
-                          groups[studentClass].count++;
+                      if (grades.total !== '' && total > 0) {
+                          // Standard Class Average (Class Specific)
+                          if (groups[studentClass]) {
+                              groups[studentClass].t += total;
+                              groups[studentClass].m += math;
+                              groups[studentClass].e += eng;
+                              groups[studentClass].c += chi;
+                              groups[studentClass].count++;
+                          }
+                          // Global Average (Weekend Group) - Though currently not used for display, good for data
+                          groups['all'].t += total;
+                          groups['all'].m += math;
+                          groups['all'].e += eng;
+                          groups['all'].c += chi;
+                          groups['all'].count++;
                       }
-                      // Add to global 'all' group
-                      groups['all'].t += total;
-                      groups['all'].m += math;
-                      groups['all'].e += eng;
-                      groups['all'].c += chi;
-                      groups['all'].count++;
-                  }
-              }
+                 }
+             });
           });
 
           avgs[date] = {};
@@ -592,7 +655,16 @@ export default function App() {
       if (data) {
         setCurrentStudentId(data.id); setStudentName(data.name);
         let loadedGrades = data.grades || {};
-        availableDates.forEach(d => { if (!loadedGrades[d]) loadedGrades[d] = { chi: '', eng: '', math: '', total: '', class: 'A班' }; }); // Default new dates to A班
+        // Use weekend IDs (Sat) to init grades for teacher view
+        availableDates.forEach(d => { 
+             // Find if student has grade in this weekend
+             const weekendID = getWeekendID(d);
+             const existingGradeKey = Object.keys(loadedGrades).find(k => getWeekendID(k) === weekendID);
+             
+             if (!existingGradeKey) {
+                 loadedGrades[d] = { chi: '', eng: '', math: '', total: '', class: 'A班' }; 
+             }
+        }); 
         setGrades(loadedGrades); setStatusMsg(`已載入：${data.name}`);
       } else {
         setCurrentStudentId(id); setStudentName('');
@@ -624,7 +696,23 @@ export default function App() {
       setAllStudentsData(prev => prev.map(s => {
           if (s.id !== studentId) return s;
           const currentGrades = s.grades || {};
-          const currentDateGrades = currentGrades[batchDate] || { chi: '', eng: '', math: '', total: '', class: 'A班' };
+          
+          // Logic to find if student has a grade record for this weekend batch
+          // We use batchDate (which is the Saturday/Start ID) to find the record
+          let targetDate = batchDate;
+          const existingKey = Object.keys(currentGrades).find(k => getWeekendID(k) === getWeekendID(batchDate));
+          
+          if (existingKey) {
+             targetDate = existingKey;
+          } else {
+             // NEW: If creating new entry, check class filter.
+             // If filter is Sunday class, use Sunday date.
+             if (teacherClassFilter === '日A班' || teacherClassFilter === '日B班') {
+                 targetDate = getSundayDate(batchDate);
+             }
+          }
+
+          const currentDateGrades = currentGrades[targetDate] || { chi: '', eng: '', math: '', total: '', class: teacherClassFilter }; 
           
           let updatedDateGrades;
           if (subject === 'class') {
@@ -638,9 +726,9 @@ export default function App() {
               );
           }
           
-          return { ...s, grades: { ...currentGrades, [batchDate]: updatedDateGrades } };
+          return { ...s, grades: { ...currentGrades, [targetDate]: updatedDateGrades } };
       }));
-  }, [batchDate]); // batchDate is dependency
+  }, [batchDate, teacherClassFilter]); 
 
   const handleExcelUpload = (e) => {
     if (!xlsxLoaded) { setStatusMsg("載入中，請稍後"); return; }
@@ -758,8 +846,11 @@ export default function App() {
           else if (className.includes('C') && !className.includes('班') && !className.includes('日')) className = className + '班';
           // --- 班級格式嚴格標準化 END ---
 
-          if (!newDates.has(dateStr)) newDates.add(dateStr);
-          lastImportedDate = dateStr;
+          // WEEKEND GROUP LOGIC (NEW): Normalize date to Saturday for storage key check, BUT store actual date
+          const weekendID = getWeekendID(dateStr);
+          if (!newDates.has(weekendID)) newDates.add(weekendID); // Ensure Saturday date is in available list
+          
+          lastImportedDate = weekendID;
 
           let student = newStudentsMap[rawId];
           if (!student) { 
@@ -769,6 +860,7 @@ export default function App() {
               student.name = rawName;
           }
           
+          // Store Grade with ACTUAL date from Excel
           student.grades[dateStr] = {
               chi: chi, 
               eng: eng, 
@@ -1005,18 +1097,31 @@ export default function App() {
         const allChartData = [];
         const sortedDates = [...availableDates].sort(customDateSort); 
         for (const date of sortedDates) {
-          const weekData = data.grades ? data.grades[date] : null;
-          // MIGRATION LOGIC: If student has data but no class, assume A班
+          // Weekend Group Logic for Parent View
+          const weekendID = getWeekendID(date);
+          const weekData = (data.grades && data.grades[date]) ? data.grades[date] : 
+                           (data.grades && data.grades[weekendID]) ? data.grades[weekendID] : null;
+
           const weekClass = weekData ? (weekData.class || 'A班') : 'A班';
           
-          // Get average specific to that class
-          const avgData = (classAverages[date] && classAverages[date][weekClass]) ? classAverages[date][weekClass] : {};
+          // Get average specific to that class for the weekend group (stored under Saturday key)
+          const avgData = (classAverages[weekendID] && classAverages[weekendID][weekClass]) ? classAverages[weekendID][weekClass] : {};
           
           if (weekData && weekData.total) {
              const t = parseFloat(weekData.total);
              if (!isNaN(t) && t > 0) {
+                 
+                 // Display Date Logic
+                 let displayDate = weekendID; // Default to Saturday/Start date
+                 
+                 // If Sunday Class, FORCE display date to Sunday
+                 if (weekClass === '日A班' || weekClass === '日B班') {
+                     displayDate = getSundayDate(weekendID);
+                 } 
+                 
                  allChartData.push({
-                     date, total: t, chi: parseFloat(weekData.chi)||0, eng: parseFloat(weekData.eng)||0, math: parseFloat(weekData.math)||0,
+                     date: displayDate, 
+                     total: t, chi: parseFloat(weekData.chi)||0, eng: parseFloat(weekData.eng)||0, math: parseFloat(weekData.math)||0,
                      avgTotal: parseFloat(avgData.total)||null, avgChi: parseFloat(avgData.chi)||null, avgEng: parseFloat(avgData.eng)||null, avgMath: parseFloat(avgData.math)||null,
                      class: weekClass
                  });
@@ -1036,7 +1141,7 @@ export default function App() {
       const [start, end] = currentPhaseConfig.range;
       const sortedAvailable = [...availableDates].sort(customDateSort);
       const targetDates = sortedAvailable.slice(start, end);
-      return fullData.filter(d => targetDates.includes(d.date));
+      return fullData.filter(d => targetDates.includes(getWeekendID(d.date)));
   };
 
   const calculateRank = (date, subject, myScore, myClass) => {
@@ -1044,18 +1149,26 @@ export default function App() {
       const myVal = parseFloat(myScore);
       if (isNaN(myVal)) return '-';
       
-      // Filter students by current date's class. Default to A班 if missing
       const targetClass = myClass || 'A班';
+      // Grouping Logic: find students in same weekend group but SPECIFIC class
+      const currentWeekendID = getWeekendID(date);
+
       const comparisonSet = cachedClassData.filter(s => {
-          const sClass = s.grades?.[date]?.class || 'A班';
-          return sClass === targetClass;
+          // Iterate through student's grades to find if they have a grade in this weekend group
+          return Object.keys(s.grades || {}).some(gradeDate => {
+             if (getWeekendID(gradeDate) !== currentWeekendID) return false;
+             const g = s.grades[gradeDate];
+             return (g.class || 'A班') === targetClass;
+          });
       });
 
       const scores = comparisonSet.map(s => {
-          const g = s.grades?.[date];
-          if (!g) return null;
-          const val = parseFloat(g[subject]);
-          return isNaN(val) ? null : val;
+           // Find the specific grade entry for this weekend group
+           const entryDate = Object.keys(s.grades || {}).find(gradeDate => getWeekendID(gradeDate) === currentWeekendID);
+           if (!entryDate) return null;
+           const g = s.grades[entryDate];
+           const val = parseFloat(g[subject]);
+           return isNaN(val) ? null : val;
       }).filter(v => v !== null);
       
       scores.sort((a, b) => b - a);
@@ -1068,23 +1181,24 @@ export default function App() {
       const myVal = parseFloat(myScore);
       if (isNaN(myVal)) return '-';
 
-      // Get all scores for this date across ALL classes
+      const currentWeekendID = getWeekendID(date);
+
+      // Get all scores for this weekend group across ALL classes (Sat + Sun + All Classes)
       const scores = cachedClassData.map(s => {
-          const g = s.grades?.[date];
-          if (!g) return null;
-          const val = parseFloat(g[subject]);
-          return isNaN(val) ? null : val;
+           const entryDate = Object.keys(s.grades || {}).find(gradeDate => getWeekendID(gradeDate) === currentWeekendID);
+           if (!entryDate) return null;
+           const g = s.grades[entryDate];
+           const val = parseFloat(g[subject]);
+           return isNaN(val) ? null : val;
       }).filter(v => v !== null);
 
-      if (scores.length < 100) return null;
+      if (scores.length < 50) return null; // Show PR only if > 50 students (lowered from 100 for dev testing, can be 100)
 
       // Sort descending
       scores.sort((a, b) => b - a);
       const rank = scores.indexOf(myVal) + 1;
       const total = scores.length;
       
-      // PR formula: floor( (total - rank) / total * 100 )
-      // Standard for entrance exams in TW
       const pr = Math.floor(((total - rank) / total) * 100);
       return pr;
   };
@@ -1113,16 +1227,21 @@ export default function App() {
       const bottomThreshold = thresholds[thresholds.length-1];
       buckets.push({ min: 0, max: bottomThreshold-1, count: 0, label: `<${bottomThreshold}`, isMyRange: false });
 
-      // Filter distribution by class. Default to A班
       const targetClass = myClass || 'A班';
+      const currentWeekendID = getWeekendID(date);
+
       const targetStudents = cachedClassData.filter(s => {
-          const sClass = s.grades?.[date]?.class || 'A班';
-          return sClass === targetClass;
+           return Object.keys(s.grades || {}).some(gradeDate => {
+             if (getWeekendID(gradeDate) !== currentWeekendID) return false;
+             const g = s.grades[gradeDate];
+             return (g.class || 'A班') === targetClass;
+          });
       });
 
       targetStudents.forEach(s => {
-          const g = s.grades?.[date];
-          if (!g) return;
+          const entryDate = Object.keys(s.grades || {}).find(gradeDate => getWeekendID(gradeDate) === currentWeekendID);
+          if (!entryDate) return;
+          const g = s.grades[entryDate];
           const val = parseFloat(g[subject]);
           if (isNaN(val)) return;
           const bucket = buckets.find(b => val >= b.min && val <= b.max);
@@ -1134,6 +1253,41 @@ export default function App() {
       }
       return buckets.map(b => ({ range: b.label, count: b.count, isMyRange: b.isMyRange }));
   };
+
+  // Helper to compute PR for batch view
+  // Uses allStudentsData (current state)
+  const getBatchStudentPR = (student, batchDate) => {
+      if (!student.grades) return '-';
+      // Find grade record for this weekend group
+      const currentWeekendID = getWeekendID(batchDate);
+      let targetDate = batchDate;
+      const existingKey = Object.keys(student.grades).find(k => getWeekendID(k) === currentWeekendID);
+      if (existingKey) targetDate = existingKey;
+      
+      const g = student.grades[targetDate];
+      if (!g || !g.total) return '-';
+      const myVal = parseFloat(g.total);
+      if (isNaN(myVal)) return '-';
+
+      // Collect all scores for this weekend from all students
+      const allScores = [];
+      allStudentsData.forEach(s => {
+          if (!s.grades) return;
+          const sKey = Object.keys(s.grades).find(k => getWeekendID(k) === currentWeekendID);
+          if (sKey) {
+              const val = parseFloat(s.grades[sKey].total);
+              if (!isNaN(val)) allScores.push(val);
+          }
+      });
+      
+      if (allScores.length < 50) return '-';
+
+      allScores.sort((a, b) => b - a);
+      const rank = allScores.indexOf(myVal) + 1;
+      const total = allScores.length;
+      return Math.floor(((total - rank) / total) * 100);
+  };
+
 
   const openStatsModal = (date, grades, className) => {
       setStatsModalData({
@@ -1170,7 +1324,7 @@ export default function App() {
             </button>
             <div className={`flex p-1 rounded-full border backdrop-blur-md ${darkMode ? 'bg-white/5 border-white/5' : 'bg-white/20 border-white/20'}`}>
                 <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-slate-700 text-emerald-400' : 'bg-white text-emerald-800 shadow-sm') : 'text-slate-400 hover:text-slate-500'}`}>{isAuthenticated ? '後台' : '老師'}</button>
-                <button onClick={() => { setViewData(null); setSearchError(''); setMode('parent'); }} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-slate-700 text-emerald-400' : 'bg-white text-emerald-800 shadow-sm') : 'text-slate-400 hover:text-slate-500'}`}>家長</button>
+                <button onClick={() => { setViewData(null); setSearchError(''); setMode('parent'); }} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-slate-700 text-emerald-400' : 'bg-white text-emerald-600 shadow-sm') : 'text-slate-400 hover:text-slate-500'}`}>家長</button>
             </div>
             {isAuthenticated && (
                 <button onClick={handleLogout} className="ml-1 p-2 text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-full transition-colors" title="登出"><LogOut className="w-5 h-5"/></button>
@@ -1182,10 +1336,10 @@ export default function App() {
       <main className="pt-28 px-4 max-w-4xl mx-auto">
         {mode === 'landing' && (
           <div className="flex flex-col items-center justify-center min-h-[calc(100vh-120px)]">
-            <div className={`p-5 rounded-full mb-6 shadow-2xl ring-1 backdrop-blur-3xl ${darkMode ? 'bg-white/5 border border-white/10 shadow-emerald-900/10' : 'bg-white/40 border border-white/40 shadow-emerald-100/40'}`}>
+            <div className={`p-5 rounded-full mb-6 shadow-2xl ring-1 backdrop-blur-3xl ${darkMode ? 'bg-white/5 border border-white/10 shadow-emerald-900/10' : 'bg-white/70 border border-white/50 shadow-emerald-100/60'}`}>
                 <Sparkles className={`w-10 h-10 ${darkMode ? 'text-emerald-400' : 'text-emerald-800'}`} />
             </div>
-            {/* Slogan with matching serif font and gradient */}
+            {/* Slogan with matching serif font and consistent gradient */}
             <h2 className={`text-xl md:text-3xl font-black font-serif tracking-tighter mb-4 text-center py-6 px-4 leading-normal bg-clip-text text-transparent bg-gradient-to-r ${darkMode ? 'from-emerald-300 via-teal-200 to-cyan-300' : 'from-emerald-800 via-teal-700 to-slate-800'}`}>Make Progress Visible</h2>
             <p className="text-slate-400 text-xs font-medium tracking-wide mb-6">2025-2026 Learning Journey</p>
             <ExamCountdown isDarkMode={darkMode} />
@@ -1229,8 +1383,8 @@ export default function App() {
                 </div>
                 <div className={`flex flex-wrap gap-2 max-h-24 overflow-y-auto p-2 rounded-xl border mb-6 no-scrollbar ${darkMode ? 'bg-slate-950/50 border-white/5' : 'bg-slate-50/50 border-slate-200'}`}>
                     {[...availableDates].sort(customDateSort).reverse().map(d => (
-                        <div key={d} className={`flex items-center px-2.5 py-1 rounded-lg text-[10px] font-bold border ${darkMode ? 'bg-slate-800 text-slate-300 border-white/5' : 'bg-white text-slate-600 border-slate-200'}`}>
-                            {d} <button onClick={() => { setDeleteTarget(d); executeWithSecurity(confirmDeleteDate); }} className="ml-1.5 text-slate-400 hover:text-red-500"><X className="w-3 h-3"/></button>
+                        <div key={d} className={`flex items-center px-2.5 py-1 rounded-lg text-[10px] font-bold border ${darkMode ? 'bg-slate-800 text-slate-300 border-white/5' : 'bg-white text-slate-500 border-slate-200'}`}>
+                            {getWeekendDisplayLabel(d)} <button onClick={() => { setDeleteTarget(d); executeWithSecurity(confirmDeleteDate); }} className="ml-1.5 text-slate-400 hover:text-red-500"><X className="w-3 h-3"/></button>
                         </div>
                     ))}
                 </div>
@@ -1266,14 +1420,19 @@ export default function App() {
                             <div className="flex items-center gap-2">
                                 <span className="text-xs font-bold text-slate-500">日期</span>
                                 <select className={`border rounded-lg px-2 py-1.5 text-xs font-bold outline-none ${darkMode ? 'bg-slate-950 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-300 text-slate-800'}`} value={batchDate} onChange={(e) => setBatchDate(e.target.value)}>
-                                    {[...availableDates].sort(customDateSort).reverse().map(d => <option key={d} value={d}>{d}</option>)}
+                                    {[...availableDates].sort(customDateSort).reverse().map(d => <option key={d} value={d}>{getWeekendDisplayLabel(d)}</option>)}
                                 </select>
                             </div>
-                            <button onClick={handleSaveBatchGrades} className="bg-emerald-600 text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-md shadow-emerald-900/20 hover:bg-emerald-500 transition-all active:scale-[0.98] flex items-center gap-1"><Save className="w-3.5 h-3.5"/> 儲存</button>
+                            <div className="flex gap-2">
+                                <button onClick={() => setSortByPR(!sortByPR)} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${sortByPR ? 'bg-purple-600 text-white shadow-md' : (darkMode ? 'bg-slate-800 text-slate-400' : 'bg-white text-slate-600 border border-slate-200')}`}>
+                                    <ArrowDownWideNarrow className="w-3.5 h-3.5" /> PR排序
+                                </button>
+                                <button onClick={handleSaveBatchGrades} className="bg-emerald-600 text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-md shadow-emerald-900/20 hover:bg-emerald-500 transition-all active:scale-[0.98] flex items-center gap-1"><Save className="w-3.5 h-3.5"/> 儲存</button>
+                            </div>
                         </div>
 
                         {/* Class Filter Tabs */}
-                        <div className={`flex p-1 mb-4 rounded-xl border overflow-x-auto justify-center ${darkMode ? 'bg-slate-950 border-white/5' : 'bg-slate-50 border-slate-200'}`}>
+                        <div className={`flex p-1 mb-4 rounded-xl border overflow-x-auto justify-center ${darkMode ? 'bg-slate-950 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
                             {CLASS_DEFS.map(c => (
                                 <button key={c.id} onClick={() => setTeacherClassFilter(c.id)} className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${teacherClassFilter === c.id ? (darkMode ? 'bg-slate-800 text-white shadow-sm' : 'bg-white text-slate-800 shadow-sm') : 'text-slate-500 hover:text-slate-400'}`}>{c.label}</button>
                             ))}
@@ -1282,7 +1441,7 @@ export default function App() {
                         {/* Fix: Overflow handling for mobile */}
                         <div className={`overflow-x-auto rounded-xl border ${darkMode ? 'border-white/5 bg-slate-950' : 'border-slate-200 bg-white'}`}>
                             <table className="w-full text-sm text-left min-w-[500px]">
-                                <thead className={`text-[10px] uppercase sticky top-0 z-10 ${darkMode ? 'text-slate-400 bg-slate-900' : 'text-slate-500 bg-slate-100'}`}>
+                                <thead className={`text-[10px] uppercase sticky top-0 z-10 ${darkMode ? 'text-slate-400 bg-slate-900' : 'text-slate-400 bg-slate-50'}`}>
                                     <tr>
                                         <th className="px-3 py-3 font-bold w-12">#</th>
                                         <th className="px-3 py-3 font-bold">學號</th>
@@ -1292,34 +1451,62 @@ export default function App() {
                                         <th className="px-2 py-3 text-center text-violet-500">英文</th>
                                         <th className="px-2 py-3 text-center text-blue-500">數學</th>
                                         <th className="px-2 py-3 text-center font-bold text-emerald-500">總分</th>
+                                        <th className="px-2 py-3 text-center font-bold text-purple-500">PR</th>
                                     </tr>
                                 </thead>
                                 <tbody className={`divide-y ${darkMode ? 'divide-slate-800' : 'divide-slate-200'}`}>
-                                    {allStudentsData.filter(s => {
-                                        const g = s.grades?.[batchDate];
-                                        if (!g) return false; // No record object for this date
-                                        
-                                        const currentClass = g.class || 'A班';
-                                        if (currentClass !== teacherClassFilter) return false;
+                                    {(() => {
+                                        let displayedStudents = allStudentsData.filter(s => {
+                                            const g = s.grades?.[batchDate];
+                                            if (!g) return false;
+                                            
+                                            const currentClass = g.class || 'A班';
+                                            if (currentClass !== teacherClassFilter) return false;
 
-                                        // Check if any score exists
-                                        const hasScore = (g.chi !== '' && g.chi !== undefined) || 
-                                                         (g.eng !== '' && g.eng !== undefined) || 
-                                                         (g.math !== '' && g.math !== undefined);
-                                        return hasScore;
-                                    }).map((student, sIndex) => (
-                                        <BatchRow 
-                                            key={student.id} 
-                                            student={student} 
-                                            sIndex={sIndex} 
-                                            batchDate={batchDate} 
-                                            dateGrades={student.grades?.[batchDate] || { chi: '', eng: '', math: '', total: '', class: 'A班' }} 
-                                            darkMode={darkMode} 
-                                            handleBatchGradeChange={handleBatchGradeChange} 
-                                            handleKeyDown={handleKeyDown} 
-                                            handlePaste={handlePaste} 
-                                        />
-                                    ))}
+                                            // Check if any score exists
+                                            const hasScore = (g.chi !== '' && g.chi !== undefined) || 
+                                                             (g.eng !== '' && g.eng !== undefined) || 
+                                                             (g.math !== '' && g.math !== undefined);
+                                            return hasScore;
+                                        });
+
+                                        if (sortByPR) {
+                                            displayedStudents.sort((a, b) => {
+                                                const prA = getBatchStudentPR(a, batchDate);
+                                                const prB = getBatchStudentPR(b, batchDate);
+                                                // Handle '-' case for sorting
+                                                const valA = prA === '-' ? -1 : prA;
+                                                const valB = prB === '-' ? -1 : prB;
+                                                return valB - valA;
+                                            });
+                                        }
+
+                                        return displayedStudents.map((student, sIndex) => {
+                                            // Re-find the exact date key for this student in this weekend group
+                                            let targetDate = batchDate;
+                                            if (student.grades) {
+                                                const existingKey = Object.keys(student.grades).find(k => getWeekendID(k) === getWeekendID(batchDate));
+                                                if (existingKey) targetDate = existingKey;
+                                            }
+
+                                            const dateGrades = student.grades?.[targetDate] || { chi: '', eng: '', math: '', total: '', class: 'A班' };
+                                            const prVal = getBatchStudentPR(student, batchDate);
+
+                                            return (
+                                            <BatchRow 
+                                                key={student.id} 
+                                                student={student} 
+                                                sIndex={sIndex} 
+                                                batchDate={batchDate} 
+                                                dateGrades={dateGrades} 
+                                                prValue={prVal}
+                                                darkMode={darkMode} 
+                                                handleBatchGradeChange={handleBatchGradeChange} 
+                                                handleKeyDown={handleKeyDown} 
+                                                handlePaste={handlePaste} 
+                                            />
+                                        )});
+                                    })()}
                                 </tbody>
                             </table>
                         </div>
@@ -1332,7 +1519,7 @@ export default function App() {
               <div className={`rounded-[2rem] shadow-xl border overflow-hidden ${darkMode ? 'bg-white/5 border-white/10 shadow-emerald-900/5' : 'bg-white border-white shadow-slate-200/50'}`}>
                 <div className={`p-6 border-b flex justify-between items-center backdrop-blur-sm ${darkMode ? 'border-white/5 bg-slate-900/50' : 'border-slate-50 bg-white/50'}`}>
                   <div className="flex-1 mr-4">
-                      <input type="text" value={studentName} onChange={(e) => setStudentName(e.target.value)} className={`text-2xl font-bold bg-transparent border-none outline-none w-full transition-all tracking-tight ${darkMode ? 'text-white placeholder:text-slate-700' : 'text-slate-800 placeholder:text-slate-400'}`} placeholder="學生姓名"/>
+                      <input type="text" value={studentName} onChange={(e) => setStudentName(e.target.value)} className={`text-2xl font-bold bg-transparent border-none outline-none w-full transition-all tracking-tight ${darkMode ? 'text-white placeholder:text-slate-700' : 'text-slate-800 placeholder:text-slate-200'}`} placeholder="學生姓名"/>
                       <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border mt-1 inline-block opacity-60 ${darkMode ? 'border-slate-600 text-slate-400' : 'border-slate-200 text-slate-400'}`}>{currentStudentId}</span>
                   </div>
                   <div className="flex gap-2">
@@ -1342,7 +1529,7 @@ export default function App() {
                 </div>
                 <div className="max-h-[60vh] overflow-y-auto">
                     <table className={`w-full text-sm text-left ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                        <thead className={`text-[10px] uppercase sticky top-0 z-10 backdrop-blur-md ${darkMode ? 'text-slate-500 bg-slate-900/90' : 'text-slate-500 bg-slate-100'}`}>
+                        <thead className={`text-[10px] uppercase sticky top-0 z-10 backdrop-blur-md ${darkMode ? 'text-slate-500 bg-slate-900/90' : 'text-slate-400 bg-white/90'}`}>
                             <tr>
                                 <th className="px-4 py-3 font-bold">日期</th>
                                 <th className="px-2 py-3 text-center text-rose-500 font-bold">國文</th>
@@ -1356,7 +1543,7 @@ export default function App() {
                                 const g = grades[date] || { chi: '', eng: '', math: '', total: '', class: 'A班' };
                                 return (
                                     <tr key={date} className={`${darkMode ? 'hover:bg-white/5' : 'hover:bg-slate-50/80'} transition-colors`}>
-                                        <td className="px-4 py-3 font-mono text-xs font-bold opacity-60">{date}</td>
+                                        <td className="px-4 py-3 font-mono text-xs font-bold opacity-60">{getWeekendDisplayLabel(date)}</td>
                                         <td className="px-2 py-2 text-center">
                                             <select 
                                                 value={g.class || 'A班'} 
@@ -1549,7 +1736,7 @@ export default function App() {
                                   const avg = dateData[avgSettingsClassFilter] || { chi: '', eng: '', math: '', total: '' };
                                   return (
                                       <tr key={date} className={darkMode ? 'bg-transparent' : 'bg-white'}>
-                                          <td className="px-4 py-3 font-mono font-bold text-slate-500">{date}</td>
+                                          <td className="px-4 py-3 font-mono font-bold text-slate-500">{getWeekendDisplayLabel(date)}</td>
                                           {['chi', 'eng', 'math', 'total'].map(sub => (
                                               <td key={sub} className="px-1 py-1.5">
                                                   <input id={`avg-${dateIndex}-${sub}`} type="number" className={`w-full text-center p-2 rounded-xl border outline-none transition-all font-bold ${darkMode ? 'bg-slate-800 border-transparent focus:bg-slate-700 focus:border-emerald-500/50 text-slate-200' : 'bg-slate-50 border-slate-100 focus:bg-white focus:border-indigo-300 text-slate-600'} ${sub==='total'?'text-emerald-500':''}`} value={avg[sub] || ''} onChange={(e) => handleManualAverageChange(date, avgSettingsClassFilter, sub, e.target.value)} onKeyDown={(e) => handleAvgKeyDown(e, dateIndex, sub)} onPaste={(e) => handleAvgPaste(e, dateIndex, sub)} placeholder="-" />
@@ -1590,59 +1777,6 @@ export default function App() {
                     />
                 </div>
             </div>
-        )}
-
-        {statsModalData && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setStatsModalData(null)}>
-              <div className={`rounded-[2.5rem] w-full max-w-lg max-h-[90vh] flex flex-col ${darkMode ? 'bg-slate-900 border border-white/10' : 'bg-white shadow-2xl'}`} onClick={e => e.stopPropagation()}>
-                  <div className={`p-6 border-b flex justify-between items-center ${darkMode ? 'border-white/5' : 'border-slate-100'}`}>
-                      <div>
-                          <div className="text-xs font-bold text-slate-400 font-mono mb-1">{statsModalData.date}</div>
-                          <h3 className={`text-xl font-bold flex items-center gap-2 ${darkMode ? 'text-white' : 'text-slate-800'}`}><BarChart3 className="w-5 h-5 text-emerald-500"/> 週次成績分析</h3>
-                          {statsModalData.className && <span className="text-[10px] text-slate-500 font-bold bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full mt-1 inline-block">{statsModalData.className}</span>}
-                      </div>
-                      <button onClick={() => setStatsModalData(null)} className={`p-2 rounded-full border transition ${darkMode ? 'bg-white/5 hover:bg-white/10 border-white/5 text-white' : 'bg-white hover:bg-slate-50 border-slate-100 text-slate-500'}`}><X className="w-5 h-5"/></button>
-                  </div>
-                  <div className="p-6 overflow-y-auto flex-1">
-                      <div className={`flex p-1 rounded-xl mb-6 justify-center ${darkMode ? 'bg-slate-950' : 'bg-slate-100'}`}>
-                          {['總分', '國文', '英文', '數學'].map(tab => {
-                              const tabKey = tab === '總分' ? 'total' : tab === '國文' ? 'chi' : tab === '英文' ? 'eng' : 'math';
-                              const isActive = statsActiveTab === tabKey;
-                              return (
-                                  <button key={tabKey} onClick={() => setStatsActiveTab(tabKey)} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${isActive ? (darkMode ? 'bg-slate-800 text-white shadow-sm' : 'bg-white text-slate-800 shadow-sm') : 'text-slate-500 hover:text-slate-400'}`}>{tab}</button>
-                              )
-                          })}
-                      </div>
-                      <div className="text-center mb-6">
-                          <div className="text-xs font-bold text-slate-500 mb-1">我的成績</div>
-                          <div className={`text-4xl font-bold tracking-tighter ${COLORS[statsActiveTab].tailwind === 'emerald' ? 'text-emerald-500' : COLORS[statsActiveTab].tailwind === 'rose' ? 'text-rose-500' : COLORS[statsActiveTab].tailwind === 'violet' ? 'text-violet-500' : 'text-blue-500'}`}>
-                              {statsModalData.myGrades[statsActiveTab] || '-'}
-                          </div>
-                      </div>
-                      <DistributionChart data={statsModalData[statsActiveTab]} colorKey={statsActiveTab} isDarkMode={darkMode} />
-                      <div className={`mt-6 rounded-2xl p-4 text-xs leading-relaxed border text-center ${darkMode ? 'bg-slate-950 border-white/5 text-slate-400' : 'bg-slate-50 border-slate-100 text-slate-500'}`}>
-                          <p className="font-bold mb-1 opacity-80">分析說明</p>
-                          長條圖顯示<span className="text-emerald-500 font-bold mx-1">{statsModalData.className || '全體'}</span>班級成績分佈，亮色區塊為您目前所在的區間。
-                      </div>
-                  </div>
-              </div>
-          </div>
-        )}
-
-        {showAddStudentModal && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowAddStudentModal(false)}>
-              <div className={`rounded-[2.5rem] p-8 shadow-2xl max-w-sm w-full animate-in zoom-in duration-300 ${darkMode ? 'bg-slate-900 border border-white/10' : 'bg-white'}`} onClick={e => e.stopPropagation()}>
-                  <div className="flex items-center gap-4 mb-8">
-                      <div className="bg-emerald-500/10 p-4 rounded-2xl text-emerald-500"><UserPlus className="w-8 h-8" /></div>
-                      <h3 className={`font-bold text-xl ${darkMode ? 'text-white' : 'text-slate-800'}`}>建立新學生</h3>
-                  </div>
-                  <input type="text" placeholder="例如: 151200" className={`w-full p-4 rounded-2xl border-2 border-transparent text-center font-bold text-xl outline-none mb-8 uppercase tracking-widest transition-all ${darkMode ? 'bg-slate-950 text-white focus:border-emerald-500/50' : 'bg-slate-50 text-slate-800 focus:bg-white focus:border-emerald-200'}`} value={newStudentIdInput} onChange={(e) => setNewStudentIdInput(e.target.value)} autoFocus />
-                  <div className="flex gap-3">
-                      <button onClick={() => setShowAddStudentModal(false)} className={`flex-1 px-4 py-3.5 rounded-xl font-bold text-sm transition-colors ${darkMode ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>取消</button>
-                      <button onClick={handleAddNewStudent} className="flex-1 px-4 py-3.5 rounded-xl bg-emerald-600 text-white hover:bg-emerald-500 font-bold text-sm shadow-lg shadow-emerald-900/20 transition-all active:scale-95">確認</button>
-                  </div>
-              </div>
-          </div>
         )}
 
         {(deleteTarget || studentToDelete) && (

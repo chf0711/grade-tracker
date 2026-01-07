@@ -159,7 +159,6 @@ const calculateTotal = (chi, eng, math) => {
 };
 
 // --- Helper Logic for Probability ---
-// Extracted to be reusable in both Teacher and Parent views
 const calculateProbLogic = (targetStudent, scoresByDate, mathScoresByDate, studentGradeMaps, availableDates) => {
     let weightedPRSum = 0;
     let totalWeight = 0;
@@ -170,7 +169,6 @@ const calculateProbLogic = (targetStudent, scoresByDate, mathScoresByDate, stude
 
     availableDates.forEach((date, index) => {
          const weekendID = getWeekendID(date);
-         
          const grade = myGrades[weekendID];
          let myTotal = null;
          let myMath = null;
@@ -182,31 +180,49 @@ const calculateProbLogic = (targetStudent, scoresByDate, mathScoresByDate, stude
              myClass = grade.class || 'A班';
          }
          
-         // Total PR
+         // Total PR Logic
          if (myTotal !== null && !isNaN(myTotal) && scoresByDate[weekendID] && scoresByDate[weekendID].length >= 5) {
              const scores = scoresByDate[weekendID];
              const rank = scores.indexOf(myTotal) + 1;
              let pr = Math.floor(((scores.length - rank) / scores.length) * 100);
              
-             // --- CLASS A PROTECTION LOGIC (PHASE 1 & 2) ---
-             // If early phase, small sample (<100), and Class A
+             // --- Updated Logic: Define Weight and Baseline per phase ---
+             const isMock = index >= 36 || date.includes('09/29') || weekendID.includes('09/29') || date.includes('12/20') || weekendID.includes('12/20'); 
+             const weight = isMock ? 2.5 : 1; 
+             const baseline = isMock ? 52 : 56; // Mock baseline 52, Phase 1/2 baseline 56
+
+             // --- CLASS A PROTECTION LOGIC (Phase 1 & 2 < 100 samples) ---
              const isPhase1Or2 = index < 36;
              const isSmallSample = scores.length < 100;
              
              if (isPhase1Or2 && isSmallSample && myClass === 'A班') {
-                 // Bottom 3 -> Risk (PR 52), Others -> Safe (PR 95)
-                 if (rank <= scores.length - 3) {
-                     pr = 95;
+                 const count = scores.length;
+                 // If bottom 3 -> PR 48
+                 if (rank > count - 3) {
+                     pr = 48;
                  } else {
-                     pr = 52; // Revised from 45 to 52
+                     // Others: Linear Interpolation from 99 down to 60
+                     // Rank 1 -> 99
+                     // Rank (count-3) -> 60
+                     if (count - 3 > 1) {
+                         const maxSafePR = 99;
+                         const minSafePR = 60;
+                         const ratio = (rank - 1) / (count - 3 - 1);
+                         pr = maxSafePR - ratio * (maxSafePR - minSafePR);
+                     } else {
+                         pr = 99;
+                     }
                  }
              }
              // ---------------------------------------------
              
-             const isMock = index >= 36 || date.includes('09/29') || weekendID.includes('09/29') || date.includes('12/20') || weekendID.includes('12/20'); 
-             const weight = isMock ? 2.5 : 1; 
-             
-             weightedPRSum += pr * weight;
+             // Normalize PR to unified baseline of 52 for averaging
+             // Difference from current baseline
+             const diff = pr - baseline; 
+             // Normalized PR (centered around 52)
+             const normalizedPR = 52 + diff;
+
+             weightedPRSum += normalizedPR * weight;
              totalWeight += weight;
          }
 
@@ -225,14 +241,14 @@ const calculateProbLogic = (targetStudent, scoresByDate, mathScoresByDate, stude
     const avgPR = weightedPRSum / totalWeight;
     const avgMathPR = mathWeight > 0 ? mathPRSum / mathWeight : 0;
     
-    // --- Probability Baseline 50% at PR 50 ---
+    // --- Probability Mapping (Unified Baseline: 52) ---
     let prob = 0;
-    if (avgPR < 50) {
-        // Curve below 50%
-        prob = Math.pow(avgPR / 50, 1.5) * 50;
+    if (avgPR < 52) {
+        // Curve below 52
+        prob = Math.pow(avgPR / 52, 1.5) * 50;
     } else {
-        // Linear above 50%
-        prob = 50 + ((avgPR - 50) / 50) * 49;
+        // Linear above 52
+        prob = 50 + ((avgPR - 52) / 48) * 49;
     }
     
     if (avgMathPR > 80) prob += 4;
@@ -960,6 +976,7 @@ export default function App() {
     reader.readAsBinaryString(file);
   };
 
+  // --- CRITICAL OPTIMIZATION: Memoized Key Handlers ---
   const handleGridKeyDown = useCallback((e, index, subject, type, totalItems) => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
         e.preventDefault();
@@ -1023,7 +1040,7 @@ export default function App() {
           if(updated) { setStatusMsg(`已貼上 ${rows.length} 筆資料`); setTimeout(() => setStatusMsg(''), 2000); }
           return newData;
       });
-  }, [batchDate]); // Added batchDate dependency
+  }, [batchDate]);
 
   const handleSinglePaste = (e, startDateIndex, startSubject) => {
       e.preventDefault();
@@ -1041,7 +1058,7 @@ export default function App() {
               if (dateIndex >= reversedDates.length) return;
               const targetDate = reversedDates[dateIndex];
               const cols = row.split('\t');
-              const currentData = { ...(newGrades[targetDate] || { chi: '', eng: '', math: '', total: '', class: 'A班' }) }; // Default to A班
+              const currentData = { ...(newGrades[targetDate] || { chi: '', eng: '', math: '', total: '', class: 'A班' }) }; 
               let rowUpdated = false;
               cols.forEach((val, cIndex) => {
                   const subjectIndex = startSubjectIndex + cIndex;
@@ -1190,9 +1207,6 @@ export default function App() {
         }
         const avg = allChartData.length > 0 ? (allChartData.reduce((a,b)=>a+b.total,0)/allChartData.length).toFixed(1) : 0;
         
-        // --- Calculate Probability for Single Student View ---
-        // Using allStudentsData or cachedClassData for context
-        // Ensure we have context data to calculate ranking
         const contextData = fullClassData.length > 0 ? fullClassData : cachedClassData;
         let studentProb = '-';
         
@@ -1617,9 +1631,10 @@ export default function App() {
                     </div>
                 )}
             </div>
+            {/* ... other modals ... */}
             {statusMsg && <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/90 text-white px-5 py-3 rounded-full flex items-center text-xs font-bold shadow-2xl backdrop-blur-md z-50 border border-white/10"><Check className="w-4 h-4 mr-2 text-emerald-400" /> {statusMsg}</div>}
               
-            {/* ... existing Single View code ... */}
+            {/* ... Single View ... */}
             {teacherViewMode === 'single' && currentStudentId && !loading && (
               <div className={`rounded-[2rem] shadow-2xl border overflow-hidden backdrop-blur-md ${darkMode ? 'bg-[#0f172a]/70 border-white/10 ring-1 ring-white/5' : 'bg-white/80 border-white/60'}`}>
                 <div className={`p-6 border-b flex justify-between items-center ${darkMode ? 'border-white/5 bg-[#0f172a]/50' : 'border-slate-50 bg-white/50'}`}>

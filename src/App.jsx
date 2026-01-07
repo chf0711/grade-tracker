@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell } from 'recharts';
-import { Search, Save, Plus, Check, BarChart3, X, Lock, LayoutDashboard, GraduationCap, Calendar, Clipboard, LogOut, AlertTriangle, UserPlus, Sparkles, Edit3, Trash2, Trophy, Target, FileSpreadsheet, Moon, Sun, ChevronRight, ArrowLeft, PieChart, Users, BarChart2, ShieldCheck, ArrowDownWideNarrow, Percent } from 'lucide-react';
+import { Search, Save, Plus, Check, BarChart3, X, Lock, LayoutDashboard, GraduationCap, Calendar, Clipboard, LogOut, AlertTriangle, UserPlus, Sparkles, Edit3, Trash2, Trophy, Target, FileSpreadsheet, Moon, Sun, ChevronRight, ArrowLeft, PieChart, Users, BarChart2, ShieldCheck, ArrowDownWideNarrow, Percent, Info } from 'lucide-react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc } from 'firebase/firestore';
@@ -14,7 +14,6 @@ const DEFAULT_EXAM_STARTS = [
   "12/27", "01/03", "01/10", "01/17", "01/24", "01/31", "02/02", "02/07", "02/13", "02/28"
 ];
 
-// 定義班級結構
 const CLASS_DEFS = [
     { id: 'A班', label: 'A' },
     { id: 'B班', label: 'B' },
@@ -24,12 +23,9 @@ const CLASS_DEFS = [
 ];
 
 const RAW_STUDENT_RECORDS = [];
-
-// --- Obfuscated Passwords (Base64 Encoded) ---
 const ENCODED_PASSWORDS = ['QmVuMTEwNzA1', 'MjQ5MTIxMg=='];
 const SECURITY_CODE = '1107';
 
-// --- Firebase Configuration ---
 const realFirebaseConfig = {
   apiKey: "AIzaSyChK1IiE6YhHZ_DdxXzpxi8vmBA9A9So9A",
   authDomain: "grade-tracker-9ccb3.firebaseapp.com",
@@ -61,14 +57,10 @@ const customDateSort = (a, b) => {
         if (!a || !b) return 0;
         const cleanA = String(a).replace(/[^0-9/]/g, '');
         const cleanB = String(b).replace(/[^0-9/]/g, '');
-        
         if (!cleanA.includes('/') || !cleanB.includes('/')) return 0;
-        
         const [m1, d1] = cleanA.split('/').map(Number);
         const [m2, d2] = cleanB.split('/').map(Number);
-        
         if (isNaN(m1) || isNaN(d1) || isNaN(m2) || isNaN(d2)) return 0;
-
         const m1Adj = m1 < 4 ? m1 + 12 : m1;
         const m2Adj = m2 < 4 ? m2 + 12 : m2;
         if (m1Adj !== m2Adj) return m1Adj - m2Adj;
@@ -84,9 +76,8 @@ const getWeekendID = (dateStr) => {
         const d = parseInt(dStr, 10);
         const y = m >= 4 ? 2025 : 2026; 
         const dateObj = new Date(y, m - 1, d);
-        const dayOfWeek = dateObj.getDay(); // 0 = Sun
-        
-        if (dayOfWeek === 0) { // Sunday -> move back to Saturday
+        const dayOfWeek = dateObj.getDay(); 
+        if (dayOfWeek === 0) { 
             const satDate = new Date(dateObj);
             satDate.setDate(dateObj.getDate() - 1);
             return `${String(satDate.getMonth() + 1).padStart(2, '0')}/${String(satDate.getDate()).padStart(2, '0')}`;
@@ -102,7 +93,7 @@ const getSundayDate = (satDateStr) => {
         const d = parseInt(dStr, 10);
         const y = m >= 4 ? 2025 : 2026;
         const dateObj = new Date(y, m - 1, d);
-        dateObj.setDate(dateObj.getDate() + 1); // Add 1 day
+        dateObj.setDate(dateObj.getDate() + 1); 
         return `${String(dateObj.getMonth() + 1).padStart(2, '0')}/${String(dateObj.getDate()).padStart(2, '0')}`;
     } catch(e) { return satDateStr; }
 }
@@ -116,11 +107,9 @@ const getWeekendDisplayLabel = (dateStr) => {
         const d = parseInt(dStr, 10);
         const y = m >= 4 ? 2025 : 2026;
         const dateObj = new Date(y, m - 1, d);
-        
         const sunDate = new Date(dateObj);
         sunDate.setDate(dateObj.getDate() + 1);
         const sunD = String(sunDate.getDate()).padStart(2, '0');
-        
         return `${String(m).padStart(2,'0')}/${String(d).padStart(2,'0')}-${sunD}`;
     } catch (e) { return dateStr; }
 };
@@ -169,6 +158,89 @@ const calculateTotal = (chi, eng, math) => {
     return (c + e + m).toFixed(1);
 };
 
+// --- Helper Logic for Probability ---
+// Extracted to be reusable in both Teacher and Parent views
+const calculateProbLogic = (targetStudent, scoresByDate, mathScoresByDate, studentGradeMaps, availableDates) => {
+    let weightedPRSum = 0;
+    let totalWeight = 0;
+    let mathPRSum = 0;
+    let mathWeight = 0;
+    
+    const myGrades = studentGradeMaps[targetStudent.id] || {};
+
+    availableDates.forEach((date, index) => {
+         const weekendID = getWeekendID(date);
+         
+         const grade = myGrades[weekendID];
+         let myTotal = null;
+         let myMath = null;
+         let myClass = 'A班';
+
+         if (grade) {
+             myTotal = parseFloat(grade.total);
+             myMath = parseFloat(grade.math);
+             myClass = grade.class || 'A班';
+         }
+         
+         // Total PR
+         if (myTotal !== null && !isNaN(myTotal) && scoresByDate[weekendID] && scoresByDate[weekendID].length >= 5) {
+             const scores = scoresByDate[weekendID];
+             const rank = scores.indexOf(myTotal) + 1;
+             let pr = Math.floor(((scores.length - rank) / scores.length) * 100);
+             
+             // --- CLASS A PROTECTION LOGIC (PHASE 1 & 2) ---
+             // If early phase, small sample (<100), and Class A
+             const isPhase1Or2 = index < 36;
+             const isSmallSample = scores.length < 100;
+             
+             if (isPhase1Or2 && isSmallSample && myClass === 'A班') {
+                 // Bottom 3 -> Risk (PR 52), Others -> Safe (PR 95)
+                 if (rank <= scores.length - 3) {
+                     pr = 95;
+                 } else {
+                     pr = 52; // Revised from 45 to 52
+                 }
+             }
+             // ---------------------------------------------
+             
+             const isMock = index >= 36 || date.includes('09/29') || weekendID.includes('09/29') || date.includes('12/20') || weekendID.includes('12/20'); 
+             const weight = isMock ? 2.5 : 1; 
+             
+             weightedPRSum += pr * weight;
+             totalWeight += weight;
+         }
+
+         // Math Bonus
+         if (myMath !== null && !isNaN(myMath) && mathScoresByDate[weekendID] && mathScoresByDate[weekendID].length >= 5) {
+             const scores = mathScoresByDate[weekendID];
+             const rank = scores.indexOf(myMath) + 1;
+             const pr = Math.floor(((scores.length - rank) / scores.length) * 100);
+             mathPRSum += pr;
+             mathWeight++;
+         }
+    });
+
+    if (totalWeight === 0) return '-';
+
+    const avgPR = weightedPRSum / totalWeight;
+    const avgMathPR = mathWeight > 0 ? mathPRSum / mathWeight : 0;
+    
+    // --- Probability Baseline 50% at PR 50 ---
+    let prob = 0;
+    if (avgPR < 50) {
+        // Curve below 50%
+        prob = Math.pow(avgPR / 50, 1.5) * 50;
+    } else {
+        // Linear above 50%
+        prob = 50 + ((avgPR - 50) / 50) * 49;
+    }
+    
+    if (avgMathPR > 80) prob += 4;
+    else if (avgMathPR > 60) prob += 2;
+    
+    return Math.min(99, Math.max(1, prob.toFixed(0)));
+};
+
 // --- Components ---
 const SingleSubjectChart = ({ data, subjectKey, avgKey, colorKey, title, domain, isDarkMode }) => (
     <div className="mb-6">
@@ -215,7 +287,6 @@ const DistributionChart = ({ data, colorKey, isDarkMode }) => (
 );
 
 const BatchRow = React.memo(({ student, sIndex, batchDate, dateGrades, prValue, probValue, darkMode, handleBatchGradeChange, handleKeyDown, handlePaste }) => {
-    
     let probColor = 'text-slate-400';
     if (probValue !== '-') {
         const p = parseInt(probValue);
@@ -345,7 +416,6 @@ export default function App() {
   const [statsModalData, setStatsModalData] = useState(null);
   const [statsActiveTab, setStatsActiveTab] = useState('total');
 
-  // --- OPTIMIZATION: State for probabilities to debounce updates ---
   const [admissionProbabilities, setAdmissionProbabilities] = useState({});
 
   const [xlsxLoaded, setXlsxLoaded] = useState(false);
@@ -367,7 +437,6 @@ export default function App() {
   }, [viewData, availableDates]);
 
   // --- OPTIMIZATION: Debounced Calculation Effect ---
-  // This moves the heavy O(N^2) or O(N*M) calculation out of the render cycle
   useEffect(() => {
       if (allStudentsData.length === 0) return;
 
@@ -381,7 +450,6 @@ export default function App() {
               mathScoresByDate[d] = [];
           });
           
-          // Build Score Arrays
           allStudentsData.forEach(s => {
               if (!s.grades) return;
               Object.entries(s.grades).forEach(([date, g]) => {
@@ -397,11 +465,9 @@ export default function App() {
               });
           });
 
-          // Sort scores for ranking
           Object.keys(scoresByDate).forEach(d => scoresByDate[d].sort((a, b) => b - a));
           Object.keys(mathScoresByDate).forEach(d => mathScoresByDate[d].sort((a, b) => b - a));
 
-          // 2. Pre-process student grades into fast lookup maps
           const studentGradeMaps = {};
           allStudentsData.forEach(s => {
               if (!s.grades) return;
@@ -414,73 +480,12 @@ export default function App() {
 
           const probs = {};
           
-          // 3. Calculate probs using fast lookups
           allStudentsData.forEach(s => {
-              let weightedPRSum = 0;
-              let totalWeight = 0;
-              let mathPRSum = 0;
-              let mathWeight = 0;
-              
-              const myGrades = studentGradeMaps[s.id] || {};
-
-              availableDates.forEach((date, index) => {
-                  const weekendID = getWeekendID(date);
-                  
-                  // Fast Map Lookup
-                  const grade = myGrades[weekendID];
-                  let myTotal = null;
-                  let myMath = null;
-
-                  if (grade) {
-                      myTotal = parseFloat(grade.total);
-                      myMath = parseFloat(grade.math);
-                  }
-                  
-                  if (myTotal !== null && !isNaN(myTotal) && scoresByDate[weekendID] && scoresByDate[weekendID].length >= 5) {
-                      const scores = scoresByDate[weekendID];
-                      // Use binary search or simpler approximation if needed, but indexOf is okay for < 500
-                      const rank = scores.indexOf(myTotal) + 1;
-                      const pr = Math.floor(((scores.length - rank) / scores.length) * 100);
-                      
-                      // Weighting logic
-                      const isMock = index >= 36 || date.includes('09/29') || weekendID.includes('09/29') || date.includes('12/20') || weekendID.includes('12/20'); 
-                      const weight = isMock ? 2.5 : 1; 
-                      
-                      weightedPRSum += pr * weight;
-                      totalWeight += weight;
-                  }
-
-                  if (myMath !== null && !isNaN(myMath) && mathScoresByDate[weekendID] && mathScoresByDate[weekendID].length >= 5) {
-                      const scores = mathScoresByDate[weekendID];
-                      const rank = scores.indexOf(myMath) + 1;
-                      const pr = Math.floor(((scores.length - rank) / scores.length) * 100);
-                      mathPRSum += pr;
-                      mathWeight++;
-                  }
-              });
-
-              if (totalWeight === 0) {
-                  probs[s.id] = '-';
-              } else {
-                  const avgPR = weightedPRSum / totalWeight;
-                  const avgMathPR = mathWeight > 0 ? mathPRSum / mathWeight : 0;
-                  
-                  let prob = 0;
-                  if (avgPR < 52) {
-                      prob = Math.pow(avgPR / 52, 1.5) * 50;
-                  } else {
-                      prob = 50 + ((avgPR - 52) / 48) * 49;
-                  }
-                  
-                  if (avgMathPR > 80) prob += 4;
-                  else if (avgMathPR > 60) prob += 2;
-                  
-                  probs[s.id] = Math.min(99, Math.max(1, prob.toFixed(0)));
-              }
+              probs[s.id] = calculateProbLogic(s, scoresByDate, mathScoresByDate, studentGradeMaps, availableDates);
           });
           
           setAdmissionProbabilities(probs);
-      }, 500); // 500ms delay to prevent blocking typing
+      }, 500);
 
       return () => clearTimeout(timer);
   }, [allStudentsData, availableDates]);
@@ -491,8 +496,12 @@ export default function App() {
       }
   }, [viewData, mode]);
 
-  // Removed problematic useEffect that cleared viewData on every mode change causing blank screen
-  // Instead, handle reset in the click handlers directly
+  useEffect(() => {
+      if (mode === 'parent') {
+          setViewData(null);
+          setSearchError('');
+      }
+  }, [mode]);
 
   useEffect(() => {
     const checkTime = () => {
@@ -951,7 +960,7 @@ export default function App() {
     reader.readAsBinaryString(file);
   };
 
-  const handleGridKeyDown = (e, index, subject, type, totalItems) => {
+  const handleGridKeyDown = useCallback((e, index, subject, type, totalItems) => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
         e.preventDefault();
         let nextIndex = index;
@@ -972,13 +981,13 @@ export default function App() {
         const nextInput = document.getElementById(nextInputId);
         if (nextInput) { nextInput.focus(); nextInput.select(); }
     }
-  };
+  }, []);
 
-  const handleKeyDown = (e, studentIndex, subject) => handleGridKeyDown(e, studentIndex, subject, 'batch', allStudentsData.length);
-  const handleSingleKeyDown = (e, dateIndex, subject) => handleGridKeyDown(e, dateIndex, subject, 'single', availableDates.length);
-  const handleAvgKeyDown = (e, dateIndex, subject) => handleGridKeyDown(e, dateIndex, subject, 'avg', availableDates.length);
+  const handleKeyDown = useCallback((e, studentIndex, subject) => handleGridKeyDown(e, studentIndex, subject, 'batch', allStudentsData.length), [allStudentsData.length, handleGridKeyDown]);
+  const handleSingleKeyDown = useCallback((e, dateIndex, subject) => handleGridKeyDown(e, dateIndex, subject, 'single', availableDates.length), [availableDates.length, handleGridKeyDown]);
+  const handleAvgKeyDown = useCallback((e, dateIndex, subject) => handleGridKeyDown(e, dateIndex, subject, 'avg', availableDates.length), [availableDates.length, handleGridKeyDown]);
 
-  const handlePaste = (e, startStudentIndex, startSubject) => {
+  const handlePaste = useCallback((e, startStudentIndex, startSubject) => {
       e.preventDefault();
       const pasteData = e.clipboardData.getData('text');
       const rows = pasteData.trim().split(/\r\n|\n|\r/);
@@ -994,13 +1003,13 @@ export default function App() {
               const cols = row.split('\t');
               const student = { ...newData[studentIndex] };
               const currentGrades = student.grades || {};
-              const currentDateGrades = { ...(currentGrades[batchDate] || { chi: '', eng: '', math: '', total: '', class: 'A班' }) }; // Default to A班
+              const currentDateGrades = { ...(currentGrades[batchDate] || { chi: '', eng: '', math: '', total: '', class: 'A班' }) }; 
               let rowUpdated = false;
               cols.forEach((val, cIndex) => {
                   const subjectIndex = startSubjectIndex + cIndex;
                   if (subjectIndex >= 3) return;
                   const subject = subjects[subjectIndex];
-                  const currentDateGrades = { ...(currentGrades[batchDate] || { chi: '', eng: '', math: '', total: '', class: 'A班' }) }; // Default to A班
+                  const currentDateGrades = { ...(currentGrades[batchDate] || { chi: '', eng: '', math: '', total: '', class: 'A班' }) };
                   currentDateGrades[subject] = val.trim();
                   rowUpdated = true;
               });
@@ -1014,7 +1023,7 @@ export default function App() {
           if(updated) { setStatusMsg(`已貼上 ${rows.length} 筆資料`); setTimeout(() => setStatusMsg(''), 2000); }
           return newData;
       });
-  };
+  }, [batchDate]); // Added batchDate dependency
 
   const handleSinglePaste = (e, startDateIndex, startSubject) => {
       e.preventDefault();
@@ -1180,7 +1189,47 @@ export default function App() {
           }
         }
         const avg = allChartData.length > 0 ? (allChartData.reduce((a,b)=>a+b.total,0)/allChartData.length).toFixed(1) : 0;
-        setViewData({ ...data, chartData: allChartData, average: avg });
+        
+        // --- Calculate Probability for Single Student View ---
+        // Using allStudentsData or cachedClassData for context
+        // Ensure we have context data to calculate ranking
+        const contextData = fullClassData.length > 0 ? fullClassData : cachedClassData;
+        let studentProb = '-';
+        
+        if (contextData.length > 0) {
+            // Re-build the scores map quickly for this calculation
+            const scoresByDate = {}; 
+            const mathScoresByDate = {}; 
+            availableDates.forEach(d => { scoresByDate[d] = []; mathScoresByDate[d] = []; });
+            
+            contextData.forEach(s => {
+                if (!s.grades) return;
+                Object.entries(s.grades).forEach(([date, g]) => {
+                    const wid = getWeekendID(date);
+                    if (g.total && !isNaN(parseFloat(g.total))) {
+                         if (!scoresByDate[wid]) scoresByDate[wid] = [];
+                         scoresByDate[wid].push(parseFloat(g.total));
+                    }
+                    if (g.math && !isNaN(parseFloat(g.math))) {
+                         if (!mathScoresByDate[wid]) mathScoresByDate[wid] = [];
+                         mathScoresByDate[wid].push(parseFloat(g.math));
+                    }
+                });
+            });
+            Object.keys(scoresByDate).forEach(d => scoresByDate[d].sort((a, b) => b - a));
+            Object.keys(mathScoresByDate).forEach(d => mathScoresByDate[d].sort((a, b) => b - a));
+            
+            // Build simple grade map for target student
+            const studentGradeMap = {};
+            studentGradeMap[data.id] = {};
+            Object.entries(data.grades || {}).forEach(([date, g]) => {
+                studentGradeMap[data.id][getWeekendID(date)] = g;
+            });
+            
+            studentProb = calculateProbLogic(data, scoresByDate, mathScoresByDate, studentGradeMap, availableDates);
+        }
+
+        setViewData({ ...data, chartData: allChartData, average: avg, prob: studentProb });
       } else { setSearchError('查無此學號'); }
     } catch (e) { setSearchError('系統忙碌'); }
     setLoading(false);
@@ -1513,7 +1562,6 @@ export default function App() {
                                             const currentClass = g.class || 'A班';
                                             if (currentClass !== teacherClassFilter) return false;
 
-                                            // Check if any score exists
                                             const hasScore = (g.chi !== '' && g.chi !== undefined) || 
                                                              (g.eng !== '' && g.eng !== undefined) || 
                                                              (g.math !== '' && g.math !== undefined);
@@ -1524,7 +1572,6 @@ export default function App() {
                                             displayedStudents.sort((a, b) => {
                                                 const prA = getBatchStudentPR(a, batchDate);
                                                 const prB = getBatchStudentPR(b, batchDate);
-                                                // Handle '-' case for sorting
                                                 const valA = prA === '-' ? -1 : prA;
                                                 const valB = prB === '-' ? -1 : prB;
                                                 return valB - valA;
@@ -1538,7 +1585,6 @@ export default function App() {
                                         }
 
                                         return displayedStudents.map((student, sIndex) => {
-                                            // Re-find the exact date key for this student in this weekend group
                                             let targetDate = batchDate;
                                             if (student.grades) {
                                                 const existingKey = Object.keys(student.grades).find(k => getWeekendID(k) === getWeekendID(batchDate));
@@ -1571,10 +1617,9 @@ export default function App() {
                     </div>
                 )}
             </div>
-            {/* ... other modals ... */}
             {statusMsg && <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/90 text-white px-5 py-3 rounded-full flex items-center text-xs font-bold shadow-2xl backdrop-blur-md z-50 border border-white/10"><Check className="w-4 h-4 mr-2 text-emerald-400" /> {statusMsg}</div>}
               
-            {/* ... Single View ... */}
+            {/* ... existing Single View code ... */}
             {teacherViewMode === 'single' && currentStudentId && !loading && (
               <div className={`rounded-[2rem] shadow-2xl border overflow-hidden backdrop-blur-md ${darkMode ? 'bg-[#0f172a]/70 border-white/10 ring-1 ring-white/5' : 'bg-white/80 border-white/60'}`}>
                 <div className={`p-6 border-b flex justify-between items-center ${darkMode ? 'border-white/5 bg-[#0f172a]/50' : 'border-slate-50 bg-white/50'}`}>
@@ -1656,8 +1701,31 @@ export default function App() {
                            <h3 className="text-3xl font-bold tracking-tighter text-white">{viewData.name}</h3>
                            <p className="text-slate-500 font-mono text-xs mt-1 font-bold">{viewData.id}</p>
                        </div>
-                       <button onClick={() => setViewData(null)} className="text-slate-400 hover:text-white bg-white/5 p-2 rounded-full backdrop-blur-md transition-colors"><LogOut className="w-4 h-4"/></button>
+                       
+                       {/* --- NEW PROBABILITY DISPLAY --- */}
+                       {viewData.prob && viewData.prob !== '-' && (
+                         <div className="text-right">
+                            <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest mb-1 opacity-80">錄取機率</div>
+                            <div className="text-3xl font-black text-white flex items-center justify-end gap-1">
+                                {viewData.prob}<span className="text-lg opacity-50">%</span>
+                            </div>
+                         </div>
+                       )}
+                       {/* --------------------------------- */}
+                       
+                       <button onClick={() => setViewData(null)} className="text-slate-400 hover:text-white bg-white/5 p-2 rounded-full backdrop-blur-md transition-colors ml-4"><LogOut className="w-4 h-4"/></button>
                    </div>
+                   
+                   {/* --- DISCLAIMER --- */}
+                   {viewData.prob && viewData.prob !== '-' && (
+                       <div className="mt-2 flex items-start gap-2 opacity-60">
+                           <Info className="w-3 h-3 text-emerald-400 mt-0.5 flex-shrink-0" />
+                           <p className="text-[10px] text-slate-300 font-medium leading-relaxed">
+                               註：此機率為系統依據歷次成績趨勢綜合運算之結果，僅供學習參考。
+                           </p>
+                       </div>
+                   )}
+                   {/* ------------------ */}
                 </div>
 
                 <div className="p-6">
@@ -1760,8 +1828,6 @@ export default function App() {
                       <h3 className={`text-xl font-bold flex items-center gap-3 ${darkMode ? 'text-white' : 'text-slate-800'}`}><Edit3 className="w-5 h-5 text-indigo-500"/> 設定班級平均</h3>
                       <button onClick={() => setShowAvgModal(false)} className={`p-2 rounded-full transition ${darkMode ? 'bg-white/5 hover:bg-white/10 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-500'}`}><X className="w-5 h-5"/></button>
                   </div>
-                  
-                  {/* Class Tabs for Average Settings */}
                   <div className={`px-6 pt-6 pb-2`}>
                       <div className={`flex p-1 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
                           {CLASS_DEFS.map(c => (
@@ -1769,7 +1835,6 @@ export default function App() {
                           ))}
                       </div>
                   </div>
-
                   <div className={`px-6 pb-6 overflow-y-auto flex-1 ${darkMode ? 'bg-[#020617]/30' : 'bg-slate-50/50'}`}>
                       <div className="mb-4 text-xs font-bold text-amber-500 bg-amber-500/10 p-3 rounded-xl border border-amber-500/20 flex items-center gap-2">
                         <Sparkles className="w-4 h-4" />
@@ -1811,11 +1876,9 @@ export default function App() {
           </div>
         )}
 
-        {/* --- Missing Stats Modal Added Here --- */}
         {statsModalData && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setStatsModalData(null)}>
                 <div className={`rounded-[2.5rem] w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh] ${darkMode ? 'bg-slate-800 border border-white/10' : 'bg-white shadow-2xl'}`} onClick={e => e.stopPropagation()}>
-                    {/* Header */}
                     <div className={`p-6 border-b flex justify-between items-center ${darkMode ? 'border-white/5 bg-slate-800/50' : 'border-slate-100'}`}>
                         <div>
                             <div className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${darkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>Score Distribution</div>
@@ -1823,10 +1886,7 @@ export default function App() {
                         </div>
                         <button onClick={() => setStatsModalData(null)} className={`p-2 rounded-full transition ${darkMode ? 'bg-white/5 hover:bg-white/10 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-500'}`}><X className="w-5 h-5"/></button>
                     </div>
-
-                    {/* Content */}
                     <div className="p-6 overflow-y-auto">
-                        {/* Tabs */}
                         <div className={`flex p-1 rounded-xl mb-6 shadow-inner ${darkMode ? 'bg-[#020617]/50 border border-white/5' : 'bg-slate-100 border border-slate-200'}`}>
                             {['總分', '國文', '英文', '數學'].map(tab => {
                                 const tabKey = tab === '總分' ? 'total' : tab === '國文' ? 'chi' : tab === '英文' ? 'eng' : 'math';
@@ -1839,13 +1899,9 @@ export default function App() {
                                 )
                             })}
                         </div>
-
-                        {/* Chart */}
                         <div className="mb-6">
                             <DistributionChart data={statsModalData[statsActiveTab]} colorKey={statsActiveTab} isDarkMode={darkMode} />
                         </div>
-
-                        {/* My Score Display */}
                         <div className={`p-4 rounded-2xl flex justify-between items-center border ${darkMode ? 'bg-white/5 border-white/5' : 'bg-slate-50 border-slate-200'}`}>
                             <span className={`text-sm font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>我的分數</span>
                             <span className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-slate-800'}`}>{statsModalData.myGrades[statsActiveTab]}</span>
@@ -1855,7 +1911,6 @@ export default function App() {
             </div>
         )}
 
-        {/* Security Check Modal */}
         {showSecurityModal && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[60] p-6 animate-in fade-in duration-200" onClick={() => {setShowSecurityModal(false); setSecurityInput('');}}>
                 <div className={`p-8 rounded-[2rem] shadow-2xl max-w-xs w-full text-center transform transition-all scale-100 border ${darkMode ? 'bg-slate-800 border-white/10' : 'bg-white border-white/50'}`} onClick={e => e.stopPropagation()}>
@@ -1864,7 +1919,6 @@ export default function App() {
                     </div>
                     <h3 className={`text-lg font-bold mb-2 ${darkMode ? 'text-white' : 'text-slate-800'}`}>安全驗證</h3>
                     <p className={`text-xs mb-6 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>請輸入安全密碼以繼續</p>
-                    
                     <input 
                         ref={securityInputRef}
                         type="password" 

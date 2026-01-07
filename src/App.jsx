@@ -194,6 +194,7 @@ const SingleSubjectChart = ({ data, subjectKey, avgKey, colorKey, title, domain,
                       }} 
                   />
                   <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: '12px', fontWeight: 500, color: isDarkMode ? '#94a3b8' : '#475569' }}/>
+                  {/* Added connectNulls={true} to ensure the average line is drawn even if there are gaps */}
                   <Line name="班平均" type="monotone" dataKey={avgKey} stroke="#94a3b8" strokeWidth={2} strokeOpacity={0.6} dot={false} activeDot={{ r: 4, fill: '#94a3b8', stroke: 'none' }} isAnimationActive={false} connectNulls={true} />
                   <Line name={title} type="monotone" dataKey={subjectKey} stroke={COLORS[colorKey].hex} strokeWidth={3} activeDot={{ r: 6, strokeWidth: 0 }} isAnimationActive={true} animationDuration={1500} connectNulls={true} />
               </LineChart>
@@ -599,12 +600,6 @@ export default function App() {
   };
 
   const handleLogout = () => { setIsAuthenticated(false); localStorage.removeItem('teacher_auth'); setMode('landing'); };
-
-  const calculateTotal = (chi, eng, math) => {
-      const c = parseFloat(chi) || 0; const e = parseFloat(eng) || 0; const m = parseFloat(math) || 0;
-      if (chi === '' && eng === '' && math === '') return '';
-      return (c + e + m).toFixed(1);
-  };
 
   const loadAllStudents = async () => {
       setLoading(true);
@@ -1192,7 +1187,7 @@ export default function App() {
            return isNaN(val) ? null : val;
       }).filter(v => v !== null);
 
-      if (scores.length < 50) return null; // Show PR only if > 50 students (lowered from 100 for dev testing, can be 100)
+      if (scores.length < 100) return null;
 
       // Sort descending
       scores.sort((a, b) => b - a);

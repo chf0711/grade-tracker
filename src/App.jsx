@@ -202,8 +202,6 @@ const calculateProbLogic = (targetStudent, scoresByDate, mathScoresByDate, stude
                      pr = 48;
                  } else {
                      // Others: Linear Interpolation from 99 down to 60
-                     // Rank 1 -> 99
-                     // Rank (count-3) -> 60
                      if (count - 3 > 1) {
                          const maxSafePR = 99;
                          const minSafePR = 60;
@@ -217,9 +215,7 @@ const calculateProbLogic = (targetStudent, scoresByDate, mathScoresByDate, stude
              // ---------------------------------------------
              
              // Normalize PR to unified baseline of 52 for averaging
-             // Difference from current baseline
              const diff = pr - baseline; 
-             // Normalized PR (centered around 52)
              const normalizedPR = 52 + diff;
 
              weightedPRSum += normalizedPR * weight;
@@ -432,6 +428,7 @@ export default function App() {
   const [statsModalData, setStatsModalData] = useState(null);
   const [statsActiveTab, setStatsActiveTab] = useState('total');
 
+  // --- OPTIMIZATION: State for probabilities to debounce updates ---
   const [admissionProbabilities, setAdmissionProbabilities] = useState({});
 
   const [xlsxLoaded, setXlsxLoaded] = useState(false);
@@ -466,6 +463,7 @@ export default function App() {
               mathScoresByDate[d] = [];
           });
           
+          // Build Score Arrays
           allStudentsData.forEach(s => {
               if (!s.grades) return;
               Object.entries(s.grades).forEach(([date, g]) => {
@@ -481,9 +479,11 @@ export default function App() {
               });
           });
 
+          // Sort scores for ranking
           Object.keys(scoresByDate).forEach(d => scoresByDate[d].sort((a, b) => b - a));
           Object.keys(mathScoresByDate).forEach(d => mathScoresByDate[d].sort((a, b) => b - a));
 
+          // 2. Pre-process student grades into fast lookup maps
           const studentGradeMaps = {};
           allStudentsData.forEach(s => {
               if (!s.grades) return;
@@ -496,6 +496,7 @@ export default function App() {
 
           const probs = {};
           
+          // 3. Calculate probs using fast lookups
           allStudentsData.forEach(s => {
               probs[s.id] = calculateProbLogic(s, scoresByDate, mathScoresByDate, studentGradeMaps, availableDates);
           });
@@ -848,9 +849,11 @@ export default function App() {
         let headerRowIndex = -1;
         const colMap = { id: -1, name: -1, date: -1, chi: -1, eng: -1, math: -1, class: -1 };
 
+        // 強化版表頭偵測
         for (let i = 0; i < Math.min(data.length, 10); i++) {
             const row = data[i];
             const rowStr = row.map(c => String(c).trim());
+            // 只要包含其中一個關鍵字就認定為表頭
             if (rowStr.some(c => c.includes('學號') || c.includes('ID') || c.includes('姓名') || c.includes('Name'))) {
                 headerRowIndex = i;
                 rowStr.forEach((cell, idx) => {
@@ -875,7 +878,7 @@ export default function App() {
         const newDates = new Set(availableDates);
         let importCount = 0;
         let lastImportedDate = '';
-        let hasError = false; 
+        let hasError = false; // Flag for validation error
 
         for (let i = headerRowIndex + 1; i < data.length; i++) {
           const row = data[i];
@@ -883,6 +886,7 @@ export default function App() {
           
           const rawId = String(row[colMap.id]).toUpperCase().trim();
           
+          // Strict ID Validation: Must contain numbers, max 10 chars (simple check)
           if (rawId.length > 15 || !/\d/.test(rawId)) {
                alert(`匯入失敗：第 ${i+1} 列學號格式錯誤 (${rawId})`);
                hasError = true;
@@ -891,19 +895,27 @@ export default function App() {
 
           const rawName = colMap.name !== -1 && row[colMap.name] ? String(row[colMap.name]).trim() : '';
           
+          // --- 日期格式嚴格標準化 START ---
           let dateStr = '';
           if (colMap.date !== -1 && row[colMap.date]) {
                const rawDate = row[colMap.date];
                let dString = String(rawDate).trim();
+               
+               // 1. 處理Excel數值型日期 (例如 45395) - 略過不處理，假設是字串
+               // 2. 處理常見符號
                dString = dString.replace(/\./g, '/').replace(/-/g, '/');
+               
+               // 3. 補零邏輯
                const parts = dString.split('/');
                if (parts.length >= 2) {
+                   // 格式: 1/3, 01/3, 2025/1/3
                    const m = parseInt(parts[parts.length - 2], 10);
                    const d = parseInt(parts[parts.length - 1], 10);
                    if (!isNaN(m) && !isNaN(d)) {
                        dateStr = `${String(m).padStart(2, '0')}/${String(d).padStart(2, '0')}`;
                    }
                } else if (dString.length === 3 || dString.length === 4) {
+                   // 格式: 412, 0412
                    const m = dString.length === 3 ? dString.slice(0,1) : dString.slice(0,2);
                    const d = dString.slice(-2);
                    dateStr = `${String(m).padStart(2, '0')}/${String(d).padStart(2, '0')}`;
@@ -911,29 +923,35 @@ export default function App() {
                    dateStr = dString; 
                }
           }
+          // --- 日期格式嚴格標準化 END ---
 
+          // Strict Date Validation: If date column exists but parsing failed, abort!
           if (colMap.date !== -1 && row[colMap.date] && (!dateStr || !dateStr.includes('/'))) {
               alert(`匯入失敗：第 ${i+1} 列日期格式錯誤`);
               hasError = true;
               break;
           }
 
-          if (!dateStr || !dateStr.includes('/')) continue; 
+          if (!dateStr || !dateStr.includes('/')) continue; // 跳過無效日期
 
+          // 讀取分數
           const getVal = (idx) => (idx !== -1 && row[idx] !== undefined && row[idx] !== null) ? String(row[idx]).trim() : '';
           const chi = getVal(colMap.chi);
           const eng = getVal(colMap.eng);
           const math = getVal(colMap.math);
           
+          // --- 班級格式嚴格標準化 START ---
           let className = (colMap.class !== -1 && row[colMap.class]) ? String(row[colMap.class]).trim() : 'A班';
           if (/^[a-zA-Z]$/.test(className)) className = className.toUpperCase() + '班';
           else if (className === '日A' || className === '日B') className = className + '班';
           else if (className.includes('A') && !className.includes('班') && !className.includes('日')) className = className + '班';
           else if (className.includes('B') && !className.includes('班') && !className.includes('日')) className = className + '班';
           else if (className.includes('C') && !className.includes('班') && !className.includes('日')) className = className + '班';
+          // --- 班級格式嚴格標準化 END ---
 
+          // WEEKEND GROUP LOGIC (NEW): Normalize date to Saturday for storage key check, BUT store actual date
           const weekendID = getWeekendID(dateStr);
-          if (!newDates.has(weekendID)) newDates.add(weekendID); 
+          if (!newDates.has(weekendID)) newDates.add(weekendID); // Ensure Saturday date is in available list
           
           lastImportedDate = weekendID;
 
@@ -945,6 +963,7 @@ export default function App() {
               student.name = rawName;
           }
           
+          // Store Grade with ACTUAL date from Excel
           student.grades[dateStr] = {
               chi: chi, 
               eng: eng, 
@@ -957,12 +976,12 @@ export default function App() {
 
         if (hasError) {
              setStatusMsg("匯入已取消");
-             return; 
+             return; // Abort everything
         }
 
         const sortedDates = Array.from(newDates).sort(customDateSort);
         setAvailableDates(sortedDates);
-        if (lastImportedDate) setBatchDate(lastImportedDate); 
+        if (lastImportedDate) setBatchDate(lastImportedDate); // 自動切換到剛匯入的日期
         else if (sortedDates.length > 0 && !batchDate) setBatchDate(sortedDates[sortedDates.length - 1]);
         
         if (db) setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: sortedDates }, { merge: true });
@@ -976,7 +995,6 @@ export default function App() {
     reader.readAsBinaryString(file);
   };
 
-  // --- CRITICAL OPTIMIZATION: Memoized Key Handlers ---
   const handleGridKeyDown = useCallback((e, index, subject, type, totalItems) => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
         e.preventDefault();
@@ -1040,7 +1058,7 @@ export default function App() {
           if(updated) { setStatusMsg(`已貼上 ${rows.length} 筆資料`); setTimeout(() => setStatusMsg(''), 2000); }
           return newData;
       });
-  }, [batchDate]);
+  }, [batchDate]); // Added batchDate dependency
 
   const handleSinglePaste = (e, startDateIndex, startSubject) => {
       e.preventDefault();
@@ -1058,7 +1076,7 @@ export default function App() {
               if (dateIndex >= reversedDates.length) return;
               const targetDate = reversedDates[dateIndex];
               const cols = row.split('\t');
-              const currentData = { ...(newGrades[targetDate] || { chi: '', eng: '', math: '', total: '', class: 'A班' }) }; 
+              const currentData = { ...(newGrades[targetDate] || { chi: '', eng: '', math: '', total: '', class: 'A班' }) }; // Default to A班
               let rowUpdated = false;
               cols.forEach((val, cIndex) => {
                   const subjectIndex = startSubjectIndex + cIndex;
@@ -1411,12 +1429,14 @@ export default function App() {
 
   return (
     <div className={`min-h-screen font-sans antialiased transition-colors duration-500 ease-in-out pb-32 relative overflow-x-hidden ${darkMode ? 'bg-gradient-to-br from-[#020617] via-[#1e293b] to-[#020617] text-slate-200' : 'bg-gradient-to-br from-emerald-100 via-slate-50 to-emerald-100 text-slate-800'}`}>
+      {/* Texture Overlay */}
       <div className={`fixed inset-0 pointer-events-none z-0 ${darkMode ? 'opacity-30 mix-blend-overlay' : 'opacity-40'}`} style={{
           background: darkMode 
             ? 'radial-gradient(circle at 50% -20%, rgba(14, 165, 233, 0.15), transparent 50%), radial-gradient(circle at 100% 100%, rgba(16, 185, 129, 0.1), transparent 40%)' 
             : 'radial-gradient(circle at 0% 0%, rgba(52,211,153,0.15) 0%, transparent 50%), radial-gradient(circle at 100% 100%, rgba(99,102,241,0.05) 0%, transparent 40%)'
       }}></div>
 
+      {/* Header */}
       <header className={`fixed top-0 w-full backdrop-blur-2xl z-30 border-b transition-all duration-300 ${darkMode ? 'bg-[#0f172a]/70 border-white/5 shadow-[0_8px_32px_0_rgba(0,0,0,0.36)]' : 'bg-white/60 border-white/40 shadow-sm'}`}>
         <div className="max-w-4xl mx-auto px-6 h-16 flex justify-between items-center relative z-10">
           <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setMode('landing')}>
@@ -1710,37 +1730,35 @@ export default function App() {
                 <div className="bg-slate-900 text-white p-8 pb-6 relative overflow-hidden">
                    <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500 rounded-full -mr-20 -mt-20 blur-3xl opacity-10"></div>
                    <div className="absolute bottom-0 left-0 w-40 h-40 bg-blue-600 rounded-full -ml-10 -mb-10 blur-3xl opacity-10"></div>
+                   
                    <div className="relative z-10 flex justify-between items-start mb-6">
+                       {/* Left Side: Name & ID */}
                        <div>
                            <div className="text-emerald-400 text-[9px] font-bold uppercase tracking-widest mb-2 border border-emerald-500/20 inline-block px-2 py-1 rounded">Student Profile</div>
                            <h3 className="text-3xl font-bold tracking-tighter text-white">{viewData.name}</h3>
                            <p className="text-slate-500 font-mono text-xs mt-1 font-bold">{viewData.id}</p>
                        </div>
-                       
-                       {/* --- NEW PROBABILITY DISPLAY --- */}
-                       {viewData.prob && viewData.prob !== '-' && (
-                         <div className="text-right">
-                            <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest mb-1 opacity-80">錄取機率</div>
-                            <div className="text-3xl font-black text-white flex items-center justify-end gap-1">
-                                {viewData.prob}<span className="text-lg opacity-50">%</span>
-                            </div>
-                         </div>
-                       )}
-                       {/* --------------------------------- */}
-                       
-                       <button onClick={() => setViewData(null)} className="text-slate-400 hover:text-white bg-white/5 p-2 rounded-full backdrop-blur-md transition-colors ml-4"><LogOut className="w-4 h-4"/></button>
-                   </div>
-                   
-                   {/* --- DISCLAIMER --- */}
-                   {viewData.prob && viewData.prob !== '-' && (
-                       <div className="mt-2 flex items-start gap-2 opacity-60">
-                           <Info className="w-3 h-3 text-emerald-400 mt-0.5 flex-shrink-0" />
-                           <p className="text-[10px] text-slate-300 font-medium leading-relaxed">
-                               註：此機率為系統依據歷次成績趨勢綜合運算之結果，僅供學習參考。
-                           </p>
+
+                       {/* Right Side: Logout & Prob */}
+                       <div className="flex flex-col items-end gap-4">
+                           <button onClick={() => setViewData(null)} className="text-slate-400 hover:text-white bg-white/5 p-2 rounded-full backdrop-blur-md transition-colors"><LogOut className="w-4 h-4"/></button>
+                           
+                           {/* --- NEW PROBABILITY DISPLAY --- */}
+                           {viewData.prob && viewData.prob !== '-' && (
+                               <div className="text-right mt-2">
+                                   <div className="text-[10px] font-bold text-emerald-400/80 uppercase tracking-widest mb-0.5">錄取機率</div>
+                                   <div className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-br from-white to-slate-400 flex items-baseline justify-end gap-1 filter drop-shadow-lg">
+                                       {viewData.prob}<span className="text-lg text-emerald-500/80 font-bold">%</span>
+                                   </div>
+                                   <div className="mt-1 flex items-center justify-end gap-1.5 opacity-50">
+                                        <p className="text-[9px] text-slate-300 font-medium">
+                                            系統綜合歷史成績運算，<span className="text-white/90 border-b border-white/20 pb-0.5">僅供參考</span>
+                                        </p>
+                                   </div>
+                               </div>
+                           )}
                        </div>
-                   )}
-                   {/* ------------------ */}
+                   </div>
                 </div>
 
                 <div className="p-6">

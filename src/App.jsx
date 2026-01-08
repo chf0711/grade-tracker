@@ -57,47 +57,32 @@ const customDateSort = (a, b) => {
         if (!a || !b) return 0;
         const cleanA = String(a).replace(/[^0-9/]/g, '');
         const cleanB = String(b).replace(/[^0-9/]/g, '');
-        
-        // Ensure we strictly have numbers to split
         if (!cleanA.includes('/') || !cleanB.includes('/')) return 0;
-        
         const [m1, d1] = cleanA.split('/').map(Number);
         const [m2, d2] = cleanB.split('/').map(Number);
-        
         if (isNaN(m1) || isNaN(d1) || isNaN(m2) || isNaN(d2)) return 0;
-
-        // Academic Year Logic: 4-12 is 2025, 1-3 is 2026
-        // We map 1,2,3 to 13,14,15 to sort them at the end
         const m1Adj = m1 < 4 ? m1 + 12 : m1;
         const m2Adj = m2 < 4 ? m2 + 12 : m2;
-        
         if (m1Adj !== m2Adj) return m1Adj - m2Adj;
         return d1 - d2;
     } catch (e) { return 0; }
 };
 
-// ** CRITICAL FIX: Robust Date Normalization & Padding **
 const getWeekendID = (dateStr) => {
     if (!dateStr || !dateStr.includes('/')) return dateStr;
     try {
         const [mStr, dStr] = dateStr.split('/');
         const m = parseInt(mStr, 10);
         const d = parseInt(dStr, 10);
-        
-        // Determine Year based on Month (Academic Year 2025-2026)
         const y = m >= 4 ? 2025 : 2026; 
         const dateObj = new Date(y, m - 1, d);
-        const dayOfWeek = dateObj.getDay(); // 0 = Sun
-        
-        let finalDate = dateObj;
-        
-        if (dayOfWeek === 0) { // Sunday -> move back to Saturday
-            finalDate = new Date(dateObj);
-            finalDate.setDate(dateObj.getDate() - 1);
+        const dayOfWeek = dateObj.getDay(); 
+        if (dayOfWeek === 0) { 
+            const satDate = new Date(dateObj);
+            satDate.setDate(dateObj.getDate() - 1);
+            return `${String(satDate.getMonth() + 1).padStart(2, '0')}/${String(satDate.getDate()).padStart(2, '0')}`;
         }
-        
-        // Always return padded MM/DD string to ensure consistency
-        return `${String(finalDate.getMonth() + 1).padStart(2, '0')}/${String(finalDate.getDate()).padStart(2, '0')}`;
+        return dateStr;
     } catch (e) { return dateStr; }
 };
 
@@ -182,15 +167,8 @@ const calculateProbLogic = (targetStudent, scoresByDate, mathScoresByDate, stude
     
     const myGrades = studentGradeMaps[targetStudent.id] || {};
 
-    // Use a Set to track processed weekends to avoid double counting if multiple dates map to same weekend
-    const processedWeekends = new Set();
-
     availableDates.forEach((date, index) => {
          const weekendID = getWeekendID(date);
-         
-         if (processedWeekends.has(weekendID)) return; // Skip if already processed this weekend
-         processedWeekends.add(weekendID);
-
          const grade = myGrades[weekendID];
          let myTotal = null;
          let myMath = null;
@@ -972,7 +950,15 @@ export default function App() {
 
           if (!dateStr || !dateStr.includes('/')) continue; 
 
-          const getVal = (idx) => (idx !== -1 && row[idx] !== undefined && row[idx] !== null) ? String(row[idx]).trim() : '';
+          const getVal = (idx) => {
+            if (idx !== -1 && row[idx] !== undefined && row[idx] !== null) {
+                const val = String(row[idx]).trim();
+                if (val === '') return '';
+                const num = parseFloat(val);
+                return isNaN(num) ? val : Math.round(num * 10) / 10;
+            }
+            return '';
+          };
           const chi = getVal(colMap.chi);
           const eng = getVal(colMap.eng);
           const math = getVal(colMap.math);
@@ -1927,8 +1913,6 @@ export default function App() {
                       <h3 className={`text-xl font-bold flex items-center gap-3 ${darkMode ? 'text-white' : 'text-slate-800'}`}><Edit3 className="w-5 h-5 text-indigo-500"/> 設定班級平均</h3>
                       <button onClick={() => setShowAvgModal(false)} className={`p-2 rounded-full transition ${darkMode ? 'bg-white/5 hover:bg-white/10 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-500'}`}><X className="w-5 h-5"/></button>
                   </div>
-                  
-                  {/* Class Tabs for Average Settings */}
                   <div className={`px-6 pt-6 pb-2`}>
                       <div className={`flex p-1 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
                           {CLASS_DEFS.map(c => (
@@ -1936,7 +1920,6 @@ export default function App() {
                           ))}
                       </div>
                   </div>
-
                   <div className={`px-6 pb-6 overflow-y-auto flex-1 ${darkMode ? 'bg-[#020617]/30' : 'bg-slate-50/50'}`}>
                       <div className="mb-4 text-xs font-bold text-amber-500 bg-amber-500/10 p-3 rounded-xl border border-amber-500/20 flex items-center gap-2">
                         <Sparkles className="w-4 h-4" />

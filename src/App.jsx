@@ -57,32 +57,47 @@ const customDateSort = (a, b) => {
         if (!a || !b) return 0;
         const cleanA = String(a).replace(/[^0-9/]/g, '');
         const cleanB = String(b).replace(/[^0-9/]/g, '');
+        
+        // Ensure we strictly have numbers to split
         if (!cleanA.includes('/') || !cleanB.includes('/')) return 0;
+        
         const [m1, d1] = cleanA.split('/').map(Number);
         const [m2, d2] = cleanB.split('/').map(Number);
+        
         if (isNaN(m1) || isNaN(d1) || isNaN(m2) || isNaN(d2)) return 0;
+
+        // Academic Year Logic: 4-12 is 2025, 1-3 is 2026
+        // We map 1,2,3 to 13,14,15 to sort them at the end
         const m1Adj = m1 < 4 ? m1 + 12 : m1;
         const m2Adj = m2 < 4 ? m2 + 12 : m2;
+        
         if (m1Adj !== m2Adj) return m1Adj - m2Adj;
         return d1 - d2;
     } catch (e) { return 0; }
 };
 
+// ** CRITICAL FIX: Robust Date Normalization & Padding **
 const getWeekendID = (dateStr) => {
     if (!dateStr || !dateStr.includes('/')) return dateStr;
     try {
         const [mStr, dStr] = dateStr.split('/');
         const m = parseInt(mStr, 10);
         const d = parseInt(dStr, 10);
+        
+        // Determine Year based on Month (Academic Year 2025-2026)
         const y = m >= 4 ? 2025 : 2026; 
         const dateObj = new Date(y, m - 1, d);
-        const dayOfWeek = dateObj.getDay(); 
-        if (dayOfWeek === 0) { 
-            const satDate = new Date(dateObj);
-            satDate.setDate(dateObj.getDate() - 1);
-            return `${String(satDate.getMonth() + 1).padStart(2, '0')}/${String(satDate.getDate()).padStart(2, '0')}`;
+        const dayOfWeek = dateObj.getDay(); // 0 = Sun
+        
+        let finalDate = dateObj;
+        
+        if (dayOfWeek === 0) { // Sunday -> move back to Saturday
+            finalDate = new Date(dateObj);
+            finalDate.setDate(dateObj.getDate() - 1);
         }
-        return dateStr;
+        
+        // Always return padded MM/DD string to ensure consistency
+        return `${String(finalDate.getMonth() + 1).padStart(2, '0')}/${String(finalDate.getDate()).padStart(2, '0')}`;
     } catch (e) { return dateStr; }
 };
 
@@ -167,8 +182,15 @@ const calculateProbLogic = (targetStudent, scoresByDate, mathScoresByDate, stude
     
     const myGrades = studentGradeMaps[targetStudent.id] || {};
 
+    // Use a Set to track processed weekends to avoid double counting if multiple dates map to same weekend
+    const processedWeekends = new Set();
+
     availableDates.forEach((date, index) => {
          const weekendID = getWeekendID(date);
+         
+         if (processedWeekends.has(weekendID)) return; // Skip if already processed this weekend
+         processedWeekends.add(weekendID);
+
          const grade = myGrades[weekendID];
          let myTotal = null;
          let myMath = null;
@@ -849,23 +871,51 @@ export default function App() {
         let headerRowIndex = -1;
         const colMap = { id: -1, name: -1, date: -1, chi: -1, eng: -1, math: -1, class: -1 };
 
-        // 強化版表頭偵測
+        // 強化版表頭偵測 (Smart Column Detection)
         for (let i = 0; i < Math.min(data.length, 10); i++) {
             const row = data[i];
-            const rowStr = row.map(c => String(c).trim());
-            // 只要包含其中一個關鍵字就認定為表頭
-            if (rowStr.some(c => c.includes('學號') || c.includes('ID') || c.includes('姓名') || c.includes('Name'))) {
+            const rowStr = row.map(c => (c !== undefined && c !== null) ? String(c).trim() : '');
+            
+            // Check for student ID or Name to identify header row
+            if (rowStr.some(c => c.includes('學號') || c.toUpperCase().includes('ID') || c.includes('姓名') || c.toUpperCase().includes('NAME'))) {
                 headerRowIndex = i;
+                
                 rowStr.forEach((cell, idx) => {
-                    if (cell.includes('學號') || cell.includes('ID')) colMap.id = idx;
-                    else if (cell.includes('姓名') || cell.includes('Name')) colMap.name = idx;
-                    else if (cell.includes('日期') || cell.includes('Date')) colMap.date = idx;
-                    else if (cell.includes('國') || cell.includes('Chi') || cell.includes('Chinese')) colMap.chi = idx;
-                    else if (cell.includes('英') || cell.includes('Eng') || cell.includes('English')) colMap.eng = idx;
-                    else if (cell.includes('數') || cell.includes('Math')) colMap.math = idx;
-                    else if (cell.includes('班') || cell.includes('Class') || cell.includes('類別')) colMap.class = idx;
+                    const text = cell.replace(/\s+/g, ''); // Remove all spaces for easier matching
+                    const lowerText = text.toLowerCase();
+                    
+                    // 1. Basic Info
+                    if (text.includes('學號') || lowerText === 'id' || lowerText.includes('studentid')) colMap.id = idx;
+                    else if (text.includes('姓名') || lowerText.includes('name')) colMap.name = idx;
+                    else if (text.includes('日期') || text.includes('測驗日')) colMap.date = idx;
+                    else if (text.includes('班') || text.includes('類別')) colMap.class = idx;
+                    
+                    // 2. Score Columns - Strict "Total" priority
+                    // Chinese
+                    else if (text.includes('國') && (text.includes('總') || text.includes('實得') || text.includes('Score') || text.includes('Total'))) {
+                        colMap.chi = idx;
+                    }
+                    // English
+                    else if (text.includes('英') && (text.includes('總') || text.includes('實得') || text.includes('Score') || text.includes('Total'))) {
+                        colMap.eng = idx;
+                    }
+                    // Math
+                    else if (text.includes('數') && (text.includes('總') || text.includes('實得') || text.includes('Score') || text.includes('Total'))) {
+                        colMap.math = idx;
+                    }
                 });
-                break;
+
+                // Fallback for scores if "Total" not found
+                if (colMap.chi === -1) {
+                     rowStr.forEach((cell, idx) => { if (cell.includes('國') && colMap.chi === -1) colMap.chi = idx; });
+                }
+                if (colMap.eng === -1) {
+                     rowStr.forEach((cell, idx) => { if (cell.includes('英') && colMap.eng === -1) colMap.eng = idx; });
+                }
+                if (colMap.math === -1) {
+                     rowStr.forEach((cell, idx) => { if (cell.includes('數') && colMap.math === -1) colMap.math = idx; });
+                }
+                break; 
             }
         }
 
@@ -874,48 +924,43 @@ export default function App() {
              colMap.id = 0; colMap.name = 1; colMap.date = 2; colMap.chi = 3; colMap.eng = 4; colMap.math = 5;
         }
 
+        // Default Class column to first column if not detected
+        if (colMap.class === -1) colMap.class = 0;
+
         const newStudentsMap = allStudentsData.reduce((acc, s) => { acc[s.id] = { ...s, grades: { ...s.grades } }; return acc; }, {});
         const newDates = new Set(availableDates);
         let importCount = 0;
         let lastImportedDate = '';
-        let hasError = false; // Flag for validation error
+        let hasError = false; 
 
         for (let i = headerRowIndex + 1; i < data.length; i++) {
           const row = data[i];
-          if (!row[colMap.id]) continue; 
+          if (!row || row[colMap.id] === undefined) continue; 
           
           const rawId = String(row[colMap.id]).toUpperCase().trim();
           
-          // Strict ID Validation: Must contain numbers, max 10 chars (simple check)
           if (rawId.length > 15 || !/\d/.test(rawId)) {
-               alert(`匯入失敗：第 ${i+1} 列學號格式錯誤 (${rawId})`);
-               hasError = true;
-               break;
+               continue; 
           }
 
           const rawName = colMap.name !== -1 && row[colMap.name] ? String(row[colMap.name]).trim() : '';
           
-          // --- 日期格式嚴格標準化 START ---
+          // --- Date Normalization ---
           let dateStr = '';
           if (colMap.date !== -1 && row[colMap.date]) {
                const rawDate = row[colMap.date];
                let dString = String(rawDate).trim();
                
-               // 1. 處理Excel數值型日期 (例如 45395) - 略過不處理，假設是字串
-               // 2. 處理常見符號
                dString = dString.replace(/\./g, '/').replace(/-/g, '/');
                
-               // 3. 補零邏輯
                const parts = dString.split('/');
                if (parts.length >= 2) {
-                   // 格式: 1/3, 01/3, 2025/1/3
                    const m = parseInt(parts[parts.length - 2], 10);
                    const d = parseInt(parts[parts.length - 1], 10);
                    if (!isNaN(m) && !isNaN(d)) {
                        dateStr = `${String(m).padStart(2, '0')}/${String(d).padStart(2, '0')}`;
                    }
                } else if (dString.length === 3 || dString.length === 4) {
-                   // 格式: 412, 0412
                    const m = dString.length === 3 ? dString.slice(0,1) : dString.slice(0,2);
                    const d = dString.slice(-2);
                    dateStr = `${String(m).padStart(2, '0')}/${String(d).padStart(2, '0')}`;
@@ -923,35 +968,31 @@ export default function App() {
                    dateStr = dString; 
                }
           }
-          // --- 日期格式嚴格標準化 END ---
+          // ------------------------
 
-          // Strict Date Validation: If date column exists but parsing failed, abort!
-          if (colMap.date !== -1 && row[colMap.date] && (!dateStr || !dateStr.includes('/'))) {
-              alert(`匯入失敗：第 ${i+1} 列日期格式錯誤`);
-              hasError = true;
-              break;
-          }
+          if (!dateStr || !dateStr.includes('/')) continue; 
 
-          if (!dateStr || !dateStr.includes('/')) continue; // 跳過無效日期
-
-          // 讀取分數
           const getVal = (idx) => (idx !== -1 && row[idx] !== undefined && row[idx] !== null) ? String(row[idx]).trim() : '';
           const chi = getVal(colMap.chi);
           const eng = getVal(colMap.eng);
           const math = getVal(colMap.math);
           
-          // --- 班級格式嚴格標準化 START ---
-          let className = (colMap.class !== -1 && row[colMap.class]) ? String(row[colMap.class]).trim() : 'A班';
-          if (/^[a-zA-Z]$/.test(className)) className = className.toUpperCase() + '班';
-          else if (className === '日A' || className === '日B') className = className + '班';
-          else if (className.includes('A') && !className.includes('班') && !className.includes('日')) className = className + '班';
-          else if (className.includes('B') && !className.includes('班') && !className.includes('日')) className = className + '班';
-          else if (className.includes('C') && !className.includes('班') && !className.includes('日')) className = className + '班';
-          // --- 班級格式嚴格標準化 END ---
+          // --- Class Normalization ---
+          let rawClass = (colMap.class !== -1 && row[colMap.class]) ? String(row[colMap.class]).trim().toUpperCase() : 'A班';
+          let className = 'A班';
 
-          // WEEKEND GROUP LOGIC (NEW): Normalize date to Saturday for storage key check, BUT store actual date
+          if (rawClass.includes('日') || rawClass.includes('SUN')) {
+               if (rawClass.includes('B')) className = '日B班';
+               else className = '日A班';
+          }
+          else if (rawClass.includes('C')) className = 'C班'; // Priority check for C
+          else if (rawClass.includes('B')) className = 'B班';
+          else if (rawClass.includes('A')) className = 'A班';
+          else className = 'A班'; 
+          // ---------------------------
+
           const weekendID = getWeekendID(dateStr);
-          if (!newDates.has(weekendID)) newDates.add(weekendID); // Ensure Saturday date is in available list
+          if (!newDates.has(weekendID)) newDates.add(weekendID); 
           
           lastImportedDate = weekendID;
 
@@ -963,7 +1004,6 @@ export default function App() {
               student.name = rawName;
           }
           
-          // Store Grade with ACTUAL date from Excel
           student.grades[dateStr] = {
               chi: chi, 
               eng: eng, 
@@ -976,13 +1016,19 @@ export default function App() {
 
         if (hasError) {
              setStatusMsg("匯入已取消");
-             return; // Abort everything
+             return; 
         }
 
         const sortedDates = Array.from(newDates).sort(customDateSort);
         setAvailableDates(sortedDates);
-        if (lastImportedDate) setBatchDate(lastImportedDate); // 自動切換到剛匯入的日期
-        else if (sortedDates.length > 0 && !batchDate) setBatchDate(sortedDates[sortedDates.length - 1]);
+        
+        // ** IMMEDIATE DISPLAY FIX **
+        // Automatically switch batch view to the imported date
+        if (lastImportedDate) {
+             setBatchDate(lastImportedDate);
+        } else if (sortedDates.length > 0 && !batchDate) {
+             setBatchDate(sortedDates[sortedDates.length - 1]);
+        }
         
         if (db) setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: sortedDates }, { merge: true });
 
@@ -1469,6 +1515,7 @@ export default function App() {
             <div className={`p-5 rounded-full mb-6 shadow-2xl ring-1 backdrop-blur-3xl transition-transform duration-700 hover:scale-105 ${darkMode ? 'bg-[#0f172a]/40 border-white/10 shadow-emerald-500/20 ring-1 ring-emerald-500/20' : 'bg-white/60 border-white/60 shadow-[0_20px_40px_rgba(16,185,129,0.15)]'}`}>
                 <Sparkles className={`w-10 h-10 ${darkMode ? 'text-emerald-400 drop-shadow-[0_0_15px_rgba(52,211,153,0.5)]' : 'text-emerald-600'}`} />
             </div>
+            {/* Slogan with matching serif font and consistent gradient */}
             <h2 className={`text-xl md:text-3xl font-black font-serif tracking-tighter mb-4 text-center py-6 px-4 leading-normal bg-clip-text text-transparent bg-gradient-to-r ${darkMode ? 'from-emerald-300 via-teal-200 to-cyan-300 drop-shadow-sm' : 'from-emerald-800 via-teal-700 to-slate-700'}`}>Make Progress Visible</h2>
             <p className="text-slate-400 text-xs font-medium tracking-wide mb-6">2025-2026 Learning Journey</p>
             <ExamCountdown isDarkMode={darkMode} />
@@ -1593,12 +1640,31 @@ export default function App() {
                                             const g = s.grades?.[batchDate];
                                             if (!g) return false;
                                             
-                                            const currentClass = g.class || 'A班';
+                                            // --- Fuzzy Match Logic for Filter ---
+                                            // If student has ANY grade data that maps to this weekend ID, we should consider it
+                                            let hasGradeForThisWeekend = false;
+                                            if (s.grades) {
+                                                const matchingKey = Object.keys(s.grades).find(k => getWeekendID(k) === getWeekendID(batchDate));
+                                                if (matchingKey) hasGradeForThisWeekend = true;
+                                            }
+                                            
+                                            if (!hasGradeForThisWeekend) return false;
+
+                                            // Re-find the exact grade object using fuzzy logic
+                                            let targetDate = batchDate;
+                                            if (s.grades) {
+                                                const existingKey = Object.keys(s.grades).find(k => getWeekendID(k) === getWeekendID(batchDate));
+                                                if (existingKey) targetDate = existingKey;
+                                            }
+                                            const gradeObj = s.grades[targetDate];
+                                            
+                                            const currentClass = gradeObj?.class || 'A班';
                                             if (currentClass !== teacherClassFilter) return false;
 
-                                            const hasScore = (g.chi !== '' && g.chi !== undefined) || 
-                                                             (g.eng !== '' && g.eng !== undefined) || 
-                                                             (g.math !== '' && g.math !== undefined);
+                                            // Check if any score exists
+                                            const hasScore = (gradeObj.chi !== '' && gradeObj.chi !== undefined) || 
+                                                             (gradeObj.eng !== '' && gradeObj.eng !== undefined) || 
+                                                             (gradeObj.math !== '' && gradeObj.math !== undefined);
                                             return hasScore;
                                         });
 
@@ -1765,7 +1831,7 @@ export default function App() {
                   {hasPriorHistory && (
                   <div className={`flex p-1 mb-6 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
                       {PHASES.map(phase => (
-                          <button key={phase.id} onClick={() => setActivePhase(phase.id)} className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${activePhase === phase.id ? (darkMode ? 'bg-slate-800 text-white shadow-md border border-white/10 ring-1 ring-white/5' : 'bg-white text-slate-800 shadow-sm border border-slate-200/50') : 'text-slate-500 hover:text-slate-400'}`}>{phase.name}</button>
+                          <button key={phase.id} onClick={() => setActivePhase(phase.id)} className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${activePhase === phase.id ? (darkMode ? 'bg-slate-800 text-white shadow-md border border-white/10 ring-1 ring-white/5' : 'bg-white text-slate-800 shadow-sm border border-slate-100') : 'text-slate-500 hover:text-slate-400'}`}>{phase.name}</button>
                       ))}
                   </div>
                   )}
@@ -1861,6 +1927,8 @@ export default function App() {
                       <h3 className={`text-xl font-bold flex items-center gap-3 ${darkMode ? 'text-white' : 'text-slate-800'}`}><Edit3 className="w-5 h-5 text-indigo-500"/> 設定班級平均</h3>
                       <button onClick={() => setShowAvgModal(false)} className={`p-2 rounded-full transition ${darkMode ? 'bg-white/5 hover:bg-white/10 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-500'}`}><X className="w-5 h-5"/></button>
                   </div>
+                  
+                  {/* Class Tabs for Average Settings */}
                   <div className={`px-6 pt-6 pb-2`}>
                       <div className={`flex p-1 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
                           {CLASS_DEFS.map(c => (
@@ -1868,6 +1936,7 @@ export default function App() {
                           ))}
                       </div>
                   </div>
+
                   <div className={`px-6 pb-6 overflow-y-auto flex-1 ${darkMode ? 'bg-[#020617]/30' : 'bg-slate-50/50'}`}>
                       <div className="mb-4 text-xs font-bold text-amber-500 bg-amber-500/10 p-3 rounded-xl border border-amber-500/20 flex items-center gap-2">
                         <Sparkles className="w-4 h-4" />

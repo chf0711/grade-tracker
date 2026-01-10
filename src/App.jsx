@@ -115,9 +115,9 @@ const getWeekendDisplayLabel = (dateStr) => {
 };
 
 const PHASES = [
-    { id: 'p1', name: '第一階段', range: [0, 18] },
-    { id: 'p2', name: '第二階段', range: [18, 36] },
-    { id: 'mock', name: '模考班', range: [36, 100] } 
+    { id: 'p1', name: '第一階段', range: [0, 17] },
+    { id: 'p2', name: '第二階段', range: [17, 35] },
+    { id: 'mock', name: '模考班', range: [35, 100] } 
 ];
 
 const COLORS = {

@@ -434,6 +434,16 @@ export default function App() {
   const [xlsxLoaded, setXlsxLoaded] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
 
+  // 預先建立依照考試日期排序好的日期清單，避免在 render 階段重複 sort
+  const sortedAvailableDatesAsc = useMemo(
+      () => [...availableDates].sort(customDateSort),
+      [availableDates]
+  );
+  const sortedAvailableDatesDesc = useMemo(
+      () => [...sortedAvailableDatesAsc].slice().reverse(),
+      [sortedAvailableDatesAsc]
+  );
+
   useEffect(() => {
       const storedAuth = localStorage.getItem('teacher_auth');
       if (storedAuth === 'true') setIsAuthenticated(true);
@@ -441,13 +451,13 @@ export default function App() {
 
   const hasPriorHistory = useMemo(() => {
       if (!viewData || !viewData.chartData) return true;
-      const sortedAllDates = [...availableDates].sort(customDateSort);
+      const sortedAllDates = sortedAvailableDatesAsc;
       return viewData.chartData.some(d => {
           const weekendID = getWeekendID(d.date);
           const idx = sortedAllDates.indexOf(weekendID);
           return idx >= 0 && idx < 36;
       });
-  }, [viewData, availableDates]);
+  }, [viewData, sortedAvailableDatesAsc]);
 
   // --- OPTIMIZATION: Debounced Calculation Effect ---
   useEffect(() => {
@@ -1076,7 +1086,6 @@ export default function App() {
                   const subjectIndex = startSubjectIndex + cIndex;
                   if (subjectIndex >= 3) return;
                   const subject = subjects[subjectIndex];
-                  const currentDateGrades = { ...(currentGrades[batchDate] || { chi: '', eng: '', math: '', total: '', class: 'A班' }) };
                   currentDateGrades[subject] = val.trim();
                   rowUpdated = true;
               });
@@ -1098,7 +1107,7 @@ export default function App() {
       const rows = pasteData.trim().split(/\r\n|\n|\r/); 
       const subjects = ['chi', 'eng', 'math'];
       const startSubjectIndex = subjects.indexOf(startSubject);
-      const reversedDates = [...availableDates].sort(customDateSort).reverse();
+      const reversedDates = sortedAvailableDatesDesc;
 
       setGrades(prev => {
           const newGrades = { ...prev };
@@ -1134,7 +1143,7 @@ export default function App() {
       const rows = pasteData.trim().split(/\r\n|\n|\r/);
       const subjects = ['chi', 'eng', 'math', 'total'];
       const startSubjectIndex = subjects.indexOf(startSubject);
-      const reversedDates = [...availableDates].sort(customDateSort).reverse();
+      const reversedDates = sortedAvailableDatesDesc;
 
       setClassAverages(prev => {
           const newAvgs = { ...prev };
@@ -1229,7 +1238,7 @@ export default function App() {
       }
       if (data) {
         const allChartData = [];
-        const sortedDates = [...availableDates].sort(customDateSort); 
+        const sortedDates = sortedAvailableDatesAsc; 
         for (const date of sortedDates) {
           const weekendID = getWeekendID(date);
           const weekData = (data.grades && data.grades[date]) ? data.grades[date] : 
@@ -1303,11 +1312,56 @@ export default function App() {
       if (!fullData) return [];
       const currentPhaseConfig = PHASES.find(p => p.id === activePhase) || PHASES[0];
       const [start, end] = currentPhaseConfig.range;
-      const sortedAvailable = [...availableDates].sort(customDateSort);
-      const targetDates = sortedAvailable.slice(start, end);
+      const targetDates = sortedAvailableDatesAsc.slice(start, end);
       return fullData.filter(d => targetDates.includes(getWeekendID(d.date)));
   };
 
+  // 預先為每個週末 / 班級 / 科目建立排序好的成績索引，避免在畫面 render 時重複掃描全班資料
+  const scoreIndexByWeekendAndClass = useMemo(() => {
+      const index = {};
+
+      if (!cachedClassData.length) return index;
+
+      cachedClassData.forEach(student => {
+          Object.entries(student.grades || {}).forEach(([date, g]) => {
+              const weekendId = getWeekendID(date);
+              if (!weekendId) return;
+
+              const cls = g.class || 'A班';
+              if (!index[weekendId]) index[weekendId] = {};
+
+              // 班級索引
+              if (!index[weekendId][cls]) {
+                  index[weekendId][cls] = { total: [], chi: [], eng: [], math: [] };
+              }
+              // 全部學生（跨班）索引，用於本部 PR
+              if (!index[weekendId].all) {
+                  index[weekendId].all = { total: [], chi: [], eng: [], math: [] };
+              }
+
+              ['total', 'chi', 'eng', 'math'].forEach(subject => {
+                  const val = parseFloat(g[subject]);
+                  if (!isNaN(val)) {
+                      index[weekendId][cls][subject].push(val);
+                      index[weekendId].all[subject].push(val);
+                  }
+              });
+          });
+      });
+
+      // 每個 bucket 的分數都事先由高到低排序好
+      Object.values(index).forEach(byClass => {
+          Object.values(byClass).forEach(bySubject => {
+              Object.keys(bySubject).forEach(subjectKey => {
+                  bySubject[subjectKey].sort((a, b) => b - a);
+              });
+          });
+      });
+
+      return index;
+  }, [cachedClassData]);
+
+  // 計算單科或總分在「本班」中的名次（#1, #2...）
   const calculateRank = (date, subject, myScore, myClass) => {
       if (!cachedClassData.length || !myScore) return '-';
       const myVal = parseFloat(myScore);
@@ -1316,27 +1370,17 @@ export default function App() {
       const targetClass = myClass || 'A班';
       const currentWeekendID = getWeekendID(date);
 
-      const comparisonSet = cachedClassData.filter(s => {
-          return Object.keys(s.grades || {}).some(gradeDate => {
-             if (getWeekendID(gradeDate) !== currentWeekendID) return false;
-             const g = s.grades[gradeDate];
-             return (g.class || 'A班') === targetClass;
-          });
-      });
+      const byWeekend = scoreIndexByWeekendAndClass[currentWeekendID];
+      if (!byWeekend || !byWeekend[targetClass]) return '-';
 
-      const scores = comparisonSet.map(s => {
-           const entryDate = Object.keys(s.grades || {}).find(gradeDate => getWeekendID(gradeDate) === currentWeekendID);
-           if (!entryDate) return null;
-           const g = s.grades[entryDate];
-           const val = parseFloat(g[subject]);
-           return isNaN(val) ? null : val;
-      }).filter(v => v !== null);
-      
-      scores.sort((a, b) => b - a);
+      const scores = byWeekend[targetClass][subject] || [];
+      if (!scores.length) return '-';
+
       const rank = scores.indexOf(myVal) + 1;
       return rank > 0 ? rank : '-';
   };
 
+  // 計算「本部全部學生」的 PR（需樣本數達門檻）
   const calculateGlobalPR = (date, subject, myScore) => {
       if (!cachedClassData.length || !myScore) return '-';
       const myVal = parseFloat(myScore);
@@ -1344,17 +1388,12 @@ export default function App() {
 
       const currentWeekendID = getWeekendID(date);
 
-      const scores = cachedClassData.map(s => {
-           const entryDate = Object.keys(s.grades || {}).find(gradeDate => getWeekendID(gradeDate) === currentWeekendID);
-           if (!entryDate) return null;
-           const g = s.grades[entryDate];
-           const val = parseFloat(g[subject]);
-           return isNaN(val) ? null : val;
-      }).filter(v => v !== null);
+      const byWeekend = scoreIndexByWeekendAndClass[currentWeekendID];
+      if (!byWeekend || !byWeekend.all) return null;
 
+      const scores = byWeekend.all[subject] || [];
       if (scores.length < 100) return null;
 
-      scores.sort((a, b) => b - a);
       const rank = scores.indexOf(myVal) + 1;
       const total = scores.length;
       
@@ -1362,6 +1401,7 @@ export default function App() {
       return pr;
   };
 
+  // 計算某次測驗的成績分布，用於家長端的「落點分析」長條圖
   const calculateDistribution = (date, subject, myScore, allDates, myClass) => {
       if (!cachedClassData.length) return [];
       const myVal = parseFloat(myScore);
@@ -1386,22 +1426,15 @@ export default function App() {
       const bottomThreshold = thresholds[thresholds.length-1];
       buckets.push({ min: 0, max: bottomThreshold-1, count: 0, label: `<${bottomThreshold}`, isMyRange: false });
 
-      const targetClass = myClass || 'A班';
       const currentWeekendID = getWeekendID(date);
 
-      const targetStudents = cachedClassData.filter(s => {
-           return Object.keys(s.grades || {}).some(gradeDate => {
-             if (getWeekendID(gradeDate) !== currentWeekendID) return false;
-             const g = s.grades[gradeDate];
-             return (g.class || 'A班') === targetClass;
-          });
-      });
+      const targetClass = myClass || 'A班';
+      const byWeekend = scoreIndexByWeekendAndClass[currentWeekendID];
+      if (!byWeekend || !byWeekend[targetClass]) return buckets.map(b => ({ range: b.label, count: 0, isMyRange: false }));
 
-      targetStudents.forEach(s => {
-          const entryDate = Object.keys(s.grades || {}).find(gradeDate => getWeekendID(gradeDate) === currentWeekendID);
-          if (!entryDate) return;
-          const g = s.grades[entryDate];
-          const val = parseFloat(g[subject]);
+      const scoreList = byWeekend[targetClass][subject] || [];
+
+      scoreList.forEach(val => {
           if (isNaN(val)) return;
           const bucket = buckets.find(b => val >= b.min && val <= b.max);
           if (bucket) bucket.count++;
@@ -1544,7 +1577,7 @@ export default function App() {
                     </div>
                 </div>
                 <div className={`flex flex-wrap gap-2 max-h-24 overflow-y-auto p-2 rounded-xl border mb-6 no-scrollbar shadow-inner ${darkMode ? 'bg-[#020617]/30 border-white/5' : 'bg-slate-50/50 border-slate-200/60'}`}>
-                    {[...availableDates].sort(customDateSort).reverse().map(d => (
+                    {sortedAvailableDatesDesc.map(d => (
                         <div key={d} className={`flex items-center px-2.5 py-1 rounded-lg text-[10px] font-bold border shadow-sm ${darkMode ? 'bg-slate-800 text-slate-300 border-white/5' : 'bg-white text-slate-600 border-slate-100'}`}>
                             {getWeekendDisplayLabel(d)} <button onClick={() => { setDeleteTarget(d); executeWithSecurity(confirmDeleteDate); }} className="ml-1.5 text-slate-400 hover:text-red-500"><X className="w-3 h-3"/></button>
                         </div>
@@ -1582,7 +1615,7 @@ export default function App() {
                             <div className="flex items-center gap-2">
                                 <span className="text-xs font-bold text-slate-500">日期</span>
                                 <select className={`border rounded-lg px-2 py-1.5 text-xs font-bold outline-none shadow-sm ${darkMode ? 'bg-[#020617]/50 border-white/10 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`} value={batchDate} onChange={(e) => setBatchDate(e.target.value)}>
-                                    {[...availableDates].sort(customDateSort).reverse().map(d => <option key={d} value={d}>{getWeekendDisplayLabel(d)}</option>)}
+                                    {sortedAvailableDatesDesc.map(d => <option key={d} value={d}>{getWeekendDisplayLabel(d)}</option>)}
                                 </select>
                             </div>
                             <div className="flex gap-2">
@@ -1623,27 +1656,13 @@ export default function App() {
                                 <tbody className={`divide-y ${darkMode ? 'divide-slate-800' : 'divide-slate-100'}`}>
                                     {(() => {
                                         let displayedStudents = allStudentsData.filter(s => {
-                                            const g = s.grades?.[batchDate];
-                                            if (!g) return false;
-                                            
-                                            // --- Fuzzy Match Logic for Filter ---
-                                            // If student has ANY grade data that maps to this weekend ID, we should consider it
-                                            let hasGradeForThisWeekend = false;
-                                            if (s.grades) {
-                                                const matchingKey = Object.keys(s.grades).find(k => getWeekendID(k) === getWeekendID(batchDate));
-                                                if (matchingKey) hasGradeForThisWeekend = true;
-                                            }
-                                            
-                                            if (!hasGradeForThisWeekend) return false;
+                                            if (!s.grades) return false;
 
-                                            // Re-find the exact grade object using fuzzy logic
-                                            let targetDate = batchDate;
-                                            if (s.grades) {
-                                                const existingKey = Object.keys(s.grades).find(k => getWeekendID(k) === getWeekendID(batchDate));
-                                                if (existingKey) targetDate = existingKey;
-                                            }
-                                            const gradeObj = s.grades[targetDate];
-                                            
+                                            const weekendId = getWeekendID(batchDate);
+                                            const matchingKey = Object.keys(s.grades).find(k => getWeekendID(k) === weekendId);
+                                            if (!matchingKey) return false;
+
+                                            const gradeObj = s.grades[matchingKey];
                                             const currentClass = gradeObj?.class || 'A班';
                                             if (currentClass !== teacherClassFilter) return false;
 
@@ -1731,7 +1750,7 @@ export default function App() {
                             </tr>
                         </thead>
                         <tbody className={`divide-y ${darkMode ? 'divide-white/5' : 'divide-slate-100'}`}>
-                            {[...availableDates].sort(customDateSort).reverse().map((date, dateIndex) => {
+                            {sortedAvailableDatesDesc.map((date, dateIndex) => {
                                 const g = grades[date] || { chi: '', eng: '', math: '', total: '', class: 'A班' };
                                 return (
                                     <tr key={date} className={`${darkMode ? 'hover:bg-white/5' : 'hover:bg-slate-50/80'} transition-colors`}>
@@ -1936,7 +1955,7 @@ export default function App() {
                               </tr>
                           </thead>
                           <tbody className={`divide-y ${darkMode ? 'divide-white/5' : 'divide-slate-100'}`}>
-                              {[...availableDates].sort(customDateSort).reverse().map((date, dateIndex) => {
+                              {sortedAvailableDatesDesc.map((date, dateIndex) => {
                                   const dateData = classAverages[date] || {};
                                   const avg = dateData[avgSettingsClassFilter] || { chi: '', eng: '', math: '', total: '' };
                                   return (

@@ -232,17 +232,27 @@ const getProbabilityVisual = (probValue, isDarkMode) => {
     if (!Number.isFinite(parsed)) return null;
 
     const prob = clamp(parsed, 1, 99);
-    const hue = Math.round((prob / 100) * 120); // 0:red -> 120:green
-    const saturation = isDarkMode ? 90 : 84;
-    const textLightness = isDarkMode ? 68 : 40;
-    const badgeLightness = isDarkMode ? 54 : 46;
+    const hue = prob <= 25 ? 0 : Math.round(Math.pow(prob / 100, 0.72) * 130);
+    const saturation = prob <= 25 ? 100 : (isDarkMode ? 96 : 94);
+    const textLightness = isDarkMode ? 72 : (prob <= 25 ? 42 : 36);
+    const badgeAlphaStart = prob <= 25 ? (isDarkMode ? 0.65 : 0.48) : (isDarkMode ? 0.48 : 0.3);
+    const badgeAlphaEnd = prob <= 25 ? (isDarkMode ? 0.82 : 0.68) : (isDarkMode ? 0.64 : 0.44);
+    const hueEnd = clamp(hue + (prob <= 25 ? 8 : 14), 0, 140);
 
     return {
-        textStyle: { color: `hsl(${hue} ${saturation}% ${textLightness}%)` },
+        textStyle: {
+            color: `hsl(${hue} ${saturation}% ${textLightness}%)`,
+            textShadow: prob <= 25
+                ? (isDarkMode ? '0 0 10px rgba(248,113,113,0.45)' : '0 1px 2px rgba(220,38,38,0.28)')
+                : 'none'
+        },
         badgeStyle: {
-            color: `hsl(${hue} ${saturation}% ${isDarkMode ? 72 : 36}%)`,
-            backgroundColor: `hsla(${hue}, ${saturation}%, ${badgeLightness}%, ${isDarkMode ? 0.2 : 0.12})`,
-            border: `1px solid hsla(${hue}, ${saturation}%, ${isDarkMode ? 66 : 40}%, ${isDarkMode ? 0.45 : 0.24})`
+            color: `hsl(${hue} ${saturation}% ${isDarkMode ? 78 : 34}%)`,
+            background: `linear-gradient(135deg, hsla(${hue}, ${saturation}%, ${isDarkMode ? 56 : 54}%, ${badgeAlphaStart}) 0%, hsla(${hueEnd}, ${saturation}%, ${isDarkMode ? 48 : 50}%, ${badgeAlphaEnd}) 100%)`,
+            border: `1px solid hsla(${hue}, ${saturation}%, ${isDarkMode ? 72 : 42}%, ${prob <= 25 ? (isDarkMode ? 0.72 : 0.52) : (isDarkMode ? 0.5 : 0.3)})`,
+            boxShadow: prob <= 25
+                ? `0 0 0 1px hsla(${hue}, ${saturation}%, ${isDarkMode ? 72 : 50}%, ${isDarkMode ? 0.4 : 0.28}), 0 10px 20px -12px hsla(${hue}, ${saturation}%, ${isDarkMode ? 62 : 44}%, 0.55)`
+                : `0 8px 18px -12px hsla(${hue}, ${saturation}%, ${isDarkMode ? 62 : 42}%, 0.4)`
         }
     };
 };
@@ -495,12 +505,12 @@ const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, 
 
     return (
         <tr className={`${darkMode ? 'hover:bg-slate-800/50' : 'hover:bg-white/50'} transition-colors`}>
-            <td className="w-10 px-2 py-2 text-center text-xs font-bold text-slate-500">{sIndex + 1}</td>
-            <td className="w-24 px-2 py-2 font-mono text-xs font-bold text-slate-500">{student.id}</td>
-            <td className={`w-28 px-2 py-2 font-bold text-xs ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+            <td className="w-9 px-1.5 py-2 text-center text-xs font-bold text-slate-500">{sIndex + 1}</td>
+            <td className="w-[5.4rem] px-1.5 py-2 text-center font-mono text-xs font-bold text-slate-500">{student.id}</td>
+            <td className={`w-[6.6rem] px-1.5 py-2 text-center font-bold text-xs ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
                 <div className="truncate">{student.name}</div>
             </td>
-            <td className="w-16 px-1 py-1">
+            <td className="w-[4.3rem] px-1 py-1">
                 <select 
                     value={dateGrades.class || 'A班'} 
                     onChange={(e) => handleBatchGradeChange(student.id, 'class', e.target.value)}
@@ -510,7 +520,7 @@ const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, 
                 </select>
             </td>
             {['chi', 'eng', 'math'].map((sub) => (
-                <td key={sub} className="w-[4.6rem] px-1 py-1">
+                <td key={sub} className="w-[4.2rem] px-1 py-1">
                     <input 
                         id={`cell-${sIndex}-${sub}`} 
                         type="text" 
@@ -523,10 +533,10 @@ const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, 
                     />
                 </td>
             ))}
-            <td className="w-[4.8rem] px-1 py-1 text-center"><div className="text-sm font-bold text-blue-500">{dateGrades.total}</div></td>
-            <td className="w-[3.9rem] px-1 py-1 text-center"><div className={`text-xs font-bold ${darkMode ? 'text-indigo-300' : 'text-indigo-600'}`}>{prValue !== '-' ? prValue : ''}</div></td>
-            <td className="w-[6.4rem] px-1 py-1 text-center">
-                <div className="text-xs font-black inline-block px-2 py-0.5 rounded-full min-w-[56px] text-center" style={probVisual ? probVisual.badgeStyle : undefined}>
+            <td className="w-[4.4rem] px-1 py-1 text-center"><div className="text-sm font-bold text-blue-500">{dateGrades.total}</div></td>
+            <td className="w-[3.5rem] px-1 py-1 text-center"><div className={`text-xs font-bold ${darkMode ? 'text-indigo-300' : 'text-indigo-600'}`}>{prValue !== '-' ? prValue : ''}</div></td>
+            <td className="w-[5.8rem] px-1 py-1 text-center">
+                <div className="text-xs font-black inline-block px-1.5 py-0.5 rounded-full min-w-[50px] text-center" style={probVisual ? probVisual.badgeStyle : undefined}>
                     {probValue !== '-' ? `${probValue}%` : ''}
                 </div>
             </td>
@@ -839,12 +849,6 @@ export default function App() {
       return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [hasPendingBatchChanges]);
 
-  useEffect(() => {
-      if (mode === 'teacher' && isAuthenticated) {
-          loadQueryStats();
-      }
-  }, [mode, isAuthenticated, loadQueryStats]);
-
   const loadDates = async () => {
       if (!db) return [...availableDates].sort(customDateSort);
       try {
@@ -956,6 +960,12 @@ export default function App() {
           setQueryStatsLoading(false);
       }
   }, []);
+
+  useEffect(() => {
+      if (mode === 'teacher' && isAuthenticated) {
+          loadQueryStats();
+      }
+  }, [mode, isAuthenticated, loadQueryStats]);
 
   const executeWithSecurity = (action) => {
       setPendingAction(() => action);

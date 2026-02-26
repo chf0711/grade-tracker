@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from 'recharts';
-import { Search, Save, Plus, Check, BarChart3, X, Lock, LayoutDashboard, GraduationCap, Calendar, Clipboard, LogOut, AlertTriangle, UserPlus, Sparkles, Edit3, Trash2, Trophy, Target, FileSpreadsheet, Moon, Sun, ChevronRight, ArrowLeft, PieChart, Users, BarChart2, ShieldCheck, ArrowDownWideNarrow, Percent, Info } from 'lucide-react';
+import { Search, Save, Plus, Check, BarChart3, X, Lock, LayoutDashboard, GraduationCap, Calendar, Clipboard, LogOut, AlertTriangle, UserPlus, Sparkles, Edit3, Trash2, Trophy, Target, FileSpreadsheet, ChevronRight, ArrowLeft, PieChart, Users, BarChart2, ShieldCheck, ArrowDownWideNarrow, Percent, Info } from 'lucide-react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc } from 'firebase/firestore';
@@ -435,45 +435,55 @@ const DistributionChart = ({ data, colorKey, isDarkMode }) => {
     );
 };
 
-const ParentAbilityRadar = ({ data, maxValue, isDarkMode }) => (
-    <div className={`mb-8 rounded-3xl border px-4 pt-4 pb-2 ${isDarkMode ? 'bg-[#0f1914]/70 border-emerald-200/15' : 'bg-white border-slate-200/70'}`}>
-        <div className="flex items-end justify-between mb-2 px-1">
-            <div>
-                <h4 className={`text-sm font-black tracking-wide ${isDarkMode ? 'text-emerald-100' : 'text-slate-800'}`}>三科能力雷達圖</h4>
-                <p className={`text-[11px] font-semibold ${isDarkMode ? 'text-emerald-200/70' : 'text-slate-500'}`}>個人平均 vs 班平均（當前階段）</p>
+const ParentAbilityRadar = ({ data, maxValue, isDarkMode, compact = false }) => {
+    if (!data || !data.length) return null;
+
+    const wrapperClass = compact
+        ? `w-[176px] rounded-2xl border px-2.5 pt-2 pb-1 ${isDarkMode ? 'bg-[#0f1914]/75 border-emerald-200/18' : 'bg-white/92 border-slate-200/80'}`
+        : `mb-8 rounded-3xl border px-4 pt-4 pb-2 ${isDarkMode ? 'bg-[#0f1914]/70 border-emerald-200/15' : 'bg-white border-slate-200/70'}`;
+
+    return (
+        <div className={wrapperClass}>
+            {!compact && (
+                <div className="flex items-end justify-between mb-2 px-1">
+                    <div>
+                        <h4 className={`text-sm font-black tracking-wide ${isDarkMode ? 'text-emerald-100' : 'text-slate-800'}`}>三科能力雷達圖</h4>
+                        <p className={`text-[11px] font-semibold ${isDarkMode ? 'text-emerald-200/70' : 'text-slate-500'}`}>個人平均 vs 班平均（當前階段）</p>
+                    </div>
+                    <span className={`text-[10px] font-bold tracking-wider ${isDarkMode ? 'text-emerald-300/60' : 'text-slate-400'}`}>SCORE</span>
+                </div>
+            )}
+            <div className={compact ? 'h-36 w-full' : 'h-60 w-full'}>
+                <ResponsiveContainer width="100%" height="100%">
+                    <RadarChart data={data} outerRadius={compact ? '66%' : '74%'}>
+                        <PolarGrid stroke={isDarkMode ? 'rgba(167,243,208,0.24)' : 'rgba(148,163,184,0.28)'} />
+                        <PolarAngleAxis dataKey="subject" tick={{ fontSize: compact ? 10 : 11, fontWeight: 700, fill: isDarkMode ? '#d1fae5' : '#334155' }} />
+                        <PolarRadiusAxis
+                            angle={25}
+                            domain={[0, maxValue]}
+                            tickCount={6}
+                            tick={compact ? false : { fontSize: 10, fill: isDarkMode ? '#86efac' : '#64748b' }}
+                            axisLine={false}
+                        />
+                        <Tooltip
+                            contentStyle={{
+                                borderRadius: '14px',
+                                border: isDarkMode ? '1px solid rgba(110,231,183,0.24)' : '1px solid rgba(148,163,184,0.22)',
+                                backgroundColor: isDarkMode ? 'rgba(7,20,15,0.95)' : 'rgba(255,255,255,0.96)',
+                                color: isDarkMode ? '#ecfdf5' : '#0f172a',
+                                fontSize: '12px',
+                                fontWeight: 600
+                            }}
+                        />
+                        {!compact && <Legend verticalAlign="top" wrapperStyle={{ fontSize: '11px', fontWeight: 700, color: isDarkMode ? '#a7f3d0' : '#64748b' }} />}
+                        <Radar name="個人平均" dataKey="student" stroke="#22c55e" fill="#22c55e" fillOpacity={isDarkMode ? 0.36 : 0.22} strokeWidth={compact ? 2.1 : 2.5} isAnimationActive={false} />
+                        <Radar name="班平均" dataKey="classAvg" stroke="#94a3b8" fill="#94a3b8" fillOpacity={isDarkMode ? 0.2 : 0.1} strokeWidth={2} isAnimationActive={false} />
+                    </RadarChart>
+                </ResponsiveContainer>
             </div>
-            <span className={`text-[10px] font-bold tracking-wider ${isDarkMode ? 'text-emerald-300/60' : 'text-slate-400'}`}>SCORE</span>
         </div>
-        <div className="h-60 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-                <RadarChart data={data} outerRadius="74%">
-                    <PolarGrid stroke={isDarkMode ? 'rgba(167,243,208,0.24)' : 'rgba(148,163,184,0.28)'} />
-                    <PolarAngleAxis dataKey="subject" tick={{ fontSize: 11, fontWeight: 700, fill: isDarkMode ? '#d1fae5' : '#334155' }} />
-                    <PolarRadiusAxis
-                        angle={25}
-                        domain={[0, maxValue]}
-                        tickCount={6}
-                        tick={{ fontSize: 10, fill: isDarkMode ? '#86efac' : '#64748b' }}
-                        axisLine={false}
-                    />
-                    <Tooltip
-                        contentStyle={{
-                            borderRadius: '14px',
-                            border: isDarkMode ? '1px solid rgba(110,231,183,0.24)' : '1px solid rgba(148,163,184,0.22)',
-                            backgroundColor: isDarkMode ? 'rgba(7,20,15,0.95)' : 'rgba(255,255,255,0.96)',
-                            color: isDarkMode ? '#ecfdf5' : '#0f172a',
-                            fontSize: '12px',
-                            fontWeight: 600
-                        }}
-                    />
-                    <Legend verticalAlign="top" wrapperStyle={{ fontSize: '11px', fontWeight: 700, color: isDarkMode ? '#a7f3d0' : '#64748b' }} />
-                    <Radar name="個人平均" dataKey="student" stroke="#22c55e" fill="#22c55e" fillOpacity={isDarkMode ? 0.36 : 0.22} strokeWidth={2.5} isAnimationActive={false} />
-                    <Radar name="班平均" dataKey="classAvg" stroke="#94a3b8" fill="#94a3b8" fillOpacity={isDarkMode ? 0.2 : 0.1} strokeWidth={2} isAnimationActive={false} />
-                </RadarChart>
-            </ResponsiveContainer>
-        </div>
-    </div>
-);
+    );
+};
 
 const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, darkMode, handleBatchGradeChange, handleKeyDown, handlePaste }) => {
     const probVisual = getProbabilityVisual(probValue, darkMode);
@@ -603,7 +613,7 @@ export default function App() {
   const [admissionProbabilities, setAdmissionProbabilities] = useState({});
 
   const [xlsxLoaded, setXlsxLoaded] = useState(false);
-  const [darkMode, setDarkMode] = useState(false);
+  const darkMode = false;
 
   // 預先建立依照考試日期排序好的日期清單，避免在 render 階段重複 sort
   const sortedAvailableDatesAsc = useMemo(
@@ -710,22 +720,6 @@ export default function App() {
           setSearchError('');
       }
   }, [mode]);
-
-  useEffect(() => {
-    const checkTime = () => {
-      const now = new Date();
-      const hour = now.getHours();
-      const min = now.getMinutes();
-      if (hour > 17 || (hour === 17 && min >= 30) || hour < 6) {
-          setDarkMode(true);
-      } else {
-          setDarkMode(false);
-      }
-    };
-    checkTime();
-  }, []);
-
-  const toggleDarkMode = () => setDarkMode(!darkMode);
 
   useEffect(() => {
     const script = document.createElement('script');
@@ -1828,10 +1822,8 @@ export default function App() {
       {mode === 'landing' && (
         <div
           className="fixed inset-0 pointer-events-none z-0"
-          style={darkMode ? {
-            backgroundImage: 'radial-gradient(circle at 13% 18%, rgba(16,185,129,0.38) 0%, transparent 42%), radial-gradient(circle at 86% 10%, rgba(110,231,183,0.3) 0%, transparent 35%), radial-gradient(circle at 50% 100%, rgba(22,163,74,0.18) 0%, transparent 42%)'
-          } : {
-            backgroundImage: 'radial-gradient(circle at 12% 16%, rgba(16,185,129,0.24) 0%, transparent 44%), radial-gradient(circle at 88% 10%, rgba(5,150,105,0.18) 0%, transparent 34%), radial-gradient(circle at 52% 100%, rgba(16,185,129,0.12) 0%, transparent 40%)'
+          style={{
+            backgroundImage: 'radial-gradient(circle at 8% 14%, rgba(16,185,129,0.26) 0%, transparent 40%), radial-gradient(circle at 89% 11%, rgba(56,189,248,0.22) 0%, transparent 36%), radial-gradient(circle at 80% 84%, rgba(244,114,182,0.16) 0%, transparent 34%), linear-gradient(180deg, #f8fafc 0%, #f6f7fb 56%, #eef2ff 100%)'
           }}
         />
       )}
@@ -1849,9 +1841,6 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={toggleDarkMode} className={`p-2 rounded-full transition-colors active:scale-95 duration-200 ${darkMode ? 'text-yellow-400 hover:bg-white/5' : 'text-slate-500 hover:bg-white/40'}`}>
-                {darkMode ? <Moon className="w-4 h-4 fill-current"/> : <Sun className="w-4 h-4"/>}
-            </button>
             <div className={`flex p-1 rounded-full border backdrop-blur-md ${darkMode ? 'bg-white/5 border-white/5 shadow-inner' : 'bg-white/40 border-white/40 shadow-inner'}`}>
                 <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white text-blue-700 shadow-md shadow-slate-200/50 ring-1 ring-black/5') : 'text-slate-400 hover:text-slate-500'}`}>{isAuthenticated ? '後台' : '老師'}</button>
                 <button onClick={() => { setViewData(null); setSearchError(''); setMode('parent'); }} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white text-blue-700 shadow-md shadow-slate-200/50 ring-1 ring-black/5') : 'text-slate-400 hover:text-slate-500'}`}>家長</button>
@@ -1866,33 +1855,31 @@ export default function App() {
       <main className="pt-28 px-4 max-w-4xl mx-auto relative z-10">
         {mode === 'landing' && (
           <div className="flex flex-col items-center justify-center min-h-[calc(100vh-120px)]">
-            <div className={`relative w-full max-w-3xl rounded-[2.5rem] overflow-hidden ${darkMode ? 'bg-[#121b17]/92 shadow-[0_18px_50px_rgba(0,0,0,0.28)]' : 'bg-white/96 shadow-[0_16px_44px_rgba(15,23,42,0.09)]'}`}>
+            <div className="relative w-full max-w-3xl rounded-[2.5rem] overflow-hidden border border-white/70 bg-white/88">
               <div
                 className="pointer-events-none absolute inset-0"
-                style={darkMode ? {
-                  backgroundImage: 'radial-gradient(circle at 10% 8%, rgba(16,185,129,0.62) 0%, rgba(16,185,129,0) 44%), radial-gradient(circle at 90% 12%, rgba(110,231,183,0.52) 0%, rgba(110,231,183,0) 37%), linear-gradient(152deg, rgba(20,35,28,0.08) 0%, rgba(6,15,11,0.56) 85%)'
-                } : {
-                  backgroundImage: 'radial-gradient(circle at 10% 10%, rgba(16,185,129,0.4) 0%, transparent 46%), radial-gradient(circle at 90% 12%, rgba(5,150,105,0.32) 0%, transparent 36%), linear-gradient(150deg, rgba(236,253,245,0.84) 0%, rgba(255,255,255,0.97) 74%)'
+                style={{
+                  backgroundImage: 'radial-gradient(circle at 12% 11%, rgba(16,185,129,0.45) 0%, rgba(16,185,129,0) 42%), radial-gradient(circle at 88% 13%, rgba(56,189,248,0.36) 0%, rgba(56,189,248,0) 38%), radial-gradient(circle at 80% 86%, rgba(244,114,182,0.26) 0%, rgba(244,114,182,0) 42%), linear-gradient(145deg, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0.95) 78%)'
                 }}
               />
 
               <div className="relative z-10 flex flex-col items-center justify-center px-6 py-12 md:py-14">
-                <div className={`p-5 rounded-full mb-6 ring-1 backdrop-blur-xl transition-transform duration-700 hover:scale-105 ${darkMode ? 'bg-gradient-to-br from-emerald-500/28 to-green-400/16 ring-emerald-200/40' : 'bg-gradient-to-br from-emerald-100 to-green-100 ring-emerald-200 shadow-sm'}`}>
-                    <Sparkles className={`w-10 h-10 ${darkMode ? 'text-emerald-100' : 'text-emerald-700'}`} />
+                <div className="p-5 rounded-full mb-6 ring-1 backdrop-blur-xl bg-gradient-to-br from-emerald-100 via-sky-100 to-pink-100 ring-white/90">
+                    <Sparkles className="w-10 h-10 text-slate-700" />
                 </div>
-                <h2 className={`text-[2.05rem] md:text-[3.45rem] font-black font-serif tracking-tight mb-4 text-center leading-[1.16] bg-clip-text text-transparent ${darkMode ? 'bg-gradient-to-r from-emerald-50 via-emerald-200 to-lime-200' : 'bg-gradient-to-r from-slate-900 via-emerald-700 to-green-600'}`}>Make Progress Visible</h2>
-                <p className={`text-xs font-semibold tracking-[0.18em] mb-6 uppercase ${darkMode ? 'text-emerald-100/75' : 'text-slate-500'}`}>2025-2026 Learning Journey</p>
+                <h2 className="text-[2.05rem] md:text-[3.45rem] font-black font-serif tracking-tight mb-4 text-center leading-[1.16] bg-clip-text text-transparent bg-gradient-to-r from-emerald-700 via-sky-700 to-fuchsia-700">Make Progress Visible</h2>
+                <p className="text-xs font-semibold tracking-[0.18em] mb-6 uppercase text-slate-600">2025-2026 Learning Journey</p>
                 <ExamCountdown isDarkMode={darkMode} />
                   
                 <div className="w-full max-w-md space-y-4 mt-8">
-                   <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className={`group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 hover:scale-[1.01] active:scale-[0.98] transition-all duration-300 backdrop-blur-xl ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/18 hover:border-emerald-300/45 shadow-lg shadow-black/30' : 'bg-gradient-to-br from-white to-slate-50 border-slate-200/80 hover:border-emerald-200 shadow-sm'}`}>
-                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-colors shadow-inner ${darkMode ? 'bg-gradient-to-br from-emerald-500/30 to-green-400/20 text-emerald-200 ring-1 ring-emerald-200/35' : 'bg-gradient-to-br from-emerald-100 to-green-100 text-emerald-700'}`}><LayoutDashboard className="w-6 h-6" /></div>
-                      <div className="text-left flex-1"><h3 className={`text-lg font-bold ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>老師通道</h3><p className="text-xs text-slate-400 mt-0.5">管理成績與設定</p></div>
+                   <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className="group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 transition-colors duration-200 backdrop-blur-xl bg-white/78 border-white/80 hover:bg-white/92 hover:border-slate-200/90">
+                      <div className="w-12 h-12 rounded-2xl flex items-center justify-center transition-colors bg-gradient-to-br from-emerald-100 to-sky-100 text-emerald-700"><LayoutDashboard className="w-6 h-6" /></div>
+                      <div className="text-left flex-1"><h3 className="text-lg font-bold text-slate-800">老師通道</h3><p className="text-xs text-slate-500 mt-0.5">管理成績與設定</p></div>
                       <ChevronRight className="w-5 h-5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
                    </button>
-                   <button onClick={() => { setViewData(null); setSearchError(''); setMode('parent'); }} className={`group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 hover:scale-[1.01] active:scale-[0.98] transition-all duration-300 backdrop-blur-xl ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/18 hover:border-emerald-300/45 shadow-lg shadow-black/30' : 'bg-gradient-to-br from-white to-slate-50 border-slate-200/80 hover:border-emerald-200 shadow-sm'}`}>
-                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-colors shadow-inner ${darkMode ? 'bg-gradient-to-br from-emerald-500/30 to-green-400/20 text-emerald-200 ring-1 ring-emerald-200/35' : 'bg-gradient-to-br from-emerald-100 to-green-100 text-emerald-700'}`}><BarChart3 className="w-6 h-6" /></div>
-                      <div className="text-left flex-1"><h3 className={`text-lg font-bold ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>家長查詢</h3><p className="text-xs text-slate-400 mt-0.5">輸入學號查看分析</p></div>
+                   <button onClick={() => { setViewData(null); setSearchError(''); setMode('parent'); }} className="group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 transition-colors duration-200 backdrop-blur-xl bg-white/78 border-white/80 hover:bg-white/92 hover:border-slate-200/90">
+                      <div className="w-12 h-12 rounded-2xl flex items-center justify-center transition-colors bg-gradient-to-br from-sky-100 to-pink-100 text-sky-700"><BarChart3 className="w-6 h-6" /></div>
+                      <div className="text-left flex-1"><h3 className="text-lg font-bold text-slate-800">家長查詢</h3><p className="text-xs text-slate-500 mt-0.5">輸入學號查看分析</p></div>
                       <ChevronRight className="w-5 h-5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
                    </button>
                 </div>
@@ -2100,7 +2087,7 @@ export default function App() {
                 <div className={`p-8 pb-6 relative overflow-hidden ${darkMode ? 'bg-[#0d1712] text-white border-b border-emerald-200/10' : 'bg-gradient-to-r from-emerald-50 to-white text-slate-800 border-b border-slate-100'}`}>
                    <div className={`absolute top-0 right-0 w-64 h-64 rounded-full -mr-20 -mt-20 blur-3xl ${darkMode ? 'bg-emerald-500 opacity-20' : 'bg-emerald-300 opacity-25'}`}></div>
                    
-                   <div className="relative z-10 flex justify-between items-start mb-6">
+                   <div className="relative z-10 grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] items-start gap-4 mb-4">
                        {/* Left Side: Name & ID */}
                        <div>
                            <div className={`text-[9px] font-bold uppercase tracking-widest mb-2 border inline-block px-2 py-1 rounded ${darkMode ? 'text-emerald-300 border-emerald-300/25' : 'text-emerald-700 border-emerald-200'}`}>Student Profile</div>
@@ -2108,18 +2095,22 @@ export default function App() {
                            <p className="font-mono text-xs mt-1 font-bold text-slate-500">{viewData.id}</p>
                        </div>
 
+                       <div className="justify-self-center">
+                           <ParentAbilityRadar data={parentRadarData} maxValue={parentRadarMax} isDarkMode={darkMode} compact />
+                       </div>
+
                        {/* Right Side: Logout & Prob */}
-                       <div className="flex flex-col items-end gap-4">
+                       <div className="flex flex-col items-start sm:items-end gap-4">
                            <button onClick={() => setViewData(null)} className={`p-2 rounded-full backdrop-blur-md transition-colors ${darkMode ? 'text-slate-400 hover:text-white bg-white/5' : 'text-slate-500 hover:text-slate-700 bg-white/70 border border-slate-200'}`}><LogOut className="w-4 h-4"/></button>
                            
                            {/* --- NEW PROBABILITY DISPLAY --- */}
                            {viewData.prob && viewData.prob !== '-' && (
-                               <div className="text-right mt-2">
+                               <div className="text-left sm:text-right mt-2">
                                    <div className={`text-[10px] font-bold uppercase tracking-widest mb-0.5 ${darkMode ? 'text-emerald-300/80' : 'text-emerald-700/80'}`}>錄取機率</div>
-                                   <div className="text-4xl font-black flex items-baseline justify-end gap-1" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>
+                                   <div className="text-4xl font-black flex items-baseline justify-start sm:justify-end gap-1" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>
                                        {viewData.prob}<span className="text-lg font-bold" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>%</span>
                                    </div>
-                                   <div className="mt-1 flex items-center justify-end gap-1.5 opacity-50">
+                                   <div className="mt-1 flex items-center justify-start sm:justify-end gap-1.5 opacity-50">
                                         <p className={`text-[9px] font-medium ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
                                             系統綜合歷史成績運算，<span className={`${darkMode ? 'text-white/90 border-white/20' : 'text-slate-700 border-slate-300'} border-b pb-0.5`}>僅供參考</span>
                                         </p>
@@ -2138,8 +2129,6 @@ export default function App() {
                       ))}
                   </div>
                   )}
-
-                  <ParentAbilityRadar data={parentRadarData} maxValue={parentRadarMax} isDarkMode={darkMode} />
 
                   <div className={`flex p-1 rounded-2xl mb-8 justify-center shadow-inner ${darkMode ? 'bg-[#08120d]/70' : 'bg-slate-100'}`}>
                       {['總分', '國文', '英文', '數學'].map(tab => {

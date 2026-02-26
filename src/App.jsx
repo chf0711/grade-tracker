@@ -68,20 +68,72 @@ const customDateSort = (a, b) => {
     } catch (e) { return 0; }
 };
 
-const getWeekendID = (dateStr) => {
-    if (!dateStr || !dateStr.includes('/')) return dateStr;
+// 將日期字串轉換為 Date 物件（處理跨年）
+const parseDateStr = (dateStr) => {
+    if (!dateStr || !dateStr.includes('/')) return null;
     try {
         const [mStr, dStr] = dateStr.split('/');
         const m = parseInt(mStr, 10);
         const d = parseInt(dStr, 10);
-        const y = m >= 4 ? 2025 : 2026; 
-        const dateObj = new Date(y, m - 1, d);
-        const dayOfWeek = dateObj.getDay(); 
-        if (dayOfWeek === 0) { 
-            const satDate = new Date(dateObj);
-            satDate.setDate(dateObj.getDate() - 1);
-            return `${String(satDate.getMonth() + 1).padStart(2, '0')}/${String(satDate.getDate()).padStart(2, '0')}`;
+        const y = m >= 4 ? 2025 : 2026;
+        return new Date(y, m - 1, d);
+    } catch (e) { return null; }
+};
+
+// 將 Date 物件轉換為日期字串
+const formatDateStr = (dateObj) => {
+    if (!dateObj) return '';
+    return `${String(dateObj.getMonth() + 1).padStart(2, '0')}/${String(dateObj.getDate()).padStart(2, '0')}`;
+};
+
+// 檢查兩個日期是否連續（相差一天）
+const isConsecutiveDate = (date1, date2) => {
+    if (!date1 || !date2) return false;
+    const diff = Math.abs((date1.getTime() - date2.getTime()) / (1000 * 60 * 60 * 24));
+    return diff === 1;
+};
+
+// 取得測驗日期 ID：如果日期與 availableDates 中某個日期連續，則返回較早的日期作為統一 ID
+// 如果沒有提供 availableDates，則使用舊的週末邏輯（向後兼容）
+const getWeekendID = (dateStr, availableDates = null) => {
+    if (!dateStr || !dateStr.includes('/')) return dateStr;
+    
+    try {
+        const currentDate = parseDateStr(dateStr);
+        if (!currentDate) return dateStr;
+        
+        // 如果提供了 availableDates，檢查是否有連續日期
+        if (availableDates && Array.isArray(availableDates)) {
+            let earliestDate = currentDate;
+            let foundConsecutive = false;
+            
+            // 檢查 availableDates 中是否有與當前日期連續的日期
+            for (const availableDateStr of availableDates) {
+                const availableDate = parseDateStr(availableDateStr);
+                if (!availableDate) continue;
+                
+                if (isConsecutiveDate(currentDate, availableDate)) {
+                    foundConsecutive = true;
+                    // 取較早的日期作為統一 ID
+                    if (availableDate < earliestDate) {
+                        earliestDate = availableDate;
+                    }
+                }
+            }
+            
+            if (foundConsecutive) {
+                return formatDateStr(earliestDate);
+            }
         }
+        
+        // 如果沒有找到連續日期，使用舊的週末邏輯（向後兼容）
+        const dayOfWeek = currentDate.getDay();
+        if (dayOfWeek === 0) { 
+            const satDate = new Date(currentDate);
+            satDate.setDate(currentDate.getDate() - 1);
+            return formatDateStr(satDate);
+        }
+        
         return dateStr;
     } catch (e) { return dateStr; }
 };
@@ -168,7 +220,7 @@ const calculateProbLogic = (targetStudent, scoresByDate, mathScoresByDate, stude
     const myGrades = studentGradeMaps[targetStudent.id] || {};
 
     availableDates.forEach((date, index) => {
-         const weekendID = getWeekendID(date);
+         const weekendID = getWeekendID(date, availableDates);
          const grade = myGrades[weekendID];
          let myTotal = null;
          let myMath = null;
@@ -444,6 +496,11 @@ export default function App() {
       [sortedAvailableDatesAsc]
   );
 
+  // 包裝 getWeekendID，自動傳入 availableDates，讓連續兩天的日期可以歸類為同一次測驗
+  const getTestDateID = useCallback((dateStr) => {
+      return getWeekendID(dateStr, availableDates);
+  }, [availableDates]);
+
   useEffect(() => {
       const storedAuth = localStorage.getItem('teacher_auth');
       if (storedAuth === 'true') setIsAuthenticated(true);
@@ -453,11 +510,11 @@ export default function App() {
       if (!viewData || !viewData.chartData) return true;
       const sortedAllDates = sortedAvailableDatesAsc;
       return viewData.chartData.some(d => {
-          const weekendID = getWeekendID(d.date);
+          const weekendID = getTestDateID(d.weekendID || d.date);
           const idx = sortedAllDates.indexOf(weekendID);
           return idx >= 0 && idx < 36;
       });
-  }, [viewData, sortedAvailableDatesAsc]);
+  }, [viewData, sortedAvailableDatesAsc, getTestDateID]);
 
   // --- OPTIMIZATION: Debounced Calculation Effect ---
   useEffect(() => {
@@ -477,7 +534,7 @@ export default function App() {
           allStudentsData.forEach(s => {
               if (!s.grades) return;
               Object.entries(s.grades).forEach(([date, g]) => {
-                  const weekendID = getWeekendID(date);
+                  const weekendID = getTestDateID(date);
                   if (g.total && !isNaN(parseFloat(g.total))) {
                       if (!scoresByDate[weekendID]) scoresByDate[weekendID] = [];
                       scoresByDate[weekendID].push(parseFloat(g.total));
@@ -499,7 +556,7 @@ export default function App() {
               if (!s.grades) return;
               const map = {};
               Object.entries(s.grades).forEach(([date, g]) => {
-                  map[getWeekendID(date)] = g;
+                  map[getTestDateID(date)] = g;
               });
               studentGradeMaps[s.id] = map;
           });
@@ -515,7 +572,7 @@ export default function App() {
       }, 500);
 
       return () => clearTimeout(timer);
-  }, [allStudentsData, availableDates]);
+  }, [allStudentsData, availableDates, getTestDateID]);
 
   useEffect(() => {
       if (mode === 'parent' && viewData) {
@@ -630,11 +687,11 @@ export default function App() {
           });
           groups['all'] = { t:0, c:0, e:0, m:0, count:0 };
           
-          const currentWeekendID = getWeekendID(date);
+          const currentWeekendID = getTestDateID(date);
 
           allStudentsData.forEach(s => {
              Object.keys(s.grades || {}).forEach(gradeDate => {
-                 if (getWeekendID(gradeDate) === currentWeekendID) {
+                 if (getTestDateID(gradeDate) === currentWeekendID) {
                       const grades = s.grades[gradeDate];
                       const math = parseFloat(grades.math) || 0;
                       const eng = parseFloat(grades.eng) || 0;
@@ -676,7 +733,7 @@ export default function App() {
           });
       });
       return avgs;
-  }, [availableDates, allStudentsData]);
+  }, [availableDates, allStudentsData, getTestDateID]);
 
   const loadClassAverages = async () => {
       if (!db) { setClassAverages(localComputedAverages); return; }
@@ -783,8 +840,8 @@ export default function App() {
         setCurrentStudentId(data.id); setStudentName(data.name);
         let loadedGrades = data.grades || {};
         availableDates.forEach(d => { 
-             const weekendID = getWeekendID(d);
-             const existingGradeKey = Object.keys(loadedGrades).find(k => getWeekendID(k) === weekendID);
+             const weekendID = getTestDateID(d);
+             const existingGradeKey = Object.keys(loadedGrades).find(k => getTestDateID(k) === weekendID);
              if (!existingGradeKey) {
                  loadedGrades[d] = { chi: '', eng: '', math: '', total: '', class: 'A班' }; 
              }
@@ -820,12 +877,13 @@ export default function App() {
           if (s.id !== studentId) return s;
           const currentGrades = s.grades || {};
           let targetDate = batchDate;
-          const existingKey = Object.keys(currentGrades).find(k => getWeekendID(k) === getWeekendID(batchDate));
+          const batchDateID = getTestDateID(batchDate);
+          const existingKey = Object.keys(currentGrades).find(k => getTestDateID(k) === batchDateID);
           if (existingKey) targetDate = existingKey;
           else {
-             if (teacherClassFilter === '日A班' || teacherClassFilter === '日B班') {
-                 targetDate = getSundayDate(batchDate);
-             }
+             // 對於日A班/日B班，嘗試找連續的日期（例如週日的日期）
+             // 但現在連續日期邏輯已經在 getTestDateID 中處理，所以這裡可以簡化
+             // 如果找不到，就使用 batchDate 作為新日期
           }
           const currentDateGrades = currentGrades[targetDate] || { chi: '', eng: '', math: '', total: '', class: teacherClassFilter }; 
           let updatedDateGrades;
@@ -841,7 +899,7 @@ export default function App() {
           }
           return { ...s, grades: { ...currentGrades, [targetDate]: updatedDateGrades } };
       }));
-  }, [batchDate, teacherClassFilter]); 
+  }, [batchDate, teacherClassFilter, getTestDateID]); 
 
   const handleExcelUpload = (e) => {
     if (!xlsxLoaded) { setStatusMsg("載入中，請稍後"); return; }
@@ -987,7 +1045,8 @@ export default function App() {
           else className = 'A班'; 
           // ---------------------------
 
-          const weekendID = getWeekendID(dateStr);
+          // Excel 匯入時，使用新的連續日期邏輯，但需要考慮已存在的 availableDates
+          const weekendID = getWeekendID(dateStr, [...availableDates, ...Array.from(newDates)]);
           if (!newDates.has(weekendID)) newDates.add(weekendID); 
           
           lastImportedDate = weekendID;
@@ -1239,31 +1298,58 @@ export default function App() {
       if (data) {
         const allChartData = [];
         const sortedDates = sortedAvailableDatesAsc; 
-        for (const date of sortedDates) {
-          const weekendID = getWeekendID(date);
-          const weekData = (data.grades && data.grades[date]) ? data.grades[date] : 
-                           (data.grades && data.grades[weekendID]) ? data.grades[weekendID] : null;
-
-          const weekClass = weekData ? (weekData.class || 'A班') : 'A班';
-          
-          const avgData = (classAverages[weekendID] && classAverages[weekendID][weekClass]) ? classAverages[weekendID][weekClass] : {};
-          
-          if (weekData && weekData.total) {
-             const t = parseFloat(weekData.total);
-             if (!isNaN(t) && t > 0) {
-                 let displayDate = weekendID;
-                 if (weekClass === '日A班' || weekClass === '日B班') {
-                     displayDate = getSundayDate(weekendID);
-                 } 
-                 allChartData.push({
-                     date: displayDate, 
-                     total: t, chi: parseFloat(weekData.chi)||0, eng: parseFloat(weekData.eng)||0, math: parseFloat(weekData.math)||0,
-                     avgTotal: parseFloat(avgData.total)||null, avgChi: parseFloat(avgData.chi)||null, avgEng: parseFloat(avgData.eng)||null, avgMath: parseFloat(avgData.math)||null,
-                     class: weekClass
-                 });
-             }
-          }
+        
+        // 建立 availableDates 的 weekendID Set，用於快速查找（使用新的連續日期邏輯）
+        const availableWeekendIDs = new Set(sortedDates.map(d => getTestDateID(d)));
+        
+        // 遍歷學生所有成績，確保連續日期的成績也能被找到
+        if (data.grades) {
+          Object.entries(data.grades).forEach(([gradeDate, weekData]) => {
+            if (!weekData || !weekData.total) return;
+            
+            const weekendID = getTestDateID(gradeDate);
+            // 只處理在 availableDates 範圍內的成績
+            if (!availableWeekendIDs.has(weekendID)) return;
+            
+            const t = parseFloat(weekData.total);
+            if (isNaN(t) || t <= 0) return;
+            
+            const weekClass = weekData.class || 'A班';
+            const avgData = (classAverages[weekendID] && classAverages[weekendID][weekClass]) 
+                          ? classAverages[weekendID][weekClass] 
+                          : {};
+            
+            // 決定顯示日期：日A班/日B班顯示週日，其他顯示週六
+            let displayDate = weekendID;
+            if (weekClass === '日A班' || weekClass === '日B班') {
+                displayDate = getSundayDate(weekendID);
+            } 
+            
+            allChartData.push({
+                date: displayDate, 
+                weekendID: weekendID, // 保存 weekendID 用於排序
+                total: t, 
+                chi: parseFloat(weekData.chi)||0, 
+                eng: parseFloat(weekData.eng)||0, 
+                math: parseFloat(weekData.math)||0,
+                avgTotal: parseFloat(avgData.total)||null, 
+                avgChi: parseFloat(avgData.chi)||null, 
+                avgEng: parseFloat(avgData.eng)||null, 
+                avgMath: parseFloat(avgData.math)||null,
+                class: weekClass
+            });
+          });
         }
+        
+        // 依照 weekendID 在 sortedDates 中的位置排序，確保折線圖順序正確
+        allChartData.sort((a, b) => {
+          const indexA = sortedDates.indexOf(a.weekendID);
+          const indexB = sortedDates.indexOf(b.weekendID);
+          if (indexA === -1 && indexB === -1) return 0;
+          if (indexA === -1) return 1;
+          if (indexB === -1) return -1;
+          return indexA - indexB;
+        });
         const avg = allChartData.length > 0 ? (allChartData.reduce((a,b)=>a+b.total,0)/allChartData.length).toFixed(1) : 0;
         
         const contextData = fullClassData.length > 0 ? fullClassData : cachedClassData;
@@ -1278,7 +1364,7 @@ export default function App() {
             contextData.forEach(s => {
                 if (!s.grades) return;
                 Object.entries(s.grades).forEach(([date, g]) => {
-                    const wid = getWeekendID(date);
+                    const wid = getTestDateID(date);
                     if (g.total && !isNaN(parseFloat(g.total))) {
                          if (!scoresByDate[wid]) scoresByDate[wid] = [];
                          scoresByDate[wid].push(parseFloat(g.total));
@@ -1296,7 +1382,7 @@ export default function App() {
             const studentGradeMap = {};
             studentGradeMap[data.id] = {};
             Object.entries(data.grades || {}).forEach(([date, g]) => {
-                studentGradeMap[data.id][getWeekendID(date)] = g;
+                studentGradeMap[data.id][getTestDateID(date)] = g;
             });
             
             studentProb = calculateProbLogic(data, scoresByDate, mathScoresByDate, studentGradeMap, availableDates);
@@ -1313,7 +1399,11 @@ export default function App() {
       const currentPhaseConfig = PHASES.find(p => p.id === activePhase) || PHASES[0];
       const [start, end] = currentPhaseConfig.range;
       const targetDates = sortedAvailableDatesAsc.slice(start, end);
-      return fullData.filter(d => targetDates.includes(getWeekendID(d.date)));
+      // 使用 weekendID（如果存在）或從 date 計算，確保連續日期的成績也能正確過濾
+      return fullData.filter(d => {
+        const wid = d.weekendID || getTestDateID(d.date);
+        return targetDates.includes(wid);
+      });
   };
 
   // 預先為每個週末 / 班級 / 科目建立排序好的成績索引，避免在畫面 render 時重複掃描全班資料
@@ -1324,7 +1414,7 @@ export default function App() {
 
       cachedClassData.forEach(student => {
           Object.entries(student.grades || {}).forEach(([date, g]) => {
-              const weekendId = getWeekendID(date);
+              const weekendId = getTestDateID(date);
               if (!weekendId) return;
 
               const cls = g.class || 'A班';
@@ -1359,7 +1449,7 @@ export default function App() {
       });
 
       return index;
-  }, [cachedClassData]);
+  }, [cachedClassData, getTestDateID]);
 
   // 計算單科或總分在「本班」中的名次（#1, #2...）
   const calculateRank = (date, subject, myScore, myClass) => {
@@ -1368,7 +1458,7 @@ export default function App() {
       if (isNaN(myVal)) return '-';
       
       const targetClass = myClass || 'A班';
-      const currentWeekendID = getWeekendID(date);
+      const currentWeekendID = getTestDateID(date);
 
       const byWeekend = scoreIndexByWeekendAndClass[currentWeekendID];
       if (!byWeekend || !byWeekend[targetClass]) return '-';
@@ -1386,7 +1476,7 @@ export default function App() {
       const myVal = parseFloat(myScore);
       if (isNaN(myVal)) return '-';
 
-      const currentWeekendID = getWeekendID(date);
+      const currentWeekendID = getTestDateID(date);
 
       const byWeekend = scoreIndexByWeekendAndClass[currentWeekendID];
       if (!byWeekend || !byWeekend.all) return null;
@@ -1426,7 +1516,7 @@ export default function App() {
       const bottomThreshold = thresholds[thresholds.length-1];
       buckets.push({ min: 0, max: bottomThreshold-1, count: 0, label: `<${bottomThreshold}`, isMyRange: false });
 
-      const currentWeekendID = getWeekendID(date);
+      const currentWeekendID = getTestDateID(date);
 
       const targetClass = myClass || 'A班';
       const byWeekend = scoreIndexByWeekendAndClass[currentWeekendID];
@@ -1448,9 +1538,9 @@ export default function App() {
 
   const getBatchStudentPR = (student, batchDate) => {
       if (!student.grades) return '-';
-      const currentWeekendID = getWeekendID(batchDate);
+      const currentWeekendID = getTestDateID(batchDate);
       let targetDate = batchDate;
-      const existingKey = Object.keys(student.grades).find(k => getWeekendID(k) === currentWeekendID);
+      const existingKey = Object.keys(student.grades).find(k => getTestDateID(k) === currentWeekendID);
       if (existingKey) targetDate = existingKey;
       
       const g = student.grades[targetDate];
@@ -1461,7 +1551,7 @@ export default function App() {
       const allScores = [];
       allStudentsData.forEach(s => {
           if (!s.grades) return;
-          const sKey = Object.keys(s.grades).find(k => getWeekendID(k) === currentWeekendID);
+          const sKey = Object.keys(s.grades).find(k => getTestDateID(k) === currentWeekendID);
           if (sKey) {
               const val = parseFloat(s.grades[sKey].total);
               if (!isNaN(val)) allScores.push(val);
@@ -1658,8 +1748,8 @@ export default function App() {
                                         let displayedStudents = allStudentsData.filter(s => {
                                             if (!s.grades) return false;
 
-                                            const weekendId = getWeekendID(batchDate);
-                                            const matchingKey = Object.keys(s.grades).find(k => getWeekendID(k) === weekendId);
+                                            const weekendId = getTestDateID(batchDate);
+                                            const matchingKey = Object.keys(s.grades).find(k => getTestDateID(k) === weekendId);
                                             if (!matchingKey) return false;
 
                                             const gradeObj = s.grades[matchingKey];
@@ -1692,7 +1782,8 @@ export default function App() {
                                         return displayedStudents.map((student, sIndex) => {
                                             let targetDate = batchDate;
                                             if (student.grades) {
-                                                const existingKey = Object.keys(student.grades).find(k => getWeekendID(k) === getWeekendID(batchDate));
+                                                const batchDateID = getTestDateID(batchDate);
+                                                const existingKey = Object.keys(student.grades).find(k => getTestDateID(k) === batchDateID);
                                                 if (existingKey) targetDate = existingKey;
                                             }
 
@@ -1876,8 +1967,10 @@ export default function App() {
                     <h4 className={`font-bold mb-6 text-xs flex items-center justify-center gap-2 tracking-widest uppercase ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>詳細紀錄</h4>
                     <div className="space-y-4">
                         {getPhaseData(viewData.chartData).slice().reverse().map((d) => {
-                             const totalRank = calculateRank(d.date, 'total', d.total, d.class);
-                             const globalPR = calculateGlobalPR(d.date, 'total', d.total);
+                             // 使用 weekendID（如果存在）或 date，確保日A班/日B班的週日日期也能正確計算排名
+                             const dateForRank = d.weekendID || d.date;
+                             const totalRank = calculateRank(dateForRank, 'total', d.total, d.class);
+                             const globalPR = calculateGlobalPR(dateForRank, 'total', d.total);
                              return (
                              <div key={d.date} className={`group p-5 rounded-3xl border transition-all duration-300 ${darkMode ? 'bg-white/5 border-white/5 hover:border-emerald-500/20' : 'bg-white border-slate-100 hover:border-emerald-200 hover:shadow-lg hover:shadow-emerald-50/20'}`}>
                                 <div className="flex justify-between items-start mb-4">
@@ -1886,7 +1979,7 @@ export default function App() {
                                             <span className="text-sm font-bold text-slate-400 font-mono">{d.date}</span>
                                             {d.class && <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold opacity-60 ${darkMode ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-600'}`}>{d.class}</span>}
                                         </div>
-                                        <button onClick={() => openStatsModal(d.date, { total: d.total, chi: d.chi, eng: d.eng, math: d.math }, d.class)} className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all hover:scale-105 active:scale-95 shadow-md shadow-slate-200/50 dark:shadow-none bg-slate-700 text-white hover:bg-slate-600 border border-white/10`}>
+                                        <button onClick={() => openStatsModal(dateForRank, { total: d.total, chi: d.chi, eng: d.eng, math: d.math }, d.class)} className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all hover:scale-105 active:scale-95 shadow-md shadow-slate-200/50 dark:shadow-none bg-slate-700 text-white hover:bg-slate-600 border border-white/10`}>
                                             <BarChart2 className="w-3.5 h-3.5" /> 
                                             查看落點分析
                                             <ChevronRight className="w-3 h-3 opacity-80" />
@@ -1906,7 +1999,7 @@ export default function App() {
                                         const subColor = sub === 'chi' ? 'text-rose-500' : sub === 'eng' ? 'text-violet-500' : 'text-blue-500';
                                         const subLabel = sub === 'chi' ? '國文' : sub === 'eng' ? '英文' : '數學';
                                         const subScore = d[sub];
-                                        const subRank = calculateRank(d.date, sub, subScore, d.class);
+                                        const subRank = calculateRank(dateForRank, sub, subScore, d.class);
                                         return (
                                             <div key={sub} className={`rounded-2xl p-2 text-center ${darkMode ? 'bg-slate-900' : 'bg-slate-50/50'}`}>
                                                 <div className={`text-[9px] font-bold opacity-80 mb-0.5 ${subColor}`}>{subLabel}</div>

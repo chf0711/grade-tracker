@@ -1844,36 +1844,43 @@ export default function App() {
   }, [statsModalData, statsActiveTab]);
 
   const isLandingMode = mode === 'landing';
+  const sharedBackgroundOpacity = isLandingMode
+      ? 1
+      : mode === 'teacher'
+          ? 0.82
+          : mode === 'parent'
+              ? 0.9
+              : 0.87;
 
   if (!user && !db) return <div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400 text-sm font-mono tracking-widest uppercase">Initializing...</div>;
   if (!user) return <div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400 text-sm font-mono tracking-widest uppercase">Connecting...</div>;
 
   return (
-    <div className={`${isLandingMode ? 'h-[100svh] overflow-hidden' : 'min-h-screen pb-32 overflow-x-hidden'} font-sans antialiased transition-colors duration-500 ease-in-out relative ${darkMode ? 'bg-[#111714] text-slate-200' : 'bg-[#f5f5f7] text-slate-800'}`}>
-      {mode === 'landing' && (
-        <div
-          className="fixed inset-0 pointer-events-none z-0"
-          style={{
-            backgroundImage: 'repeating-linear-gradient(0deg, rgba(148,163,184,0.1) 0px, rgba(148,163,184,0.1) 1px, transparent 1px, transparent 24px), repeating-linear-gradient(90deg, rgba(148,163,184,0.08) 0px, rgba(148,163,184,0.08) 1px, transparent 1px, transparent 24px), radial-gradient(circle at 12% 15%, rgba(99,102,241,0.22) 0%, transparent 40%), radial-gradient(circle at 86% 12%, rgba(14,165,233,0.22) 0%, transparent 40%), radial-gradient(circle at 80% 84%, rgba(236,72,153,0.16) 0%, transparent 36%), linear-gradient(138deg, #f8fafc 0%, #f3f7ff 46%, #eefcf5 100%)'
-          }}
-        />
-      )}
+    <div className={`${isLandingMode ? 'h-[100svh] overflow-hidden' : 'min-h-screen pb-32 overflow-x-hidden'} font-sans antialiased transition-colors duration-500 ease-in-out relative ${darkMode ? 'bg-[#111714] text-slate-200' : 'bg-transparent text-slate-800'}`}>
+      <div
+        aria-hidden="true"
+        className="fixed inset-0 pointer-events-none z-0 transition-opacity duration-500"
+        style={{
+          opacity: sharedBackgroundOpacity,
+          backgroundImage: 'repeating-linear-gradient(0deg, rgba(148,163,184,0.1) 0px, rgba(148,163,184,0.1) 1px, transparent 1px, transparent 24px), repeating-linear-gradient(90deg, rgba(148,163,184,0.08) 0px, rgba(148,163,184,0.08) 1px, transparent 1px, transparent 24px), radial-gradient(circle at 12% 15%, rgba(99,102,241,0.22) 0%, transparent 40%), radial-gradient(circle at 86% 12%, rgba(14,165,233,0.22) 0%, transparent 40%), radial-gradient(circle at 80% 84%, rgba(236,72,153,0.16) 0%, transparent 36%), linear-gradient(138deg, #f8fafc 0%, #f3f7ff 46%, #eefcf5 100%)'
+        }}
+      />
 
       {/* Header */}
-      <header className={`fixed top-0 w-full backdrop-blur-2xl z-30 border-b transition-all duration-300 ${darkMode ? 'bg-[#121a17]/88 border-emerald-200/10 shadow-lg shadow-black/25' : 'bg-white/90 border-slate-200/80 shadow-sm'}`}>
+      <header className={`fixed top-0 w-full backdrop-blur-2xl z-30 border-b transition-all duration-300 ${darkMode ? 'bg-[#121a17]/88 border-emerald-200/10 shadow-lg shadow-black/25' : 'bg-white/40 border-white/60 shadow-[0_10px_35px_rgba(15,23,42,0.08)]'}`}>
         <div className="max-w-4xl mx-auto px-6 h-16 flex justify-between items-center relative z-10">
           <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setMode('landing')}>
-            <div className={`p-2 rounded-xl transition-transform group-hover:scale-105 duration-300 ${darkMode ? 'bg-emerald-500/10 text-emerald-200 ring-1 ring-emerald-300/35' : 'bg-white text-blue-600 ring-1 ring-slate-200 shadow-sm'}`}><GraduationCap className="h-5 w-5" /></div>
+            <div className={`p-2 rounded-xl transition-transform group-hover:scale-105 duration-300 ${darkMode ? 'bg-emerald-500/10 text-emerald-200 ring-1 ring-emerald-300/35' : 'bg-white/74 text-emerald-700 ring-1 ring-white/90 shadow-sm'}`}><GraduationCap className="h-5 w-5" /></div>
             <div>
-                <h1 className={`text-2xl font-black tracking-widest font-serif uppercase leading-none bg-clip-text text-transparent ${darkMode ? 'bg-gradient-to-r from-emerald-50 via-emerald-200 to-lime-200' : 'bg-gradient-to-r from-slate-800 via-blue-700 to-cyan-600'}`}>
+                <h1 className={`text-2xl font-black tracking-widest font-serif uppercase leading-none bg-clip-text text-transparent ${darkMode ? 'bg-gradient-to-r from-emerald-50 via-emerald-200 to-lime-200' : 'bg-gradient-to-r from-slate-800 via-emerald-700 to-cyan-700'}`}>
                   HSINRU
                 </h1>
-                <p className="text-[9px] text-slate-400 font-bold tracking-widest uppercase mt-0.5 opacity-80">Grade Tracker</p>
+                <p className="text-[9px] text-slate-500/90 font-bold tracking-widest uppercase mt-0.5">Grade Tracker</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-                <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white text-blue-700 shadow-md shadow-slate-200/50 ring-1 ring-black/5') : 'text-slate-400 hover:text-slate-500 bg-white/55'}`}>{isAuthenticated ? '後台' : '老師'}</button>
-                <button onClick={() => { setViewData(null); setSearchError(''); setMode('parent'); }} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white text-blue-700 shadow-md shadow-slate-200/50 ring-1 ring-black/5') : 'text-slate-400 hover:text-slate-500 bg-white/55'}`}>家長</button>
+                <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/92 text-emerald-700 shadow-md shadow-slate-300/40 ring-1 ring-white/95') : 'text-slate-600 hover:text-slate-800 bg-white/52 hover:bg-white/70'}`}>{isAuthenticated ? '後台' : '老師'}</button>
+                <button onClick={() => { setViewData(null); setSearchError(''); setMode('parent'); }} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/92 text-emerald-700 shadow-md shadow-slate-300/40 ring-1 ring-white/95') : 'text-slate-600 hover:text-slate-800 bg-white/52 hover:bg-white/70'}`}>家長</button>
             {isAuthenticated && (
                 <button onClick={handleLogout} className="ml-1 p-2 text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-full transition-colors" title="登出"><LogOut className="w-5 h-5"/></button>
             )}
@@ -1889,7 +1896,7 @@ export default function App() {
                 <div className="px-4 py-1.5 rounded-full mb-5 border border-white/90 bg-white/72 text-[10px] tracking-[0.2em] font-black uppercase text-slate-600">
                     HSINRU CENTRAL
                 </div>
-                <h2 className="whitespace-nowrap text-[1.12rem] sm:text-[1.68rem] md:text-[2.7rem] font-black font-serif tracking-tight mb-3 text-center leading-[1.12] bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 via-sky-700 to-emerald-700">Make Progress Visible</h2>
+                <h2 className="whitespace-nowrap text-[1.28rem] sm:text-[1.82rem] md:text-[2.7rem] font-black font-serif tracking-tight mb-3 text-center leading-[1.12] bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 via-sky-700 to-emerald-700">Make Progress Visible</h2>
                 <p className="text-[11px] font-bold tracking-[0.18em] mb-6 uppercase text-slate-600">2025-2026 Learning Journey</p>
                 <ExamCountdown isDarkMode={darkMode} />
                   

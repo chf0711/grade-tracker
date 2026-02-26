@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell } from 'recharts';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from 'recharts';
 import { Search, Save, Plus, Check, BarChart3, X, Lock, LayoutDashboard, GraduationCap, Calendar, Clipboard, LogOut, AlertTriangle, UserPlus, Sparkles, Edit3, Trash2, Trophy, Target, FileSpreadsheet, Moon, Sun, ChevronRight, ArrowLeft, PieChart, Users, BarChart2, ShieldCheck, ArrowDownWideNarrow, Percent, Info } from 'lucide-react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
@@ -392,7 +392,7 @@ const SingleSubjectChart = ({ data, subjectKey, avgKey, colorKey, title, domain,
                   />
                   <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: '12px', fontWeight: 500, color: isDarkMode ? '#94a3b8' : '#475569' }}/>
                   <Line name="班平均" type="monotone" dataKey={avgKey} stroke="#94a3b8" strokeWidth={2} strokeOpacity={0.6} dot={false} activeDot={{ r: 4, fill: '#94a3b8', stroke: 'none' }} isAnimationActive={false} connectNulls={true} />
-                  <Line name={title} type="monotone" dataKey={subjectKey} stroke={COLORS[colorKey].hex} strokeWidth={3} activeDot={{ r: 6, strokeWidth: 0 }} isAnimationActive={true} animationDuration={1500} connectNulls={true} />
+                  <Line name={title} type="monotone" dataKey={subjectKey} stroke={COLORS[colorKey].hex} strokeWidth={3} activeDot={{ r: 6, strokeWidth: 0 }} isAnimationActive={false} connectNulls={true} />
               </LineChart>
           </ResponsiveContainer>
         </div>
@@ -420,7 +420,7 @@ const DistributionChart = ({ data, colorKey, isDarkMode }) => {
                             fontWeight: 600
                         }}
                     />
-                    <Bar dataKey="count" name="人數" radius={[7, 7, 3, 3]}>
+                    <Bar dataKey="count" name="人數" radius={[7, 7, 3, 3]} isAnimationActive={false}>
                         {data.map((entry, index) => {
                             if (entry.isMyRange) {
                                 return <Cell key={`cell-${index}`} fill={COLORS[colorKey].hex} fillOpacity={0.95} />;
@@ -434,6 +434,46 @@ const DistributionChart = ({ data, colorKey, isDarkMode }) => {
         </div>
     );
 };
+
+const ParentAbilityRadar = ({ data, maxValue, isDarkMode }) => (
+    <div className={`mb-8 rounded-3xl border px-4 pt-4 pb-2 ${isDarkMode ? 'bg-[#0f1914]/70 border-emerald-200/15' : 'bg-white border-slate-200/70'}`}>
+        <div className="flex items-end justify-between mb-2 px-1">
+            <div>
+                <h4 className={`text-sm font-black tracking-wide ${isDarkMode ? 'text-emerald-100' : 'text-slate-800'}`}>三科能力雷達圖</h4>
+                <p className={`text-[11px] font-semibold ${isDarkMode ? 'text-emerald-200/70' : 'text-slate-500'}`}>個人平均 vs 班平均（當前階段）</p>
+            </div>
+            <span className={`text-[10px] font-bold tracking-wider ${isDarkMode ? 'text-emerald-300/60' : 'text-slate-400'}`}>SCORE</span>
+        </div>
+        <div className="h-60 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+                <RadarChart data={data} outerRadius="74%">
+                    <PolarGrid stroke={isDarkMode ? 'rgba(167,243,208,0.24)' : 'rgba(148,163,184,0.28)'} />
+                    <PolarAngleAxis dataKey="subject" tick={{ fontSize: 11, fontWeight: 700, fill: isDarkMode ? '#d1fae5' : '#334155' }} />
+                    <PolarRadiusAxis
+                        angle={25}
+                        domain={[0, maxValue]}
+                        tickCount={6}
+                        tick={{ fontSize: 10, fill: isDarkMode ? '#86efac' : '#64748b' }}
+                        axisLine={false}
+                    />
+                    <Tooltip
+                        contentStyle={{
+                            borderRadius: '14px',
+                            border: isDarkMode ? '1px solid rgba(110,231,183,0.24)' : '1px solid rgba(148,163,184,0.22)',
+                            backgroundColor: isDarkMode ? 'rgba(7,20,15,0.95)' : 'rgba(255,255,255,0.96)',
+                            color: isDarkMode ? '#ecfdf5' : '#0f172a',
+                            fontSize: '12px',
+                            fontWeight: 600
+                        }}
+                    />
+                    <Legend verticalAlign="top" wrapperStyle={{ fontSize: '11px', fontWeight: 700, color: isDarkMode ? '#a7f3d0' : '#64748b' }} />
+                    <Radar name="個人平均" dataKey="student" stroke="#22c55e" fill="#22c55e" fillOpacity={isDarkMode ? 0.36 : 0.22} strokeWidth={2.5} isAnimationActive={false} />
+                    <Radar name="班平均" dataKey="classAvg" stroke="#94a3b8" fill="#94a3b8" fillOpacity={isDarkMode ? 0.2 : 0.1} strokeWidth={2} isAnimationActive={false} />
+                </RadarChart>
+            </ResponsiveContainer>
+        </div>
+    </div>
+);
 
 const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, darkMode, handleBatchGradeChange, handleKeyDown, handlePaste }) => {
     const probVisual = getProbabilityVisual(probValue, darkMode);
@@ -501,13 +541,13 @@ const ExamCountdown = ({ isDarkMode }) => {
     }, []);
 
     return (
-        <div className={`flex items-center gap-3 mt-4 px-5 py-2 rounded-full border backdrop-blur-md transition-all duration-500 shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10 text-slate-200 shadow-black/20' : 'bg-white/60 border-white/60 text-slate-700 shadow-slate-200/50'}`}>
-            <Target className="w-4 h-4 text-blue-500" />
+        <div className={`flex items-center gap-3 mt-4 px-5 py-2 rounded-full border backdrop-blur-md transition-all duration-500 shadow-sm ${isDarkMode ? 'bg-emerald-500/10 border-emerald-200/20 text-slate-100 shadow-black/20' : 'bg-white/70 border-emerald-100 text-slate-700 shadow-slate-200/50'}`}>
+            <Target className="w-4 h-4 text-emerald-500" />
             <div className="flex items-baseline gap-1.5 font-mono text-sm">
                 <span className="font-bold">{timeLeft.days}</span><span className="text-[10px] opacity-50 mr-1">DAYS</span>
                 <span className="font-bold">{String(timeLeft.hours).padStart(2,'0')}</span><span className="opacity-30">:</span>
                 <span className="font-bold">{String(timeLeft.minutes).padStart(2,'0')}</span><span className="opacity-30">:</span>
-                <span className="font-bold text-blue-500">{String(timeLeft.seconds).padStart(2,'0')}</span>
+                <span className="font-bold text-emerald-500">{String(timeLeft.seconds).padStart(2,'0')}</span>
             </div>
         </div>
     );
@@ -1501,17 +1541,56 @@ export default function App() {
     setLoading(false);
   };
 
-  const getPhaseData = (fullData) => {
-      if (!fullData) return [];
-      const currentPhaseConfig = PHASES.find(p => p.id === activePhase) || PHASES[0];
+  const parentPhaseData = useMemo(() => {
+      if (!viewData?.chartData) return [];
+      const currentPhaseConfig = PHASES.find((p) => p.id === activePhase) || PHASES[0];
       const [start, end] = currentPhaseConfig.range;
       const targetDates = sortedAvailableDatesAsc.slice(start, end);
-      // 使用 weekendID（如果存在）或從 date 計算，確保連續日期的成績也能正確過濾
-      return fullData.filter(d => {
-        const wid = d.weekendID || getTestDateID(d.date);
-        return targetDates.includes(wid);
+
+      return viewData.chartData.filter((d) => {
+          const wid = d.weekendID || getTestDateID(d.date);
+          return targetDates.includes(wid);
       });
-  };
+  }, [viewData, activePhase, sortedAvailableDatesAsc, getTestDateID]);
+
+  const parentRadarData = useMemo(() => {
+      if (!parentPhaseData.length) return [];
+
+      const summarize = (label, scoreKey, avgKey) => {
+          const selfValues = parentPhaseData
+              .map((item) => parseFloat(item[scoreKey]))
+              .filter((v) => !isNaN(v));
+          const avgValues = parentPhaseData
+              .map((item) => parseFloat(item[avgKey]))
+              .filter((v) => !isNaN(v));
+
+          const selfMean = selfValues.length ? selfValues.reduce((sum, v) => sum + v, 0) / selfValues.length : 0;
+          const classMean = avgValues.length ? avgValues.reduce((sum, v) => sum + v, 0) / avgValues.length : 0;
+
+          return {
+              subject: label,
+              student: Number(selfMean.toFixed(1)),
+              classAvg: Number(classMean.toFixed(1))
+          };
+      };
+
+      return [
+          summarize('國文', 'chi', 'avgChi'),
+          summarize('英文', 'eng', 'avgEng'),
+          summarize('數學', 'math', 'avgMath')
+      ];
+  }, [parentPhaseData]);
+
+  const parentRadarMax = useMemo(() => {
+      const values = parentRadarData
+          .flatMap((item) => [item.student, item.classAvg])
+          .filter((v) => !isNaN(v));
+
+      if (!values.length) return 100;
+
+      const maxValue = Math.max(...values, 80);
+      return Math.min(120, Math.ceil(maxValue / 10) * 10);
+  }, [parentRadarData]);
 
   // 預先為每個週末 / 班級 / 科目建立排序好的成績索引，避免在畫面 render 時重複掃描全班資料
   const scoreIndexByWeekendAndClass = useMemo(() => {
@@ -1719,8 +1798,8 @@ export default function App() {
   };
 
   const parentProbVisual = useMemo(
-      () => getProbabilityVisual(viewData?.prob, true),
-      [viewData]
+      () => getProbabilityVisual(viewData?.prob, darkMode),
+      [viewData, darkMode]
   );
 
   const statsSummary = useMemo(() => {
@@ -1745,25 +1824,25 @@ export default function App() {
   if (!user) return <div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400 text-sm font-mono tracking-widest uppercase">Connecting...</div>;
 
   return (
-    <div className={`min-h-screen font-sans antialiased transition-colors duration-500 ease-in-out pb-32 relative overflow-x-hidden ${darkMode ? 'bg-[#0f1115] text-slate-200' : 'bg-[#f5f5f7] text-slate-800'}`}>
+    <div className={`min-h-screen font-sans antialiased transition-colors duration-500 ease-in-out pb-32 relative overflow-x-hidden ${darkMode ? 'bg-[#111714] text-slate-200' : 'bg-[#f5f5f7] text-slate-800'}`}>
       {mode === 'landing' && (
         <div
           className="fixed inset-0 pointer-events-none z-0"
           style={darkMode ? {
-            backgroundImage: 'radial-gradient(circle at 14% 18%, rgba(10,132,255,0.22) 0%, transparent 36%), radial-gradient(circle at 86% 12%, rgba(100,210,255,0.16) 0%, transparent 30%)'
+            backgroundImage: 'radial-gradient(circle at 13% 18%, rgba(16,185,129,0.38) 0%, transparent 42%), radial-gradient(circle at 86% 10%, rgba(110,231,183,0.3) 0%, transparent 35%), radial-gradient(circle at 50% 100%, rgba(22,163,74,0.18) 0%, transparent 42%)'
           } : {
-            backgroundImage: 'radial-gradient(circle at 14% 18%, rgba(10,132,255,0.18) 0%, transparent 38%), radial-gradient(circle at 86% 12%, rgba(255,159,10,0.14) 0%, transparent 28%)'
+            backgroundImage: 'radial-gradient(circle at 12% 16%, rgba(16,185,129,0.24) 0%, transparent 44%), radial-gradient(circle at 88% 10%, rgba(5,150,105,0.18) 0%, transparent 34%), radial-gradient(circle at 52% 100%, rgba(16,185,129,0.12) 0%, transparent 40%)'
           }}
         />
       )}
 
       {/* Header */}
-      <header className={`fixed top-0 w-full backdrop-blur-2xl z-30 border-b transition-all duration-300 ${darkMode ? 'bg-[#10141d]/88 border-white/10 shadow-lg shadow-black/30' : 'bg-white/90 border-slate-200/80 shadow-sm'}`}>
+      <header className={`fixed top-0 w-full backdrop-blur-2xl z-30 border-b transition-all duration-300 ${darkMode ? 'bg-[#121a17]/88 border-emerald-200/10 shadow-lg shadow-black/25' : 'bg-white/90 border-slate-200/80 shadow-sm'}`}>
         <div className="max-w-4xl mx-auto px-6 h-16 flex justify-between items-center relative z-10">
           <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setMode('landing')}>
-            <div className={`p-2 rounded-xl transition-transform group-hover:scale-105 duration-300 ${darkMode ? 'bg-blue-500/10 text-blue-300 ring-1 ring-blue-400/30' : 'bg-white text-blue-600 ring-1 ring-slate-200 shadow-sm'}`}><GraduationCap className="h-5 w-5" /></div>
+            <div className={`p-2 rounded-xl transition-transform group-hover:scale-105 duration-300 ${darkMode ? 'bg-emerald-500/10 text-emerald-200 ring-1 ring-emerald-300/35' : 'bg-white text-blue-600 ring-1 ring-slate-200 shadow-sm'}`}><GraduationCap className="h-5 w-5" /></div>
             <div>
-                <h1 className={`text-2xl font-black tracking-widest font-serif uppercase leading-none bg-clip-text text-transparent ${darkMode ? 'bg-gradient-to-r from-white via-blue-100 to-cyan-200' : 'bg-gradient-to-r from-slate-800 via-blue-700 to-cyan-600'}`}>
+                <h1 className={`text-2xl font-black tracking-widest font-serif uppercase leading-none bg-clip-text text-transparent ${darkMode ? 'bg-gradient-to-r from-emerald-50 via-emerald-200 to-lime-200' : 'bg-gradient-to-r from-slate-800 via-blue-700 to-cyan-600'}`}>
                   HSINRU
                 </h1>
                 <p className="text-[9px] text-slate-400 font-bold tracking-widest uppercase mt-0.5 opacity-80">Grade Tracker</p>
@@ -1774,8 +1853,8 @@ export default function App() {
                 {darkMode ? <Moon className="w-4 h-4 fill-current"/> : <Sun className="w-4 h-4"/>}
             </button>
             <div className={`flex p-1 rounded-full border backdrop-blur-md ${darkMode ? 'bg-white/5 border-white/5 shadow-inner' : 'bg-white/40 border-white/40 shadow-inner'}`}>
-                <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-slate-800 text-blue-400 shadow-lg shadow-black/40 ring-1 ring-white/5' : 'bg-white text-blue-700 shadow-md shadow-slate-200/50 ring-1 ring-black/5') : 'text-slate-400 hover:text-slate-500'}`}>{isAuthenticated ? '後台' : '老師'}</button>
-                <button onClick={() => { setViewData(null); setSearchError(''); setMode('parent'); }} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-slate-800 text-blue-400 shadow-lg shadow-black/40 ring-1 ring-white/5' : 'bg-white text-blue-700 shadow-md shadow-slate-200/50 ring-1 ring-black/5') : 'text-slate-400 hover:text-slate-500'}`}>家長</button>
+                <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white text-blue-700 shadow-md shadow-slate-200/50 ring-1 ring-black/5') : 'text-slate-400 hover:text-slate-500'}`}>{isAuthenticated ? '後台' : '老師'}</button>
+                <button onClick={() => { setViewData(null); setSearchError(''); setMode('parent'); }} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white text-blue-700 shadow-md shadow-slate-200/50 ring-1 ring-black/5') : 'text-slate-400 hover:text-slate-500'}`}>家長</button>
             </div>
             {isAuthenticated && (
                 <button onClick={handleLogout} className="ml-1 p-2 text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-full transition-colors" title="登出"><LogOut className="w-5 h-5"/></button>
@@ -1787,38 +1866,32 @@ export default function App() {
       <main className="pt-28 px-4 max-w-4xl mx-auto relative z-10">
         {mode === 'landing' && (
           <div className="flex flex-col items-center justify-center min-h-[calc(100vh-120px)]">
-            <div className={`relative w-full max-w-3xl rounded-[2.5rem] overflow-hidden ${darkMode ? 'bg-[#101722]/88 shadow-2xl shadow-black/45' : 'bg-white/95 shadow-[0_24px_80px_rgba(15,23,42,0.08)]'}`}>
+            <div className={`relative w-full max-w-3xl rounded-[2.5rem] overflow-hidden ${darkMode ? 'bg-[#121b17]/92 shadow-[0_18px_50px_rgba(0,0,0,0.28)]' : 'bg-white/96 shadow-[0_16px_44px_rgba(15,23,42,0.09)]'}`}>
               <div
-                className={`pointer-events-none absolute inset-0 ${darkMode ? 'opacity-90' : 'opacity-100'}`}
+                className="pointer-events-none absolute inset-0"
                 style={darkMode ? {
-                  backgroundImage: 'radial-gradient(circle at 10% 10%, rgba(10,132,255,0.34) 0%, transparent 42%), radial-gradient(circle at 90% 14%, rgba(100,210,255,0.22) 0%, transparent 34%), linear-gradient(140deg, rgba(15,23,42,0.0) 0%, rgba(15,23,42,0.32) 72%)'
+                  backgroundImage: 'radial-gradient(circle at 10% 8%, rgba(16,185,129,0.62) 0%, rgba(16,185,129,0) 44%), radial-gradient(circle at 90% 12%, rgba(110,231,183,0.52) 0%, rgba(110,231,183,0) 37%), linear-gradient(152deg, rgba(20,35,28,0.08) 0%, rgba(6,15,11,0.56) 85%)'
                 } : {
-                  backgroundImage: 'radial-gradient(circle at 10% 10%, rgba(10,132,255,0.28) 0%, transparent 44%), radial-gradient(circle at 90% 14%, rgba(255,159,10,0.2) 0%, transparent 32%), linear-gradient(145deg, rgba(255,255,255,0.4) 0%, rgba(248,250,252,0.78) 70%)'
-                }}
-              />
-              <div
-                className={`pointer-events-none absolute inset-0 ${darkMode ? 'opacity-15' : 'opacity-20'}`}
-                style={{
-                  backgroundImage: 'repeating-linear-gradient(135deg, rgba(148,163,184,0.26) 0px, rgba(148,163,184,0.26) 1px, transparent 1px, transparent 14px)'
+                  backgroundImage: 'radial-gradient(circle at 10% 10%, rgba(16,185,129,0.4) 0%, transparent 46%), radial-gradient(circle at 90% 12%, rgba(5,150,105,0.32) 0%, transparent 36%), linear-gradient(150deg, rgba(236,253,245,0.84) 0%, rgba(255,255,255,0.97) 74%)'
                 }}
               />
 
               <div className="relative z-10 flex flex-col items-center justify-center px-6 py-12 md:py-14">
-                <div className={`p-5 rounded-full mb-6 ring-1 backdrop-blur-3xl transition-transform duration-700 hover:scale-105 ${darkMode ? 'bg-gradient-to-br from-blue-500/20 to-cyan-500/10 ring-blue-300/35' : 'bg-gradient-to-br from-blue-100 to-cyan-100 ring-blue-200 shadow-sm'}`}>
-                    <Sparkles className={`w-10 h-10 ${darkMode ? 'text-blue-200' : 'text-blue-700'}`} />
+                <div className={`p-5 rounded-full mb-6 ring-1 backdrop-blur-xl transition-transform duration-700 hover:scale-105 ${darkMode ? 'bg-gradient-to-br from-emerald-500/28 to-green-400/16 ring-emerald-200/40' : 'bg-gradient-to-br from-emerald-100 to-green-100 ring-emerald-200 shadow-sm'}`}>
+                    <Sparkles className={`w-10 h-10 ${darkMode ? 'text-emerald-100' : 'text-emerald-700'}`} />
                 </div>
-                <h2 className={`text-[2.05rem] md:text-[3.45rem] font-black font-serif tracking-tight mb-4 text-center leading-[1.16] bg-clip-text text-transparent ${darkMode ? 'bg-gradient-to-r from-white via-blue-100 to-cyan-200' : 'bg-gradient-to-r from-slate-900 via-blue-700 to-cyan-600'}`}>Make Progress Visible</h2>
-                <p className="text-slate-400 text-xs font-semibold tracking-[0.18em] mb-6 uppercase">2025-2026 Learning Journey</p>
+                <h2 className={`text-[2.05rem] md:text-[3.45rem] font-black font-serif tracking-tight mb-4 text-center leading-[1.16] bg-clip-text text-transparent ${darkMode ? 'bg-gradient-to-r from-emerald-50 via-emerald-200 to-lime-200' : 'bg-gradient-to-r from-slate-900 via-emerald-700 to-green-600'}`}>Make Progress Visible</h2>
+                <p className={`text-xs font-semibold tracking-[0.18em] mb-6 uppercase ${darkMode ? 'text-emerald-100/75' : 'text-slate-500'}`}>2025-2026 Learning Journey</p>
                 <ExamCountdown isDarkMode={darkMode} />
                   
                 <div className="w-full max-w-md space-y-4 mt-8">
-                   <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className={`group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 hover:scale-[1.01] active:scale-[0.98] transition-all duration-300 backdrop-blur-2xl ${darkMode ? 'bg-gradient-to-br from-[#0f172a]/90 to-[#0c1322]/90 border-white/12 hover:border-blue-500/35 shadow-lg shadow-black/35' : 'bg-gradient-to-br from-white to-slate-50 border-slate-200/80 hover:border-blue-200 shadow-sm'}`}>
-                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-colors shadow-inner ${darkMode ? 'bg-gradient-to-br from-blue-500/25 to-cyan-500/20 text-blue-300 ring-1 ring-blue-300/30' : 'bg-gradient-to-br from-blue-100 to-cyan-100 text-blue-700'}`}><LayoutDashboard className="w-6 h-6" /></div>
+                   <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className={`group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 hover:scale-[1.01] active:scale-[0.98] transition-all duration-300 backdrop-blur-xl ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/18 hover:border-emerald-300/45 shadow-lg shadow-black/30' : 'bg-gradient-to-br from-white to-slate-50 border-slate-200/80 hover:border-emerald-200 shadow-sm'}`}>
+                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-colors shadow-inner ${darkMode ? 'bg-gradient-to-br from-emerald-500/30 to-green-400/20 text-emerald-200 ring-1 ring-emerald-200/35' : 'bg-gradient-to-br from-emerald-100 to-green-100 text-emerald-700'}`}><LayoutDashboard className="w-6 h-6" /></div>
                       <div className="text-left flex-1"><h3 className={`text-lg font-bold ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>老師通道</h3><p className="text-xs text-slate-400 mt-0.5">管理成績與設定</p></div>
                       <ChevronRight className="w-5 h-5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
                    </button>
-                   <button onClick={() => { setViewData(null); setSearchError(''); setMode('parent'); }} className={`group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 hover:scale-[1.01] active:scale-[0.98] transition-all duration-300 backdrop-blur-2xl ${darkMode ? 'bg-gradient-to-br from-[#0f172a]/90 to-[#0c1322]/90 border-white/12 hover:border-blue-500/35 shadow-lg shadow-black/35' : 'bg-gradient-to-br from-white to-slate-50 border-slate-200/80 hover:border-blue-200 shadow-sm'}`}>
-                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-colors shadow-inner ${darkMode ? 'bg-gradient-to-br from-blue-500/25 to-cyan-500/20 text-blue-300 ring-1 ring-blue-300/30' : 'bg-gradient-to-br from-blue-100 to-cyan-100 text-blue-700'}`}><BarChart3 className="w-6 h-6" /></div>
+                   <button onClick={() => { setViewData(null); setSearchError(''); setMode('parent'); }} className={`group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 hover:scale-[1.01] active:scale-[0.98] transition-all duration-300 backdrop-blur-xl ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/18 hover:border-emerald-300/45 shadow-lg shadow-black/30' : 'bg-gradient-to-br from-white to-slate-50 border-slate-200/80 hover:border-emerald-200 shadow-sm'}`}>
+                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-colors shadow-inner ${darkMode ? 'bg-gradient-to-br from-emerald-500/30 to-green-400/20 text-emerald-200 ring-1 ring-emerald-200/35' : 'bg-gradient-to-br from-emerald-100 to-green-100 text-emerald-700'}`}><BarChart3 className="w-6 h-6" /></div>
                       <div className="text-left flex-1"><h3 className={`text-lg font-bold ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>家長查詢</h3><p className="text-xs text-slate-400 mt-0.5">輸入學號查看分析</p></div>
                       <ChevronRight className="w-5 h-5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
                    </button>
@@ -2011,44 +2084,44 @@ export default function App() {
         {mode === 'parent' && (
           <div className="max-w-md mx-auto space-y-6 pt-10"> 
             {!viewData && (
-            <div className={`backdrop-blur-2xl p-8 rounded-[2.5rem] shadow-2xl border text-center relative overflow-hidden ${darkMode ? 'bg-[#111827]/88 border-white/10 shadow-black/35' : 'bg-white/94 border-slate-200/80 shadow-sm'}`}>
-              <div className="absolute top-0 left-0 w-full h-1 bg-blue-500/80"></div>
+            <div className={`backdrop-blur-2xl p-8 rounded-[2.5rem] shadow-2xl border text-center relative overflow-hidden ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/15 shadow-black/30' : 'bg-white/94 border-slate-200/80 shadow-sm'}`}>
+              <div className="absolute top-0 left-0 w-full h-1 bg-emerald-500/80"></div>
               <h2 className={`text-2xl font-bold mb-8 tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>查詢成績</h2>
-              <div className={`w-full p-2 rounded-2xl border transition-all mb-6 shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/10 focus-within:ring-2 focus-within:ring-blue-500/20' : 'bg-slate-50 border-slate-200 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100'}`}>
+              <div className={`w-full p-2 rounded-2xl border transition-all mb-6 shadow-inner ${darkMode ? 'bg-[#08120d]/70 border-emerald-200/15 focus-within:ring-2 focus-within:ring-emerald-500/20' : 'bg-slate-50 border-slate-200 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100'}`}>
                 <input type="text" placeholder="請輸入學號" className={`w-full bg-transparent border-none px-4 py-3 outline-none text-xl uppercase font-bold text-center tracking-widest placeholder:text-base placeholder:tracking-normal placeholder:font-medium ${darkMode ? 'text-white placeholder:text-slate-600' : 'text-slate-800 placeholder:text-slate-400'}`} value={searchId} onChange={(e) => setSearchId(e.target.value)} />
               </div>
-              <button onClick={handleParentSearch} disabled={loading} className="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-2xl font-bold text-lg shadow-sm transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 tracking-wide">{loading ? '查詢中...' : '開始查詢'}</button>
+              <button onClick={handleParentSearch} disabled={loading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-2xl font-bold text-lg shadow-sm transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 tracking-wide">{loading ? '查詢中...' : '開始查詢'}</button>
               {searchError && <p className="mt-6 text-red-500 text-xs font-bold bg-red-500/10 inline-block px-4 py-2 rounded-full animate-pulse">{searchError}</p>}
             </div>
             )}
 
             {viewData && (
-              <div className={`rounded-[2.5rem] shadow-2xl overflow-hidden border backdrop-blur-2xl ${darkMode ? 'bg-[#111827]/88 border-white/10 shadow-black/35' : 'bg-white/95 border-slate-200/80 shadow-sm'}`}>
-                <div className="bg-slate-900 text-white p-8 pb-6 relative overflow-hidden">
-                   <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500 rounded-full -mr-20 -mt-20 blur-3xl opacity-10"></div>
+              <div className={`rounded-[2.5rem] shadow-2xl overflow-hidden border backdrop-blur-2xl ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/15 shadow-black/30' : 'bg-white/95 border-slate-200/80 shadow-sm'}`}>
+                <div className={`p-8 pb-6 relative overflow-hidden ${darkMode ? 'bg-[#0d1712] text-white border-b border-emerald-200/10' : 'bg-gradient-to-r from-emerald-50 to-white text-slate-800 border-b border-slate-100'}`}>
+                   <div className={`absolute top-0 right-0 w-64 h-64 rounded-full -mr-20 -mt-20 blur-3xl ${darkMode ? 'bg-emerald-500 opacity-20' : 'bg-emerald-300 opacity-25'}`}></div>
                    
                    <div className="relative z-10 flex justify-between items-start mb-6">
                        {/* Left Side: Name & ID */}
                        <div>
-                           <div className="text-blue-400 text-[9px] font-bold uppercase tracking-widest mb-2 border border-blue-500/20 inline-block px-2 py-1 rounded">Student Profile</div>
-                           <h3 className="text-3xl font-bold tracking-tighter text-white">{viewData.name}</h3>
-                           <p className="text-slate-500 font-mono text-xs mt-1 font-bold">{viewData.id}</p>
+                           <div className={`text-[9px] font-bold uppercase tracking-widest mb-2 border inline-block px-2 py-1 rounded ${darkMode ? 'text-emerald-300 border-emerald-300/25' : 'text-emerald-700 border-emerald-200'}`}>Student Profile</div>
+                           <h3 className={`text-3xl font-bold tracking-tighter ${darkMode ? 'text-white' : 'text-slate-800'}`}>{viewData.name}</h3>
+                           <p className="font-mono text-xs mt-1 font-bold text-slate-500">{viewData.id}</p>
                        </div>
 
                        {/* Right Side: Logout & Prob */}
                        <div className="flex flex-col items-end gap-4">
-                           <button onClick={() => setViewData(null)} className="text-slate-400 hover:text-white bg-white/5 p-2 rounded-full backdrop-blur-md transition-colors"><LogOut className="w-4 h-4"/></button>
+                           <button onClick={() => setViewData(null)} className={`p-2 rounded-full backdrop-blur-md transition-colors ${darkMode ? 'text-slate-400 hover:text-white bg-white/5' : 'text-slate-500 hover:text-slate-700 bg-white/70 border border-slate-200'}`}><LogOut className="w-4 h-4"/></button>
                            
                            {/* --- NEW PROBABILITY DISPLAY --- */}
                            {viewData.prob && viewData.prob !== '-' && (
                                <div className="text-right mt-2">
-                                   <div className="text-[10px] font-bold text-blue-400/80 uppercase tracking-widest mb-0.5">錄取機率</div>
+                                   <div className={`text-[10px] font-bold uppercase tracking-widest mb-0.5 ${darkMode ? 'text-emerald-300/80' : 'text-emerald-700/80'}`}>錄取機率</div>
                                    <div className="text-4xl font-black flex items-baseline justify-end gap-1" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>
                                        {viewData.prob}<span className="text-lg font-bold" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>%</span>
                                    </div>
                                    <div className="mt-1 flex items-center justify-end gap-1.5 opacity-50">
-                                        <p className="text-[9px] text-slate-300 font-medium">
-                                            系統綜合歷史成績運算，<span className="text-white/90 border-b border-white/20 pb-0.5">僅供參考</span>
+                                        <p className={`text-[9px] font-medium ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
+                                            系統綜合歷史成績運算，<span className={`${darkMode ? 'text-white/90 border-white/20' : 'text-slate-700 border-slate-300'} border-b pb-0.5`}>僅供參考</span>
                                         </p>
                                    </div>
                                </div>
@@ -2059,47 +2132,37 @@ export default function App() {
 
                 <div className="p-6">
                   {hasPriorHistory && (
-                  <div className={`flex p-1 mb-6 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
+                  <div className={`flex p-1 mb-6 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#08120d]/70 border-emerald-200/10' : 'bg-slate-50 border-slate-100'}`}>
                       {PHASES.map(phase => (
-                          <button key={phase.id} onClick={() => setActivePhase(phase.id)} className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${activePhase === phase.id ? (darkMode ? 'bg-slate-800 text-white shadow-md border border-white/10 ring-1 ring-white/5' : 'bg-white text-slate-800 shadow-sm border border-slate-100') : 'text-slate-500 hover:text-slate-400'}`}>{phase.name}</button>
+                          <button key={phase.id} onClick={() => setActivePhase(phase.id)} className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${activePhase === phase.id ? (darkMode ? 'bg-[#1f2a24] text-emerald-100 shadow-md border border-emerald-200/20 ring-1 ring-emerald-200/10' : 'bg-white text-slate-800 shadow-sm border border-slate-100') : 'text-slate-500 hover:text-slate-400'}`}>{phase.name}</button>
                       ))}
                   </div>
                   )}
 
-                  <div className={`flex p-1 rounded-2xl mb-8 justify-center shadow-inner ${darkMode ? 'bg-[#020617]/50' : 'bg-slate-100'}`}>
+                  <ParentAbilityRadar data={parentRadarData} maxValue={parentRadarMax} isDarkMode={darkMode} />
+
+                  <div className={`flex p-1 rounded-2xl mb-8 justify-center shadow-inner ${darkMode ? 'bg-[#08120d]/70' : 'bg-slate-100'}`}>
                       {['總分', '國文', '英文', '數學'].map(tab => {
                           const tabKey = tab === '總分' ? 'total' : tab === '國文' ? 'chi' : tab === '英文' ? 'eng' : 'math';
                           const isActive = activeTab === tabKey;
                           return (
-                              <button key={tabKey} onClick={() => setActiveTab(tabKey)} className={`flex-1 py-2.5 text-xs font-bold rounded-xl transition-all duration-300 ${isActive ? (darkMode ? 'bg-slate-800 text-white shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-800 shadow-sm border border-slate-100') : 'text-slate-400'}`}>
+                              <button key={tabKey} onClick={() => setActiveTab(tabKey)} className={`flex-1 py-2.5 text-xs font-bold rounded-xl transition-all duration-300 ${isActive ? (darkMode ? 'bg-[#1f2a24] text-emerald-100 shadow-md border border-emerald-200/15 ring-1 ring-emerald-200/10' : 'bg-white text-slate-800 shadow-sm border border-slate-100') : 'text-slate-400'}`}>
                                 {isActive && <span className={`inline-block w-1.5 h-1.5 rounded-full ${TAB_DOT_BG_CLASS[tabKey]} mr-1.5 mb-0.5`}></span>}{tab}
                               </button>
                           )
                       })}
                   </div>
 
-                  {(() => {
-                      const filteredData = getPhaseData(viewData.chartData);
-                      let maxDomain = 100;
-                      if (activeTab === 'total') maxDomain = 300;
-                      else if (activeTab === 'math' && activePhase === 'mock') maxDomain = 120;
-                      const engDomain = activePhase === 'mock' ? [0, 80] : [0, 100];
-                      
-                      return (
-                        <>
-                          {activeTab === 'total' && <SingleSubjectChart data={filteredData} subjectKey="total" avgKey="avgTotal" colorKey="total" title="總分" domain={[0, 300]} isDarkMode={darkMode} />}
-                          {activeTab === 'chi' && <SingleSubjectChart data={filteredData} subjectKey="chi" avgKey="avgChi" colorKey="chi" title="國文" domain={[0, 100]} isDarkMode={darkMode} />}
-                          {activeTab === 'eng' && <SingleSubjectChart data={filteredData} subjectKey="eng" avgKey="avgEng" colorKey="eng" title="英文" domain={engDomain} isDarkMode={darkMode} />}
-                          {activeTab === 'math' && <SingleSubjectChart data={filteredData} subjectKey="math" avgKey="avgMath" colorKey="math" title="數學" domain={[0, maxDomain]} isDarkMode={darkMode} />}
-                        </>
-                      );
-                  })()}
+                  {activeTab === 'total' && <SingleSubjectChart data={parentPhaseData} subjectKey="total" avgKey="avgTotal" colorKey="total" title="總分" domain={[0, 300]} isDarkMode={darkMode} />}
+                  {activeTab === 'chi' && <SingleSubjectChart data={parentPhaseData} subjectKey="chi" avgKey="avgChi" colorKey="chi" title="國文" domain={[0, 100]} isDarkMode={darkMode} />}
+                  {activeTab === 'eng' && <SingleSubjectChart data={parentPhaseData} subjectKey="eng" avgKey="avgEng" colorKey="eng" title="英文" domain={activePhase === 'mock' ? [0, 80] : [0, 100]} isDarkMode={darkMode} />}
+                  {activeTab === 'math' && <SingleSubjectChart data={parentPhaseData} subjectKey="math" avgKey="avgMath" colorKey="math" title="數學" domain={activePhase === 'mock' ? [0, 120] : [0, 100]} isDarkMode={darkMode} />}
                 </div>
                   
-                <div className={`p-6 border-t ${darkMode ? 'bg-slate-800 border-white/5' : 'bg-white border-slate-50'}`}>
+                <div className={`p-6 border-t ${darkMode ? 'bg-[#101a15] border-emerald-200/10' : 'bg-white border-slate-50'}`}>
                     <h4 className={`font-bold mb-6 text-xs flex items-center justify-center gap-2 tracking-widest uppercase ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>詳細紀錄</h4>
                     <div className="space-y-4">
-                        {getPhaseData(viewData.chartData).slice().reverse().map((d) => {
+                        {parentPhaseData.slice().reverse().map((d) => {
                              // 使用 weekendID（如果存在）或 date，確保日A班/日B班的週日日期也能正確計算排名
                              const dateForRank = d.weekendID || d.date;
                              const totalRank = calculateRank(dateForRank, 'total', d.total, d.class);

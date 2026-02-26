@@ -173,11 +173,17 @@ const PHASES = [
 ];
 
 const COLORS = {
-    total: { hex: '#10b981', tailwind: 'emerald', label: '總分' },
-    chi:   { hex: '#f43f5e', tailwind: 'rose',      label: '國文' }, 
-    eng:   { hex: '#8b5cf6', tailwind: 'violet',    label: '英文' }, 
-    math:  { hex: '#3b82f6', tailwind: 'blue',      label: '數學' }, 
+    total: { hex: '#0A84FF', tailwind: 'blue', label: '總分' },
+    chi:   { hex: '#FF375F', tailwind: 'rose',      label: '國文' }, 
+    eng:   { hex: '#FF9F0A', tailwind: 'amber',    label: '英文' }, 
+    math:  { hex: '#64D2FF', tailwind: 'cyan',      label: '數學' }, 
     avg:   { hex: '#94a3b8', tailwind: 'slate',     label: '班平均' } 
+};
+const TAB_DOT_BG_CLASS = {
+    total: 'bg-blue-500',
+    chi: 'bg-rose-500',
+    eng: 'bg-amber-500',
+    math: 'bg-cyan-500'
 };
 
 const f1 = (v) => {
@@ -354,7 +360,7 @@ const BatchRow = React.memo(({ student, sIndex, batchDate, dateGrades, prValue, 
     let probColor = 'text-slate-400';
     if (probValue !== '-') {
         const p = parseInt(probValue);
-        if (p >= 80) probColor = 'text-emerald-500';
+        if (p >= 80) probColor = 'text-blue-500';
         else if (p >= 50) probColor = 'text-amber-500';
         else probColor = 'text-rose-500';
     }
@@ -378,7 +384,7 @@ const BatchRow = React.memo(({ student, sIndex, batchDate, dateGrades, prValue, 
                     <input 
                         id={`cell-${sIndex}-${sub}`} 
                         type="text" 
-                        className={`w-full text-center p-1.5 rounded-lg border border-transparent outline-none text-sm font-bold transition-all shadow-inner focus:ring-1 ${darkMode ? 'bg-slate-950/50 text-slate-300 focus:bg-slate-900 focus:border-emerald-500/50 focus:ring-emerald-500/20' : 'bg-slate-50 text-slate-600 focus:bg-white focus:border-emerald-200 focus:ring-emerald-200'}`} 
+                        className={`w-full text-center p-1.5 rounded-lg border border-transparent outline-none text-sm font-bold transition-all shadow-inner focus:ring-1 ${darkMode ? 'bg-slate-950/50 text-slate-300 focus:bg-slate-900 focus:border-blue-500/50 focus:ring-blue-500/20' : 'bg-slate-50 text-slate-600 focus:bg-white focus:border-blue-200 focus:ring-blue-200'}`} 
                         value={dateGrades[sub] || ''} 
                         onChange={(e) => handleBatchGradeChange(student.id, sub, e.target.value)} 
                         onKeyDown={(e) => handleKeyDown(e, sIndex, sub)} 
@@ -387,8 +393,8 @@ const BatchRow = React.memo(({ student, sIndex, batchDate, dateGrades, prValue, 
                     />
                 </td>
             ))}
-            <td className="px-1 py-1 text-center"><div className="text-sm font-bold text-emerald-500">{dateGrades.total}</div></td>
-            <td className="px-1 py-1 text-center"><div className={`text-xs font-bold ${darkMode ? 'text-purple-300' : 'text-purple-600'}`}>{prValue !== '-' ? prValue : ''}</div></td>
+            <td className="px-1 py-1 text-center"><div className="text-sm font-bold text-blue-500">{dateGrades.total}</div></td>
+            <td className="px-1 py-1 text-center"><div className={`text-xs font-bold ${darkMode ? 'text-indigo-300' : 'text-indigo-600'}`}>{prValue !== '-' ? prValue : ''}</div></td>
             <td className="px-1 py-1 text-center">
                 <div className={`text-xs font-black ${probColor} inline-block px-2 py-0.5 rounded-full`}>
                     {probValue !== '-' ? `${probValue}%` : ''}
@@ -423,12 +429,12 @@ const ExamCountdown = ({ isDarkMode }) => {
 
     return (
         <div className={`flex items-center gap-3 mt-4 px-5 py-2 rounded-full border backdrop-blur-md transition-all duration-500 shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10 text-slate-200 shadow-black/20' : 'bg-white/60 border-white/60 text-slate-700 shadow-slate-200/50'}`}>
-            <Target className="w-4 h-4 text-emerald-500" />
+            <Target className="w-4 h-4 text-blue-500" />
             <div className="flex items-baseline gap-1.5 font-mono text-sm">
                 <span className="font-bold">{timeLeft.days}</span><span className="text-[10px] opacity-50 mr-1">DAYS</span>
                 <span className="font-bold">{String(timeLeft.hours).padStart(2,'0')}</span><span className="opacity-30">:</span>
                 <span className="font-bold">{String(timeLeft.minutes).padStart(2,'0')}</span><span className="opacity-30">:</span>
-                <span className="font-bold text-emerald-500">{String(timeLeft.seconds).padStart(2,'0')}</span>
+                <span className="font-bold text-blue-500">{String(timeLeft.seconds).padStart(2,'0')}</span>
             </div>
         </div>
     );
@@ -1583,21 +1589,15 @@ export default function App() {
   if (!user) return <div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400 text-sm font-mono tracking-widest uppercase">Connecting...</div>;
 
   return (
-    <div className={`min-h-screen font-sans antialiased transition-colors duration-500 ease-in-out pb-32 relative overflow-x-hidden ${darkMode ? 'bg-gradient-to-br from-[#020617] via-[#1e293b] to-[#020617] text-slate-200' : 'bg-gradient-to-br from-emerald-100 via-slate-50 to-emerald-100 text-slate-800'}`}>
-      {/* Texture Overlay */}
-      <div className={`fixed inset-0 pointer-events-none z-0 ${darkMode ? 'opacity-30 mix-blend-overlay' : 'opacity-40'}`} style={{
-          background: darkMode 
-            ? 'radial-gradient(circle at 50% -20%, rgba(14, 165, 233, 0.15), transparent 50%), radial-gradient(circle at 100% 100%, rgba(16, 185, 129, 0.1), transparent 40%)' 
-            : 'radial-gradient(circle at 0% 0%, rgba(52,211,153,0.15) 0%, transparent 50%), radial-gradient(circle at 100% 100%, rgba(99,102,241,0.05) 0%, transparent 40%)'
-      }}></div>
+    <div className={`min-h-screen font-sans antialiased transition-colors duration-500 ease-in-out pb-32 relative overflow-x-hidden ${darkMode ? 'bg-[#0f1115] text-slate-200' : 'bg-[#f5f5f7] text-slate-800'}`}>
 
       {/* Header */}
-      <header className={`fixed top-0 w-full backdrop-blur-2xl z-30 border-b transition-all duration-300 ${darkMode ? 'bg-[#0f172a]/70 border-white/5 shadow-[0_8px_32px_0_rgba(0,0,0,0.36)]' : 'bg-white/60 border-white/40 shadow-sm'}`}>
+      <header className={`fixed top-0 w-full backdrop-blur-2xl z-30 border-b transition-all duration-300 ${darkMode ? 'bg-[#10141d]/88 border-white/10 shadow-lg shadow-black/30' : 'bg-white/90 border-slate-200/80 shadow-sm'}`}>
         <div className="max-w-4xl mx-auto px-6 h-16 flex justify-between items-center relative z-10">
           <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setMode('landing')}>
-            <div className={`p-2 rounded-xl shadow-lg transition-transform group-hover:scale-105 duration-300 ${darkMode ? 'bg-emerald-500/10 text-emerald-400 shadow-emerald-500/10' : 'bg-white text-emerald-600 shadow-emerald-100/50 ring-1 ring-emerald-50'}`}><GraduationCap className="h-5 w-5" /></div>
+            <div className={`p-2 rounded-xl transition-transform group-hover:scale-105 duration-300 ${darkMode ? 'bg-blue-500/10 text-blue-300 ring-1 ring-blue-400/30' : 'bg-white text-blue-600 ring-1 ring-slate-200 shadow-sm'}`}><GraduationCap className="h-5 w-5" /></div>
             <div>
-                <h1 className={`text-2xl font-black tracking-widest font-serif uppercase bg-clip-text text-transparent bg-gradient-to-r leading-none ${darkMode ? 'from-emerald-300 via-teal-200 to-cyan-300 drop-shadow-[0_2px_10px_rgba(20,184,166,0.3)]' : 'from-emerald-700 via-teal-600 to-slate-700'}`}>
+                <h1 className={`text-2xl font-black tracking-widest font-serif uppercase leading-none ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>
                   HSINRU
                 </h1>
                 <p className="text-[9px] text-slate-400 font-bold tracking-widest uppercase mt-0.5 opacity-80">Grade Tracker</p>
@@ -1608,8 +1608,8 @@ export default function App() {
                 {darkMode ? <Moon className="w-4 h-4 fill-current"/> : <Sun className="w-4 h-4"/>}
             </button>
             <div className={`flex p-1 rounded-full border backdrop-blur-md ${darkMode ? 'bg-white/5 border-white/5 shadow-inner' : 'bg-white/40 border-white/40 shadow-inner'}`}>
-                <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-slate-800 text-emerald-400 shadow-lg shadow-black/40 ring-1 ring-white/5' : 'bg-white text-emerald-700 shadow-md shadow-slate-200/50 ring-1 ring-black/5') : 'text-slate-400 hover:text-slate-500'}`}>{isAuthenticated ? '後台' : '老師'}</button>
-                <button onClick={() => { setViewData(null); setSearchError(''); setMode('parent'); }} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-slate-800 text-emerald-400 shadow-lg shadow-black/40 ring-1 ring-white/5' : 'bg-white text-emerald-700 shadow-md shadow-slate-200/50 ring-1 ring-black/5') : 'text-slate-400 hover:text-slate-500'}`}>家長</button>
+                <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-slate-800 text-blue-400 shadow-lg shadow-black/40 ring-1 ring-white/5' : 'bg-white text-blue-700 shadow-md shadow-slate-200/50 ring-1 ring-black/5') : 'text-slate-400 hover:text-slate-500'}`}>{isAuthenticated ? '後台' : '老師'}</button>
+                <button onClick={() => { setViewData(null); setSearchError(''); setMode('parent'); }} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-slate-800 text-blue-400 shadow-lg shadow-black/40 ring-1 ring-white/5' : 'bg-white text-blue-700 shadow-md shadow-slate-200/50 ring-1 ring-black/5') : 'text-slate-400 hover:text-slate-500'}`}>家長</button>
             </div>
             {isAuthenticated && (
                 <button onClick={handleLogout} className="ml-1 p-2 text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-full transition-colors" title="登出"><LogOut className="w-5 h-5"/></button>
@@ -1621,21 +1621,20 @@ export default function App() {
       <main className="pt-28 px-4 max-w-4xl mx-auto relative z-10">
         {mode === 'landing' && (
           <div className="flex flex-col items-center justify-center min-h-[calc(100vh-120px)]">
-            <div className={`p-5 rounded-full mb-6 shadow-2xl ring-1 backdrop-blur-3xl transition-transform duration-700 hover:scale-105 ${darkMode ? 'bg-[#0f172a]/40 border-white/10 shadow-emerald-500/20 ring-1 ring-emerald-500/20' : 'bg-white/60 border-white/60 shadow-[0_20px_40px_rgba(16,185,129,0.15)]'}`}>
-                <Sparkles className={`w-10 h-10 ${darkMode ? 'text-emerald-400 drop-shadow-[0_0_15px_rgba(52,211,153,0.5)]' : 'text-emerald-600'}`} />
+            <div className={`p-5 rounded-full mb-6 ring-1 backdrop-blur-3xl transition-transform duration-700 hover:scale-105 ${darkMode ? 'bg-[#141b27] border-white/10 ring-blue-500/30' : 'bg-white border-slate-200 shadow-sm'}`}>
+                <Sparkles className={`w-10 h-10 ${darkMode ? 'text-blue-300' : 'text-blue-600'}`} />
             </div>
-            {/* Slogan with matching serif font and consistent gradient */}
-            <h2 className={`text-xl md:text-3xl font-black font-serif tracking-tighter mb-4 text-center py-6 px-4 leading-normal bg-clip-text text-transparent bg-gradient-to-r ${darkMode ? 'from-emerald-300 via-teal-200 to-cyan-300 drop-shadow-sm' : 'from-emerald-800 via-teal-700 to-slate-700'}`}>Make Progress Visible</h2>
+            <h2 className={`text-xl md:text-3xl font-black font-serif tracking-tighter mb-4 text-center py-6 px-4 leading-normal ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>Make Progress Visible</h2>
             <p className="text-slate-400 text-xs font-medium tracking-wide mb-6">2025-2026 Learning Journey</p>
             <ExamCountdown isDarkMode={darkMode} />
               
             <div className="w-full max-w-sm space-y-4 mt-8">
-               <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className={`group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 hover:scale-[1.01] active:scale-[0.98] transition-all duration-300 backdrop-blur-2xl ${darkMode ? 'bg-[#0f172a]/70 border-white/10 hover:border-emerald-500/30 shadow-xl shadow-black/40 ring-1 ring-white/5' : 'bg-white/70 border-white/60 hover:border-emerald-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)]'}`}>
-                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-colors shadow-inner ${darkMode ? 'bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/20' : 'bg-emerald-50 text-emerald-600'}`}><LayoutDashboard className="w-6 h-6" /></div>
+               <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className={`group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 hover:scale-[1.01] active:scale-[0.98] transition-all duration-300 backdrop-blur-2xl ${darkMode ? 'bg-[#111827]/88 border-white/10 hover:border-blue-500/30 shadow-lg shadow-black/30' : 'bg-white/92 border-slate-200/80 hover:border-blue-200 shadow-sm'}`}>
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-colors shadow-inner ${darkMode ? 'bg-blue-500/10 text-blue-400 ring-1 ring-blue-500/20' : 'bg-blue-50 text-blue-600'}`}><LayoutDashboard className="w-6 h-6" /></div>
                   <div className="text-left flex-1"><h3 className={`text-lg font-bold ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}>老師通道</h3><p className="text-xs text-slate-400 mt-0.5">管理成績與設定</p></div>
                   <ChevronRight className="w-5 h-5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
                </button>
-               <button onClick={() => { setViewData(null); setSearchError(''); setMode('parent'); }} className={`group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 hover:scale-[1.01] active:scale-[0.98] transition-all duration-300 backdrop-blur-2xl ${darkMode ? 'bg-[#0f172a]/70 border-white/10 hover:border-blue-500/30 shadow-xl shadow-black/40 ring-1 ring-white/5' : 'bg-white/70 border-white/60 hover:border-blue-200 shadow-[0_8px_30px_rgb(0,0,0,0.04)]'}`}>
+               <button onClick={() => { setViewData(null); setSearchError(''); setMode('parent'); }} className={`group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 hover:scale-[1.01] active:scale-[0.98] transition-all duration-300 backdrop-blur-2xl ${darkMode ? 'bg-[#111827]/88 border-white/10 hover:border-blue-500/30 shadow-lg shadow-black/30' : 'bg-white/92 border-slate-200/80 hover:border-blue-200 shadow-sm'}`}>
                   <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-colors shadow-inner ${darkMode ? 'bg-blue-500/10 text-blue-400 ring-1 ring-blue-500/20' : 'bg-blue-50 text-blue-600'}`}><BarChart3 className="w-6 h-6" /></div>
                   <div className="text-left flex-1"><h3 className={`text-lg font-bold ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}>家長查詢</h3><p className="text-xs text-slate-400 mt-0.5">輸入學號查看分析</p></div>
                   <ChevronRight className="w-5 h-5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
@@ -1646,12 +1645,12 @@ export default function App() {
 
         {mode === 'teacher_login' && (
             <div className="flex items-center justify-center min-h-[50vh]">
-                <div className={`backdrop-blur-2xl p-8 rounded-[2.5rem] w-full max-w-sm text-center border ${darkMode ? 'bg-[#0f172a]/70 border-white/10 shadow-2xl shadow-black/50 ring-1 ring-white/5' : 'bg-white/70 border-white/60 shadow-[0_20px_50px_rgba(0,0,0,0.05)]'}`}>
-                    <div className={`inline-flex p-4 rounded-2xl mb-6 shadow-inner ${darkMode ? 'bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/20' : 'bg-emerald-50 text-emerald-600'}`}><Lock className="w-6 h-6" /></div>
+                <div className={`backdrop-blur-2xl p-8 rounded-[2.5rem] w-full max-w-sm text-center border ${darkMode ? 'bg-[#111827]/88 border-white/10 shadow-lg shadow-black/35' : 'bg-white/94 border-slate-200/80 shadow-sm'}`}>
+                    <div className={`inline-flex p-4 rounded-2xl mb-6 shadow-inner ${darkMode ? 'bg-blue-500/10 text-blue-400 ring-1 ring-blue-500/20' : 'bg-blue-50 text-blue-600'}`}><Lock className="w-6 h-6" /></div>
                     <h2 className={`text-xl font-bold mb-6 ${darkMode ? 'text-white' : 'text-slate-800'}`}>身份驗證</h2>
-                    <input type="password" value={passwordInput} onChange={(e) => { setPasswordInput(e.target.value); setLoginError(false); }} onKeyDown={(e) => e.key === 'Enter' && handleLoginSubmit()} className={`w-full p-4 rounded-2xl text-center text-xl font-bold tracking-widest outline-none transition-all mb-6 placeholder:text-base placeholder:tracking-normal placeholder:font-medium border shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5 text-white focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20' : 'bg-slate-50 border-transparent text-slate-800 focus:bg-white focus:ring-2 focus:ring-emerald-100 placeholder:text-slate-400'}`} placeholder="輸入密碼" autoFocus />
+                    <input type="password" value={passwordInput} onChange={(e) => { setPasswordInput(e.target.value); setLoginError(false); }} onKeyDown={(e) => e.key === 'Enter' && handleLoginSubmit()} className={`w-full p-4 rounded-2xl text-center text-xl font-bold tracking-widest outline-none transition-all mb-6 placeholder:text-base placeholder:tracking-normal placeholder:font-medium border shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5 text-white focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20' : 'bg-slate-50 border-transparent text-slate-800 focus:bg-white focus:ring-2 focus:ring-blue-100 placeholder:text-slate-400'}`} placeholder="輸入密碼" autoFocus />
                     {loginError && <p className="text-red-500 text-xs font-bold mb-4">密碼錯誤</p>}
-                    <button onClick={handleLoginSubmit} className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white py-3.5 rounded-2xl font-bold shadow-lg shadow-emerald-500/20 active:scale-[0.98] transition-all">登入</button>
+                    <button onClick={handleLoginSubmit} className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3.5 rounded-2xl font-bold shadow-sm active:scale-[0.98] transition-all">登入</button>
                 </div>
             </div>
         )}
@@ -1660,9 +1659,9 @@ export default function App() {
           <div className="space-y-6">
             <div className={`p-6 rounded-[2rem] border backdrop-blur-2xl ${darkMode ? 'bg-[#0f172a]/70 border-white/10 shadow-xl shadow-black/20 ring-1 ring-white/5' : 'bg-white/70 border-white/60 shadow-[0_8px_30px_rgb(0,0,0,0.04)]'}`}>
                 <div className="flex justify-between items-center mb-4">
-                    <div className={`flex items-center gap-2 font-bold ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}><Calendar className="w-4 h-4 text-emerald-500"/>管理日期</div>
+                    <div className={`flex items-center gap-2 font-bold ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}><Calendar className="w-4 h-4 text-blue-500"/>管理日期</div>
                     <div className="flex gap-2">
-                         <input type="text" placeholder="MM/DD" className={`w-20 p-2 rounded-lg text-xs text-center font-bold outline-none transition-colors tracking-widest border shadow-sm ${darkMode ? 'bg-[#020617]/50 border-white/10 text-slate-200 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/20' : 'bg-white border-slate-200 text-slate-700 focus:border-emerald-400'}`} value={newDateInput} onChange={e=>setNewDateInput(e.target.value)} />
+                         <input type="text" placeholder="MM/DD" className={`w-20 p-2 rounded-lg text-xs text-center font-bold outline-none transition-colors tracking-widest border shadow-sm ${darkMode ? 'bg-[#020617]/50 border-white/10 text-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20' : 'bg-white border-slate-200 text-slate-700 focus:border-blue-400'}`} value={newDateInput} onChange={e=>setNewDateInput(e.target.value)} />
                          <button onClick={addDate} className={`px-3 rounded-lg transition-colors shadow-sm ${darkMode ? 'bg-slate-800 text-white hover:bg-slate-700 border border-white/5' : 'bg-slate-800 text-white hover:bg-slate-700'}`}><Plus className="w-4 h-4"/></button>
                     </div>
                 </div>
@@ -1676,20 +1675,20 @@ export default function App() {
 
                 <div className={`flex p-1 rounded-xl mb-6 shadow-inner ${darkMode ? 'bg-[#020617]/50' : 'bg-slate-100/80'}`}>
                      <button onClick={() => setTeacherViewMode('single')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${teacherViewMode==='single' ? (darkMode ? 'bg-slate-800 text-slate-200 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-700 shadow-sm') : 'text-slate-500'}`}>個人檢視</button>
-                     <button onClick={() => setTeacherViewMode('batch')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${teacherViewMode==='batch' ? (darkMode ? 'bg-slate-800 text-emerald-400 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-emerald-700 shadow-sm') : 'text-slate-500'}`}>批量檢視</button>
+                     <button onClick={() => setTeacherViewMode('batch')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${teacherViewMode==='batch' ? (darkMode ? 'bg-slate-800 text-blue-400 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-blue-700 shadow-sm') : 'text-slate-500'}`}>批量檢視</button>
                 </div>
 
                 {teacherViewMode === 'single' && (
                     <div className="flex flex-col gap-4">
                         <div className="flex gap-2">
                             <div className="relative flex-1">
-                                <input id="loadIdInput" type="text" placeholder="輸入學號..." className={`w-full p-3 pl-9 rounded-xl border text-sm font-bold outline-none uppercase tracking-widest placeholder:tracking-normal text-center shadow-inner transition-all ${darkMode ? 'bg-[#020617]/50 border-white/5 text-slate-200 focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20' : 'bg-white border-slate-200 text-slate-700 focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100'}`} />
+                                <input id="loadIdInput" type="text" placeholder="輸入學號..." className={`w-full p-3 pl-9 rounded-xl border text-sm font-bold outline-none uppercase tracking-widest placeholder:tracking-normal text-center shadow-inner transition-all ${darkMode ? 'bg-[#020617]/50 border-white/5 text-slate-200 focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20' : 'bg-white border-slate-200 text-slate-700 focus:border-blue-300 focus:ring-2 focus:ring-blue-100'}`} />
                                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
                             </div>
                             <button onClick={() => document.getElementById('loadIdInput').value && loadStudentForTeacher(document.getElementById('loadIdInput').value.toUpperCase())} className={`px-4 rounded-xl text-xs font-bold whitespace-nowrap transition-colors shadow-sm border ${darkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-white/5' : 'bg-white hover:bg-slate-50 text-slate-600 border-slate-200'}`}>載入</button>
                         </div>
                         <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
-                            <button onClick={() => setShowAddStudentModal(true)} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-emerald-600/20 active:scale-[0.98] transition-all whitespace-nowrap"><UserPlus className="w-4 h-4"/> 新增學生</button>
+                            <button onClick={() => setShowAddStudentModal(true)} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all whitespace-nowrap"><UserPlus className="w-4 h-4"/> 新增學生</button>
                             <label className="cursor-pointer bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all whitespace-nowrap">
                                 <FileSpreadsheet className="w-4 h-4" /> 匯入 Excel
                                 <input type="file" accept=".xlsx, .xls" className="hidden" onChange={handleExcelUpload} />
@@ -1709,13 +1708,13 @@ export default function App() {
                                 </select>
                             </div>
                             <div className="flex gap-2">
-                                <button onClick={() => setSortByPR(!sortByPR)} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByPR ? 'bg-purple-600 text-white shadow-purple-500/30' : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
+                                <button onClick={() => setSortByPR(!sortByPR)} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByPR ? 'bg-indigo-600 text-white shadow-indigo-500/30' : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
                                     <ArrowDownWideNarrow className="w-3.5 h-3.5" /> PR排序
                                 </button>
-                                <button onClick={() => setSortByProb(!sortByProb)} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByProb ? 'bg-emerald-600 text-white shadow-emerald-500/30' : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
+                                <button onClick={() => setSortByProb(!sortByProb)} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByProb ? 'bg-blue-600 text-white shadow-blue-500/30' : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
                                     <Percent className="w-3.5 h-3.5" /> 機率排序
                                 </button>
-                                <button onClick={handleSaveBatchGrades} className="bg-emerald-600 text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-md shadow-emerald-600/20 hover:bg-emerald-500 transition-all active:scale-[0.98] flex items-center gap-1"><Save className="w-3.5 h-3.5"/> 儲存</button>
+                                <button onClick={handleSaveBatchGrades} className="bg-blue-600 text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-md shadow-blue-600/20 hover:bg-blue-500 transition-all active:scale-[0.98] flex items-center gap-1"><Save className="w-3.5 h-3.5"/> 儲存</button>
                             </div>
                         </div>
 
@@ -1736,10 +1735,10 @@ export default function App() {
                                         <th className="px-3 py-3 font-bold">姓名</th>
                                         <th className="px-2 py-3 text-center text-slate-500">班級</th>
                                         <th className="px-2 py-3 text-center text-rose-500">國文</th>
-                                        <th className="px-2 py-3 text-center text-violet-500">英文</th>
-                                        <th className="px-2 py-3 text-center text-blue-500">數學</th>
-                                        <th className="px-2 py-3 text-center font-bold text-emerald-500">總分</th>
-                                        <th className="px-2 py-3 text-center font-bold text-purple-500">PR</th>
+                                        <th className="px-2 py-3 text-center text-amber-500">英文</th>
+                                        <th className="px-2 py-3 text-center text-cyan-500">數學</th>
+                                        <th className="px-2 py-3 text-center font-bold text-blue-500">總分</th>
+                                        <th className="px-2 py-3 text-center font-bold text-indigo-500">PR</th>
                                         <th className="px-2 py-3 text-center font-bold text-slate-500">錄取機率</th>
                                     </tr>
                                 </thead>
@@ -1814,7 +1813,7 @@ export default function App() {
                 )}
             </div>
             {/* ... other modals ... */}
-            {statusMsg && <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/90 text-white px-5 py-3 rounded-full flex items-center text-xs font-bold shadow-2xl backdrop-blur-md z-50 border border-white/10"><Check className="w-4 h-4 mr-2 text-emerald-400" /> {statusMsg}</div>}
+            {statusMsg && <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/90 text-white px-5 py-3 rounded-full flex items-center text-xs font-bold shadow-2xl backdrop-blur-md z-50 border border-white/10"><Check className="w-4 h-4 mr-2 text-blue-400" /> {statusMsg}</div>}
               
             {/* ... Single View ... */}
             {teacherViewMode === 'single' && currentStudentId && !loading && (
@@ -1826,7 +1825,7 @@ export default function App() {
                   </div>
                   <div className="flex gap-2">
                     <button onClick={() => { setStudentToDelete({ id: currentStudentId, name: studentName }); executeWithSecurity(confirmDeleteStudent); }} className="bg-red-500/10 text-red-500 p-2.5 rounded-xl hover:bg-red-500/20 transition-colors active:scale-95"><Trash2 className="w-5 h-5"/></button>
-                    <button onClick={handleSaveGrades} className="bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-emerald-500 shadow-lg shadow-emerald-900/20 transition-all active:scale-95 flex items-center gap-2"><Save className="w-4 h-4"/> 儲存</button>
+                    <button onClick={handleSaveGrades} className="bg-blue-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-blue-500 shadow-lg shadow-blue-900/20 transition-all active:scale-95 flex items-center gap-2"><Save className="w-4 h-4"/> 儲存</button>
                   </div>
                 </div>
                 <div className="max-h-[60vh] overflow-y-auto">
@@ -1835,9 +1834,9 @@ export default function App() {
                             <tr>
                                 <th className="px-4 py-3 font-bold">日期</th>
                                 <th className="px-2 py-3 text-center text-rose-500 font-bold">國文</th>
-                                <th className="px-2 py-3 text-center text-violet-500 font-bold">英文</th>
-                                <th className="px-2 py-3 text-center text-blue-500 font-bold">數學</th>
-                                <th className="px-2 py-3 text-center font-bold text-emerald-500">總分</th>
+                                <th className="px-2 py-3 text-center text-amber-500 font-bold">英文</th>
+                                <th className="px-2 py-3 text-center text-cyan-500 font-bold">數學</th>
+                                <th className="px-2 py-3 text-center font-bold text-blue-500">總分</th>
                             </tr>
                         </thead>
                         <tbody className={`divide-y ${darkMode ? 'divide-white/5' : 'divide-slate-100'}`}>
@@ -1857,10 +1856,10 @@ export default function App() {
                                             </td>
                                             {['chi', 'eng', 'math'].map(sub => (
                                                 <td key={sub} className="px-2 py-2 text-center">
-                                                    <input id={`single-${dateIndex}-${sub}`} type="text" className={`w-full text-center p-2 rounded-lg bg-transparent border border-transparent outline-none text-base font-bold transition-all ${darkMode ? 'focus:bg-slate-800 focus:border-emerald-500/50 text-slate-200' : 'focus:bg-white focus:border-emerald-200 text-slate-700'}`} value={g[sub]} onChange={(e) => handleGradeChange(date, sub, e.target.value)} onKeyDown={(e) => handleSingleKeyDown(e, dateIndex, sub)} onPaste={(e) => handleSinglePaste(e, dateIndex, sub)} placeholder="-" />
+                                                    <input id={`single-${dateIndex}-${sub}`} type="text" className={`w-full text-center p-2 rounded-lg bg-transparent border border-transparent outline-none text-base font-bold transition-all ${darkMode ? 'focus:bg-slate-800 focus:border-blue-500/50 text-slate-200' : 'focus:bg-white focus:border-blue-200 text-slate-700'}`} value={g[sub]} onChange={(e) => handleGradeChange(date, sub, e.target.value)} onKeyDown={(e) => handleSingleKeyDown(e, dateIndex, sub)} onPaste={(e) => handleSinglePaste(e, dateIndex, sub)} placeholder="-" />
                                                 </td>
                                             ))}
-                                            <td className="px-2 py-2 text-center"><div className="text-base font-bold text-emerald-500 py-2">{g.total}</div></td>
+                                            <td className="px-2 py-2 text-center"><div className="text-base font-bold text-blue-500 py-2">{g.total}</div></td>
                                     </tr>
                                 );
                             })}
@@ -1876,27 +1875,26 @@ export default function App() {
         {mode === 'parent' && (
           <div className="max-w-md mx-auto space-y-6 pt-10"> 
             {!viewData && (
-            <div className={`backdrop-blur-2xl p-8 rounded-[2.5rem] shadow-2xl border text-center relative overflow-hidden ${darkMode ? 'bg-[#0f172a]/70 border-white/10 shadow-black/40 ring-1 ring-white/5' : 'bg-white/70 border-white/60 shadow-[0_20px_50px_rgba(16,185,129,0.1)]'}`}>
-              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-400 to-blue-500 opacity-80"></div>
+            <div className={`backdrop-blur-2xl p-8 rounded-[2.5rem] shadow-2xl border text-center relative overflow-hidden ${darkMode ? 'bg-[#111827]/88 border-white/10 shadow-black/35' : 'bg-white/94 border-slate-200/80 shadow-sm'}`}>
+              <div className="absolute top-0 left-0 w-full h-1 bg-blue-500/80"></div>
               <h2 className={`text-2xl font-bold mb-8 tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>查詢成績</h2>
-              <div className={`w-full p-2 rounded-2xl border transition-all mb-6 shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/10 focus-within:ring-2 focus-within:ring-emerald-500/20' : 'bg-slate-50 border-slate-200 focus-within:bg-white focus-within:ring-2 focus-within:ring-emerald-100'}`}>
+              <div className={`w-full p-2 rounded-2xl border transition-all mb-6 shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/10 focus-within:ring-2 focus-within:ring-blue-500/20' : 'bg-slate-50 border-slate-200 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100'}`}>
                 <input type="text" placeholder="請輸入學號" className={`w-full bg-transparent border-none px-4 py-3 outline-none text-xl uppercase font-bold text-center tracking-widest placeholder:text-base placeholder:tracking-normal placeholder:font-medium ${darkMode ? 'text-white placeholder:text-slate-600' : 'text-slate-800 placeholder:text-slate-400'}`} value={searchId} onChange={(e) => setSearchId(e.target.value)} />
               </div>
-              <button onClick={handleParentSearch} disabled={loading} className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white py-4 rounded-2xl font-bold text-lg hover:shadow-lg hover:shadow-emerald-500/20 transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 tracking-wide">{loading ? '查詢中...' : '開始查詢'}</button>
+              <button onClick={handleParentSearch} disabled={loading} className="w-full bg-blue-600 hover:bg-blue-500 text-white py-4 rounded-2xl font-bold text-lg shadow-sm transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 tracking-wide">{loading ? '查詢中...' : '開始查詢'}</button>
               {searchError && <p className="mt-6 text-red-500 text-xs font-bold bg-red-500/10 inline-block px-4 py-2 rounded-full animate-pulse">{searchError}</p>}
             </div>
             )}
 
             {viewData && (
-              <div className={`rounded-[2.5rem] shadow-2xl overflow-hidden border backdrop-blur-2xl ${darkMode ? 'bg-[#0f172a]/70 border-white/5 shadow-black/50 ring-1 ring-white/5' : 'bg-white/80 border-white/60 shadow-[0_20px_50px_rgba(0,0,0,0.08)]'}`}>
+              <div className={`rounded-[2.5rem] shadow-2xl overflow-hidden border backdrop-blur-2xl ${darkMode ? 'bg-[#111827]/88 border-white/10 shadow-black/35' : 'bg-white/95 border-slate-200/80 shadow-sm'}`}>
                 <div className="bg-slate-900 text-white p-8 pb-6 relative overflow-hidden">
-                   <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500 rounded-full -mr-20 -mt-20 blur-3xl opacity-10"></div>
-                   <div className="absolute bottom-0 left-0 w-40 h-40 bg-blue-600 rounded-full -ml-10 -mb-10 blur-3xl opacity-10"></div>
+                   <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500 rounded-full -mr-20 -mt-20 blur-3xl opacity-10"></div>
                    
                    <div className="relative z-10 flex justify-between items-start mb-6">
                        {/* Left Side: Name & ID */}
                        <div>
-                           <div className="text-emerald-400 text-[9px] font-bold uppercase tracking-widest mb-2 border border-emerald-500/20 inline-block px-2 py-1 rounded">Student Profile</div>
+                           <div className="text-blue-400 text-[9px] font-bold uppercase tracking-widest mb-2 border border-blue-500/20 inline-block px-2 py-1 rounded">Student Profile</div>
                            <h3 className="text-3xl font-bold tracking-tighter text-white">{viewData.name}</h3>
                            <p className="text-slate-500 font-mono text-xs mt-1 font-bold">{viewData.id}</p>
                        </div>
@@ -1908,9 +1906,9 @@ export default function App() {
                            {/* --- NEW PROBABILITY DISPLAY --- */}
                            {viewData.prob && viewData.prob !== '-' && (
                                <div className="text-right mt-2">
-                                   <div className="text-[10px] font-bold text-emerald-400/80 uppercase tracking-widest mb-0.5">錄取機率</div>
-                                   <div className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-br from-white to-slate-400 flex items-baseline justify-end gap-1 filter drop-shadow-lg">
-                                       {viewData.prob}<span className="text-lg text-emerald-500/80 font-bold">%</span>
+                                   <div className="text-[10px] font-bold text-blue-400/80 uppercase tracking-widest mb-0.5">錄取機率</div>
+                                   <div className="text-4xl font-black text-white flex items-baseline justify-end gap-1">
+                                       {viewData.prob}<span className="text-lg text-blue-500/80 font-bold">%</span>
                                    </div>
                                    <div className="mt-1 flex items-center justify-end gap-1.5 opacity-50">
                                         <p className="text-[9px] text-slate-300 font-medium">
@@ -1936,10 +1934,9 @@ export default function App() {
                       {['總分', '國文', '英文', '數學'].map(tab => {
                           const tabKey = tab === '總分' ? 'total' : tab === '國文' ? 'chi' : tab === '英文' ? 'eng' : 'math';
                           const isActive = activeTab === tabKey;
-                          const color = COLORS[tabKey].tailwind;
                           return (
                               <button key={tabKey} onClick={() => setActiveTab(tabKey)} className={`flex-1 py-2.5 text-xs font-bold rounded-xl transition-all duration-300 ${isActive ? (darkMode ? 'bg-slate-800 text-white shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-800 shadow-sm border border-slate-100') : 'text-slate-400'}`}>
-                                {isActive && <span className={`inline-block w-1.5 h-1.5 rounded-full bg-${color}-500 mr-1.5 mb-0.5`}></span>}{tab}
+                                {isActive && <span className={`inline-block w-1.5 h-1.5 rounded-full ${TAB_DOT_BG_CLASS[tabKey]} mr-1.5 mb-0.5`}></span>}{tab}
                               </button>
                           )
                       })}
@@ -1972,7 +1969,7 @@ export default function App() {
                              const totalRank = calculateRank(dateForRank, 'total', d.total, d.class);
                              const globalPR = calculateGlobalPR(dateForRank, 'total', d.total);
                              return (
-                             <div key={d.date} className={`group p-5 rounded-3xl border transition-all duration-300 ${darkMode ? 'bg-white/5 border-white/5 hover:border-emerald-500/20' : 'bg-white border-slate-100 hover:border-emerald-200 hover:shadow-lg hover:shadow-emerald-50/20'}`}>
+                             <div key={d.date} className={`group p-5 rounded-3xl border transition-all duration-300 ${darkMode ? 'bg-white/5 border-white/5 hover:border-blue-500/20' : 'bg-white border-slate-100 hover:border-blue-200 hover:shadow-lg hover:shadow-blue-50/20'}`}>
                                 <div className="flex justify-between items-start mb-4">
                                     <div className="flex flex-col gap-2 items-start">
                                         <div className="flex items-center gap-2">
@@ -1986,17 +1983,17 @@ export default function App() {
                                         </button>
                                     </div>
                                     <div className="text-right">
-                                        <div className={`text-3xl font-bold tracking-tighter text-emerald-500`}>{f1(d.total)}</div>
+                                        <div className={`text-3xl font-bold tracking-tighter text-blue-500`}>{f1(d.total)}</div>
                                         <div className="flex items-center justify-end gap-2 mt-1">
                                             {totalRank !== '-' && <span className="bg-amber-100 text-amber-700 text-[10px] px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5"><Trophy className="w-3 h-3"/> #{totalRank}</span>}
-                                            {globalPR !== null && globalPR !== '-' && <span className="bg-purple-100 text-purple-700 text-[10px] px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">本部PR {globalPR}</span>}
+                                            {globalPR !== null && globalPR !== '-' && <span className="bg-indigo-100 text-indigo-700 text-[10px] px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">本部PR {globalPR}</span>}
                                         </div>
                                         {d.avgTotal && <div className="text-[10px] font-bold text-slate-400 tracking-wide text-right mt-1">Avg {f1(d.avgTotal)}</div>}
                                     </div>
                                 </div>
                                 <div className={`grid grid-cols-3 gap-2 mt-3 pt-3 border-t ${darkMode ? 'border-white/5' : 'border-slate-50'}`}>
                                     {['chi', 'eng', 'math'].map(sub => {
-                                        const subColor = sub === 'chi' ? 'text-rose-500' : sub === 'eng' ? 'text-violet-500' : 'text-blue-500';
+                                        const subColor = sub === 'chi' ? 'text-rose-500' : sub === 'eng' ? 'text-amber-500' : 'text-cyan-500';
                                         const subLabel = sub === 'chi' ? '國文' : sub === 'eng' ? '英文' : '數學';
                                         const subScore = d[sub];
                                         const subRank = calculateRank(dateForRank, sub, subScore, d.class);
@@ -2042,9 +2039,9 @@ export default function App() {
                               <tr>
                                   <th className="px-4 py-4 font-bold tracking-wider">日期</th>
                                   <th className="px-2 py-4 text-center text-rose-500">國文</th>
-                                  <th className="px-2 py-4 text-center text-violet-500">英文</th>
-                                  <th className="px-2 py-4 text-center text-blue-500">數學</th>
-                                  <th className="px-2 py-4 text-center text-emerald-500 font-bold">總分</th>
+                                  <th className="px-2 py-4 text-center text-amber-500">英文</th>
+                                  <th className="px-2 py-4 text-center text-cyan-500">數學</th>
+                                  <th className="px-2 py-4 text-center text-blue-500 font-bold">總分</th>
                               </tr>
                           </thead>
                           <tbody className={`divide-y ${darkMode ? 'divide-white/5' : 'divide-slate-100'}`}>
@@ -2056,7 +2053,7 @@ export default function App() {
                                           <td className="px-4 py-3 font-mono font-bold text-slate-500">{getWeekendDisplayLabel(date)}</td>
                                           {['chi', 'eng', 'math', 'total'].map(sub => (
                                               <td key={sub} className="px-1 py-1.5">
-                                                  <input id={`avg-${dateIndex}-${sub}`} type="number" className={`w-full text-center p-2 rounded-xl border outline-none transition-all font-bold ${darkMode ? 'bg-slate-900 border-transparent focus:bg-slate-800 focus:border-emerald-500/50 text-slate-200' : 'bg-slate-50 border-slate-100 focus:bg-white focus:border-indigo-300 text-slate-600'} ${sub==='total'?'text-emerald-500':''}`} value={avg[sub] || ''} onChange={(e) => handleManualAverageChange(date, avgSettingsClassFilter, sub, e.target.value)} onKeyDown={(e) => handleAvgKeyDown(e, dateIndex, sub)} onPaste={(e) => handleAvgPaste(e, dateIndex, sub)} placeholder="-" />
+                                                  <input id={`avg-${dateIndex}-${sub}`} type="number" className={`w-full text-center p-2 rounded-xl border outline-none transition-all font-bold ${darkMode ? 'bg-slate-900 border-transparent focus:bg-slate-800 focus:border-blue-500/50 text-slate-200' : 'bg-slate-50 border-slate-100 focus:bg-white focus:border-indigo-300 text-slate-600'} ${sub==='total'?'text-blue-500':''}`} value={avg[sub] || ''} onChange={(e) => handleManualAverageChange(date, avgSettingsClassFilter, sub, e.target.value)} onKeyDown={(e) => handleAvgKeyDown(e, dateIndex, sub)} onPaste={(e) => handleAvgPaste(e, dateIndex, sub)} placeholder="-" />
                                               </td>
                                           ))}
                                       </tr>
@@ -2078,7 +2075,7 @@ export default function App() {
                 <div className={`rounded-[2.5rem] w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh] ${darkMode ? 'bg-slate-800 border border-white/10' : 'bg-white shadow-2xl'}`} onClick={e => e.stopPropagation()}>
                     <div className={`p-6 border-b flex justify-between items-center ${darkMode ? 'border-white/5 bg-slate-800/50' : 'border-slate-100'}`}>
                         <div>
-                            <div className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${darkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>Score Distribution</div>
+                            <div className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${darkMode ? 'text-blue-400' : 'text-blue-600'}`}>Score Distribution</div>
                             <h3 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-slate-800'}`}>{statsModalData.date} 落點分析</h3>
                         </div>
                         <button onClick={() => setStatsModalData(null)} className={`p-2 rounded-full transition ${darkMode ? 'bg-white/5 hover:bg-white/10 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-500'}`}><X className="w-5 h-5"/></button>
@@ -2088,10 +2085,9 @@ export default function App() {
                             {['總分', '國文', '英文', '數學'].map(tab => {
                                 const tabKey = tab === '總分' ? 'total' : tab === '國文' ? 'chi' : tab === '英文' ? 'eng' : 'math';
                                 const isActive = statsActiveTab === tabKey;
-                                const color = COLORS[tabKey].tailwind;
                                 return (
                                     <button key={tabKey} onClick={() => setStatsActiveTab(tabKey)} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${isActive ? (darkMode ? 'bg-slate-800 text-white shadow-md border border-white/5' : 'bg-white text-slate-800 shadow-sm border border-slate-200') : 'text-slate-500'}`}>
-                                    {isActive && <span className={`inline-block w-1.5 h-1.5 rounded-full bg-${color}-500 mr-1.5 mb-0.5`}></span>}{tab}
+                                    {isActive && <span className={`inline-block w-1.5 h-1.5 rounded-full ${TAB_DOT_BG_CLASS[tabKey]} mr-1.5 mb-0.5`}></span>}{tab}
                                     </button>
                                 )
                             })}
@@ -2111,7 +2107,7 @@ export default function App() {
         {showSecurityModal && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[60] p-6 animate-in fade-in duration-200" onClick={() => {setShowSecurityModal(false); setSecurityInput('');}}>
                 <div className={`p-8 rounded-[2rem] shadow-2xl max-w-xs w-full text-center transform transition-all scale-100 border ${darkMode ? 'bg-slate-800 border-white/10' : 'bg-white border-white/50'}`} onClick={e => e.stopPropagation()}>
-                    <div className={`mx-auto mb-6 p-4 rounded-full inline-block shadow-inner ${darkMode ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}>
+                    <div className={`mx-auto mb-6 p-4 rounded-full inline-block shadow-inner ${darkMode ? 'bg-blue-500/10 text-blue-400' : 'bg-blue-50 text-blue-600'}`}>
                         <ShieldCheck className="w-8 h-8" />
                     </div>
                     <h3 className={`text-lg font-bold mb-2 ${darkMode ? 'text-white' : 'text-slate-800'}`}>安全驗證</h3>
@@ -2122,7 +2118,7 @@ export default function App() {
                         maxLength={4}
                         value={securityInput}
                         onChange={handleSecurityInput}
-                        className={`w-full text-center text-3xl font-bold tracking-[0.5em] p-4 rounded-xl outline-none border-2 transition-all shadow-inner ${darkMode ? 'bg-slate-900 border-slate-800 text-white focus:border-emerald-500/50' : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-emerald-200 focus:bg-white'}`}
+                        className={`w-full text-center text-3xl font-bold tracking-[0.5em] p-4 rounded-xl outline-none border-2 transition-all shadow-inner ${darkMode ? 'bg-slate-900 border-slate-800 text-white focus:border-blue-500/50' : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-blue-200 focus:bg-white'}`}
                         placeholder=""
                     />
                 </div>

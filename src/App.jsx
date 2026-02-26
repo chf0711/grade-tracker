@@ -435,30 +435,41 @@ const DistributionChart = ({ data, colorKey, isDarkMode }) => {
     );
 };
 
-const ParentAbilityRadar = ({ data, maxValue, isDarkMode }) => {
+const ParentAbilityRadar = ({ data, maxValue, isDarkMode, recordCount = 0, phaseName = '' }) => {
     if (!data || !data.length) return null;
 
-    const wrapperClass = `mt-2 mb-7 rounded-2xl border px-3 pt-3 pb-1 ${isDarkMode ? 'bg-[#0f1914]/75 border-emerald-200/18' : 'bg-white/92 border-slate-200/80'}`;
+    const wrapperClass = `mt-3 mb-7 rounded-3xl border px-4 pt-4 pb-3 ${isDarkMode ? 'bg-[#0f1914]/75 border-emerald-200/18' : 'bg-white/92 border-slate-200/80'}`;
+    const subjectRows = data.map((item) => {
+        const delta = Number((item.student - item.classAvg).toFixed(1));
+        return {
+            ...item,
+            delta,
+            deltaLabel: delta > 0 ? `+${delta}` : `${delta}`
+        };
+    });
 
     return (
         <div className={wrapperClass}>
-            <div className="flex items-center justify-between mb-2 px-1">
-                <h4 className={`text-xs font-black tracking-wide ${isDarkMode ? 'text-emerald-100' : 'text-slate-800'}`}>三科能力雷達圖</h4>
+            <div className="flex items-center justify-between mb-3 px-1">
+                <div>
+                    <h4 className={`text-sm font-black tracking-wide ${isDarkMode ? 'text-emerald-100' : 'text-slate-800'}`}>三科能力雷達圖</h4>
+                    <p className={`text-[11px] font-semibold mt-0.5 ${isDarkMode ? 'text-emerald-200/75' : 'text-slate-500'}`}>{phaseName || '目前階段'} | 樣本 {recordCount} 次</p>
+                </div>
                 <div className={`flex items-center gap-3 text-[10px] font-bold ${isDarkMode ? 'text-emerald-200/80' : 'text-slate-500'}`}>
                     <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />個人</span>
                     <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-400" />班平均</span>
                 </div>
             </div>
-            <div className="h-44 w-full">
+            <div className="h-64 w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                    <RadarChart data={data} outerRadius="70%">
+                    <RadarChart data={data} outerRadius="76%">
                         <PolarGrid stroke={isDarkMode ? 'rgba(167,243,208,0.24)' : 'rgba(148,163,184,0.28)'} />
-                        <PolarAngleAxis dataKey="subject" tick={{ fontSize: 10, fontWeight: 700, fill: isDarkMode ? '#d1fae5' : '#334155' }} />
+                        <PolarAngleAxis dataKey="subject" tick={{ fontSize: 11, fontWeight: 800, fill: isDarkMode ? '#d1fae5' : '#334155' }} />
                         <PolarRadiusAxis
                             angle={25}
                             domain={[0, maxValue]}
                             tickCount={6}
-                            tick={false}
+                            tick={{ fontSize: 10, fill: isDarkMode ? '#86efac' : '#64748b' }}
                             axisLine={false}
                         />
                         <Tooltip
@@ -475,6 +486,24 @@ const ParentAbilityRadar = ({ data, maxValue, isDarkMode }) => {
                         <Radar name="班平均" dataKey="classAvg" stroke="#94a3b8" fill="#94a3b8" fillOpacity={isDarkMode ? 0.2 : 0.1} strokeWidth={2} isAnimationActive={false} />
                     </RadarChart>
                 </ResponsiveContainer>
+            </div>
+            <div className={`mt-2 rounded-2xl border overflow-hidden ${isDarkMode ? 'border-white/10' : 'border-slate-200/70'}`}>
+                <div className={`grid grid-cols-[1fr_auto_auto_auto] text-[10px] font-bold px-3 py-2 ${isDarkMode ? 'bg-white/5 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>
+                    <span>科目</span>
+                    <span>個人</span>
+                    <span>班均</span>
+                    <span>差值</span>
+                </div>
+                <div className={isDarkMode ? 'bg-[#0b1510]' : 'bg-white'}>
+                    {subjectRows.map((row) => (
+                        <div key={row.subject} className={`grid grid-cols-[1fr_auto_auto_auto] items-center gap-3 px-3 py-2.5 text-xs border-t ${isDarkMode ? 'border-white/5' : 'border-slate-100'}`}>
+                            <span className={`font-bold ${isDarkMode ? 'text-slate-100' : 'text-slate-700'}`}>{row.subject}</span>
+                            <span className={`font-semibold ${isDarkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>{f1(row.student)}</span>
+                            <span className={`font-semibold ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>{f1(row.classAvg)}</span>
+                            <span className={`font-black ${row.delta >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{row.deltaLabel}</span>
+                        </div>
+                    ))}
+                </div>
             </div>
         </div>
     );
@@ -546,13 +575,13 @@ const ExamCountdown = ({ isDarkMode }) => {
     }, []);
 
     return (
-        <div className={`flex items-center gap-3 mt-4 px-5 py-2 rounded-full border backdrop-blur-md transition-all duration-500 shadow-sm ${isDarkMode ? 'bg-emerald-500/10 border-emerald-200/20 text-slate-100 shadow-black/20' : 'bg-white/70 border-emerald-100 text-slate-700 shadow-slate-200/50'}`}>
-            <Target className="w-4 h-4 text-emerald-500" />
+        <div className={`flex items-center gap-3 mt-4 px-5 py-2 rounded-full border backdrop-blur-md transition-all duration-500 shadow-sm ${isDarkMode ? 'bg-emerald-500/10 border-emerald-200/20 text-slate-100 shadow-black/20' : 'bg-white/74 border-white text-slate-700 shadow-slate-200/50'}`}>
+            <Target className="w-4 h-4 text-sky-600" />
             <div className="flex items-baseline gap-1.5 font-mono text-sm">
                 <span className="font-bold">{timeLeft.days}</span><span className="text-[10px] opacity-50 mr-1">DAYS</span>
                 <span className="font-bold">{String(timeLeft.hours).padStart(2,'0')}</span><span className="opacity-30">:</span>
                 <span className="font-bold">{String(timeLeft.minutes).padStart(2,'0')}</span><span className="opacity-30">:</span>
-                <span className="font-bold text-emerald-500">{String(timeLeft.seconds).padStart(2,'0')}</span>
+                <span className="font-bold text-orange-500">{String(timeLeft.seconds).padStart(2,'0')}</span>
             </div>
         </div>
     );
@@ -1581,6 +1610,11 @@ export default function App() {
       return Math.min(120, Math.ceil(maxValue / 10) * 10);
   }, [parentRadarData]);
 
+  const activePhaseLabel = useMemo(() => {
+      const phase = PHASES.find((item) => item.id === activePhase);
+      return phase ? phase.name : '';
+  }, [activePhase]);
+
   // 預先為每個週末 / 班級 / 科目建立排序好的成績索引，避免在畫面 render 時重複掃描全班資料
   const scoreIndexByWeekendAndClass = useMemo(() => {
       const index = {};
@@ -1818,7 +1852,7 @@ export default function App() {
         <div
           className="fixed inset-0 pointer-events-none z-0"
           style={{
-            backgroundImage: 'radial-gradient(circle at 8% 14%, rgba(16,185,129,0.26) 0%, transparent 40%), radial-gradient(circle at 89% 11%, rgba(56,189,248,0.22) 0%, transparent 36%), radial-gradient(circle at 80% 84%, rgba(244,114,182,0.16) 0%, transparent 34%), linear-gradient(180deg, #f8fafc 0%, #f6f7fb 56%, #eef2ff 100%)'
+            backgroundImage: 'radial-gradient(circle at 9% 12%, rgba(251,146,60,0.22) 0%, transparent 36%), radial-gradient(circle at 86% 10%, rgba(56,189,248,0.25) 0%, transparent 38%), radial-gradient(circle at 74% 86%, rgba(34,197,94,0.2) 0%, transparent 36%), linear-gradient(125deg, #fff8f1 0%, #f5f8ff 45%, #f2fff7 100%)'
           }}
         />
       )}
@@ -1848,32 +1882,38 @@ export default function App() {
       <main className="pt-28 px-4 max-w-4xl mx-auto relative z-10">
         {mode === 'landing' && (
           <div className="flex flex-col items-center justify-center min-h-[calc(100vh-120px)]">
-            <div className="relative w-full max-w-3xl rounded-[2.5rem] overflow-hidden border border-white/70 bg-white/88">
+            <div className="relative w-full max-w-3xl rounded-[2.5rem] overflow-hidden border border-white/80 bg-white/82">
               <div
                 className="pointer-events-none absolute inset-0"
                 style={{
-                  backgroundImage: 'radial-gradient(circle at 12% 11%, rgba(16,185,129,0.45) 0%, rgba(16,185,129,0) 42%), radial-gradient(circle at 88% 13%, rgba(56,189,248,0.36) 0%, rgba(56,189,248,0) 38%), radial-gradient(circle at 80% 86%, rgba(244,114,182,0.26) 0%, rgba(244,114,182,0) 42%), linear-gradient(145deg, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0.95) 78%)'
+                  backgroundImage: 'radial-gradient(circle at 8% 9%, rgba(251,146,60,0.42) 0%, rgba(251,146,60,0) 42%), radial-gradient(circle at 90% 14%, rgba(14,165,233,0.34) 0%, rgba(14,165,233,0) 38%), radial-gradient(circle at 78% 86%, rgba(34,197,94,0.28) 0%, rgba(34,197,94,0) 42%), linear-gradient(145deg, rgba(255,255,255,0.72) 0%, rgba(255,255,255,0.92) 70%)'
+                }}
+              />
+              <div
+                className="pointer-events-none absolute inset-0 opacity-[0.22]"
+                style={{
+                  backgroundImage: 'repeating-linear-gradient(0deg, rgba(148,163,184,0.22) 0px, rgba(148,163,184,0.22) 1px, transparent 1px, transparent 16px), repeating-linear-gradient(90deg, rgba(148,163,184,0.18) 0px, rgba(148,163,184,0.18) 1px, transparent 1px, transparent 16px)'
                 }}
               />
 
               <div className="relative z-10 flex flex-col items-center justify-center px-6 py-12 md:py-14">
-                <div className="p-5 rounded-full mb-6 ring-1 backdrop-blur-xl bg-gradient-to-br from-emerald-100 via-sky-100 to-pink-100 ring-white/90">
-                    <Sparkles className="w-10 h-10 text-slate-700" />
+                <div className="px-4 py-1.5 rounded-full mb-5 border border-white/90 bg-white/70 text-[10px] tracking-[0.2em] font-black uppercase text-slate-600">
+                    HSINRU Progress Studio
                 </div>
-                <h2 className="text-[2.05rem] md:text-[3.45rem] font-black font-serif tracking-tight mb-4 text-center leading-[1.16] bg-clip-text text-transparent bg-gradient-to-r from-emerald-700 via-sky-700 to-fuchsia-700">Make Progress Visible</h2>
-                <p className="text-xs font-semibold tracking-[0.18em] mb-6 uppercase text-slate-600">2025-2026 Learning Journey</p>
+                <h2 className="text-[2.16rem] md:text-[3.75rem] font-black font-serif tracking-tight mb-4 text-center leading-[1.12] bg-clip-text text-transparent bg-gradient-to-r from-orange-600 via-sky-700 to-emerald-700">Make Progress Visible</h2>
+                <p className="text-[11px] font-bold tracking-[0.18em] mb-6 uppercase text-slate-600">2025-2026 Learning Journey</p>
                 <ExamCountdown isDarkMode={darkMode} />
                   
-                <div className="w-full max-w-md space-y-4 mt-8">
-                   <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className="group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 transition-colors duration-200 backdrop-blur-xl bg-white/78 border-white/80 hover:bg-white/92 hover:border-slate-200/90">
-                      <div className="w-12 h-12 rounded-2xl flex items-center justify-center transition-colors bg-gradient-to-br from-emerald-100 to-sky-100 text-emerald-700"><LayoutDashboard className="w-6 h-6" /></div>
-                      <div className="text-left flex-1"><h3 className="text-lg font-bold text-slate-800">老師通道</h3><p className="text-xs text-slate-500 mt-0.5">管理成績與設定</p></div>
-                      <ChevronRight className="w-5 h-5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
+                <div className="w-full max-w-xl grid grid-cols-1 md:grid-cols-2 gap-3 mt-8">
+                   <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className="group w-full p-5 rounded-[1.45rem] border flex items-center gap-4 transition-all duration-200 backdrop-blur-xl bg-white/76 border-white/85 hover:bg-white/92 hover:border-orange-200/90">
+                      <div className="w-11 h-11 rounded-2xl flex items-center justify-center transition-colors bg-gradient-to-br from-orange-100 to-amber-100 text-orange-700"><LayoutDashboard className="w-5 h-5" /></div>
+                      <div className="text-left flex-1"><h3 className="text-base font-black text-slate-800">老師通道</h3><p className="text-[11px] text-slate-500 mt-0.5">管理成績與設定</p></div>
+                      <ChevronRight className="w-4.5 h-4.5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
                    </button>
-                   <button onClick={() => { setViewData(null); setSearchError(''); setMode('parent'); }} className="group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 transition-colors duration-200 backdrop-blur-xl bg-white/78 border-white/80 hover:bg-white/92 hover:border-slate-200/90">
-                      <div className="w-12 h-12 rounded-2xl flex items-center justify-center transition-colors bg-gradient-to-br from-sky-100 to-pink-100 text-sky-700"><BarChart3 className="w-6 h-6" /></div>
-                      <div className="text-left flex-1"><h3 className="text-lg font-bold text-slate-800">家長查詢</h3><p className="text-xs text-slate-500 mt-0.5">輸入學號查看分析</p></div>
-                      <ChevronRight className="w-5 h-5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
+                   <button onClick={() => { setViewData(null); setSearchError(''); setMode('parent'); }} className="group w-full p-5 rounded-[1.45rem] border flex items-center gap-4 transition-all duration-200 backdrop-blur-xl bg-white/76 border-white/85 hover:bg-white/92 hover:border-sky-200/90">
+                      <div className="w-11 h-11 rounded-2xl flex items-center justify-center transition-colors bg-gradient-to-br from-sky-100 to-emerald-100 text-sky-700"><BarChart3 className="w-5 h-5" /></div>
+                      <div className="text-left flex-1"><h3 className="text-base font-black text-slate-800">家長查詢</h3><p className="text-[11px] text-slate-500 mt-0.5">輸入學號查看分析</p></div>
+                      <ChevronRight className="w-4.5 h-4.5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
                    </button>
                 </div>
               </div>
@@ -2136,7 +2176,7 @@ export default function App() {
                   {activeTab === 'eng' && <SingleSubjectChart data={parentPhaseData} subjectKey="eng" avgKey="avgEng" colorKey="eng" title="英文" domain={activePhase === 'mock' ? [0, 80] : [0, 100]} isDarkMode={darkMode} />}
                   {activeTab === 'math' && <SingleSubjectChart data={parentPhaseData} subjectKey="math" avgKey="avgMath" colorKey="math" title="數學" domain={activePhase === 'mock' ? [0, 120] : [0, 100]} isDarkMode={darkMode} />}
 
-                  <ParentAbilityRadar data={parentRadarData} maxValue={parentRadarMax} isDarkMode={darkMode} />
+                  <ParentAbilityRadar data={parentRadarData} maxValue={parentRadarMax} isDarkMode={darkMode} recordCount={parentPhaseData.length} phaseName={activePhaseLabel} />
                 </div>
                   
                 <div className={`p-6 border-t ${darkMode ? 'bg-[#101a15] border-emerald-200/10' : 'bg-white border-slate-50'}`}>

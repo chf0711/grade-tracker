@@ -1843,16 +1843,18 @@ export default function App() {
       };
   }, [statsModalData, statsActiveTab]);
 
+  const isLandingMode = mode === 'landing';
+
   if (!user && !db) return <div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400 text-sm font-mono tracking-widest uppercase">Initializing...</div>;
   if (!user) return <div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400 text-sm font-mono tracking-widest uppercase">Connecting...</div>;
 
   return (
-    <div className={`min-h-screen font-sans antialiased transition-colors duration-500 ease-in-out pb-32 relative overflow-x-hidden ${darkMode ? 'bg-[#111714] text-slate-200' : 'bg-[#f5f5f7] text-slate-800'}`}>
+    <div className={`${isLandingMode ? 'h-[100svh] overflow-hidden' : 'min-h-screen pb-32 overflow-x-hidden'} font-sans antialiased transition-colors duration-500 ease-in-out relative ${darkMode ? 'bg-[#111714] text-slate-200' : 'bg-[#f5f5f7] text-slate-800'}`}>
       {mode === 'landing' && (
         <div
           className="fixed inset-0 pointer-events-none z-0"
           style={{
-            backgroundImage: 'radial-gradient(circle at 9% 12%, rgba(251,146,60,0.22) 0%, transparent 36%), radial-gradient(circle at 86% 10%, rgba(56,189,248,0.25) 0%, transparent 38%), radial-gradient(circle at 74% 86%, rgba(34,197,94,0.2) 0%, transparent 36%), linear-gradient(125deg, #fff8f1 0%, #f5f8ff 45%, #f2fff7 100%)'
+            backgroundImage: 'repeating-linear-gradient(0deg, rgba(148,163,184,0.1) 0px, rgba(148,163,184,0.1) 1px, transparent 1px, transparent 24px), repeating-linear-gradient(90deg, rgba(148,163,184,0.08) 0px, rgba(148,163,184,0.08) 1px, transparent 1px, transparent 24px), radial-gradient(circle at 12% 15%, rgba(99,102,241,0.22) 0%, transparent 40%), radial-gradient(circle at 86% 12%, rgba(14,165,233,0.22) 0%, transparent 40%), radial-gradient(circle at 80% 84%, rgba(236,72,153,0.16) 0%, transparent 36%), linear-gradient(138deg, #f8fafc 0%, #f3f7ff 46%, #eefcf5 100%)'
           }}
         />
       )}
@@ -1879,34 +1881,21 @@ export default function App() {
         </div>
       </header>
 
-      <main className="pt-28 px-4 max-w-4xl mx-auto relative z-10">
+      <main className={`${isLandingMode ? 'pt-16' : 'pt-28'} px-4 max-w-4xl mx-auto relative z-10`}>
         {mode === 'landing' && (
-          <div className="flex flex-col items-center justify-center min-h-[calc(100vh-120px)]">
-            <div className="relative w-full max-w-3xl overflow-hidden">
-              <div
-                className="pointer-events-none absolute inset-0"
-                style={{
-                  backgroundImage: 'radial-gradient(circle at 8% 9%, rgba(251,146,60,0.42) 0%, rgba(251,146,60,0) 42%), radial-gradient(circle at 90% 14%, rgba(14,165,233,0.34) 0%, rgba(14,165,233,0) 38%), radial-gradient(circle at 78% 86%, rgba(34,197,94,0.28) 0%, rgba(34,197,94,0) 42%), linear-gradient(145deg, rgba(255,255,255,0.72) 0%, rgba(255,255,255,0.92) 70%)'
-                }}
-              />
-              <div
-                className="pointer-events-none absolute inset-0 opacity-[0.22]"
-                style={{
-                  backgroundImage: 'repeating-linear-gradient(0deg, rgba(148,163,184,0.22) 0px, rgba(148,163,184,0.22) 1px, transparent 1px, transparent 16px), repeating-linear-gradient(90deg, rgba(148,163,184,0.18) 0px, rgba(148,163,184,0.18) 1px, transparent 1px, transparent 16px)'
-                }}
-              />
-
-              <div className="relative z-10 flex flex-col items-center justify-center px-6 py-12 md:py-14">
-                <div className="px-4 py-1.5 rounded-full mb-5 border border-white/90 bg-white/70 text-[10px] tracking-[0.2em] font-black uppercase text-slate-600">
-                    HSINRU Progress Studio
+          <div className="h-[calc(100svh-64px)] flex items-center justify-center">
+            <div className="w-full max-w-3xl h-full">
+              <div className="relative z-10 h-full flex flex-col items-center justify-center px-4 md:px-6 py-6 md:py-8">
+                <div className="px-4 py-1.5 rounded-full mb-5 border border-white/90 bg-white/72 text-[10px] tracking-[0.2em] font-black uppercase text-slate-600">
+                    HSINRU CENTRAL
                 </div>
-                <h2 className="text-[2.16rem] md:text-[3.75rem] font-black font-serif tracking-tight mb-4 text-center leading-[1.12] bg-clip-text text-transparent bg-gradient-to-r from-orange-600 via-sky-700 to-emerald-700">Make Progress Visible</h2>
+                <h2 className="whitespace-nowrap text-[1.12rem] sm:text-[1.68rem] md:text-[2.7rem] font-black font-serif tracking-tight mb-3 text-center leading-[1.12] bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 via-sky-700 to-emerald-700">Make Progress Visible</h2>
                 <p className="text-[11px] font-bold tracking-[0.18em] mb-6 uppercase text-slate-600">2025-2026 Learning Journey</p>
                 <ExamCountdown isDarkMode={darkMode} />
                   
-                <div className="w-full max-w-xl grid grid-cols-1 md:grid-cols-2 gap-3 mt-8">
+                <div className="w-full max-w-xl grid grid-cols-1 md:grid-cols-2 gap-3 mt-6">
                    <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className="group w-full p-5 rounded-[1.45rem] border flex items-center gap-4 transition-all duration-200 backdrop-blur-xl bg-white/76 border-white/85 hover:bg-white/92 hover:border-orange-200/90">
-                      <div className="w-11 h-11 rounded-2xl flex items-center justify-center transition-colors bg-gradient-to-br from-orange-100 to-amber-100 text-orange-700"><LayoutDashboard className="w-5 h-5" /></div>
+                      <div className="w-11 h-11 rounded-2xl flex items-center justify-center transition-colors bg-gradient-to-br from-indigo-100 to-sky-100 text-indigo-700"><LayoutDashboard className="w-5 h-5" /></div>
                       <div className="text-left flex-1"><h3 className="text-base font-black text-slate-800">老師通道</h3><p className="text-[11px] text-slate-500 mt-0.5">管理成績與設定</p></div>
                       <ChevronRight className="w-4.5 h-4.5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
                    </button>
@@ -1916,6 +1905,10 @@ export default function App() {
                       <ChevronRight className="w-4.5 h-4.5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
                    </button>
                 </div>
+
+                <p className="mt-6 md:mt-8 text-[11px] font-serif font-semibold tracking-[0.14em] text-slate-500/90">
+                  Created by CH.Fan
+                </p>
               </div>
             </div>
           </div>

@@ -1882,7 +1882,7 @@ export default function App() {
       <main className="pt-28 px-4 max-w-4xl mx-auto relative z-10">
         {mode === 'landing' && (
           <div className="flex flex-col items-center justify-center min-h-[calc(100vh-120px)]">
-            <div className="relative w-full max-w-3xl rounded-[2.5rem] overflow-hidden border border-white/80 bg-white/82">
+            <div className="relative w-full max-w-3xl overflow-hidden">
               <div
                 className="pointer-events-none absolute inset-0"
                 style={{

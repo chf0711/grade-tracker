@@ -1590,6 +1590,16 @@ export default function App() {
 
   return (
     <div className={`min-h-screen font-sans antialiased transition-colors duration-500 ease-in-out pb-32 relative overflow-x-hidden ${darkMode ? 'bg-[#0f1115] text-slate-200' : 'bg-[#f5f5f7] text-slate-800'}`}>
+      {mode === 'landing' && (
+        <div
+          className="fixed inset-0 pointer-events-none z-0"
+          style={darkMode ? {
+            backgroundImage: 'radial-gradient(circle at 14% 18%, rgba(10,132,255,0.22) 0%, transparent 36%), radial-gradient(circle at 86% 12%, rgba(100,210,255,0.16) 0%, transparent 30%)'
+          } : {
+            backgroundImage: 'radial-gradient(circle at 14% 18%, rgba(10,132,255,0.18) 0%, transparent 38%), radial-gradient(circle at 86% 12%, rgba(255,159,10,0.14) 0%, transparent 28%)'
+          }}
+        />
+      )}
 
       {/* Header */}
       <header className={`fixed top-0 w-full backdrop-blur-2xl z-30 border-b transition-all duration-300 ${darkMode ? 'bg-[#10141d]/88 border-white/10 shadow-lg shadow-black/30' : 'bg-white/90 border-slate-200/80 shadow-sm'}`}>
@@ -1597,7 +1607,7 @@ export default function App() {
           <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setMode('landing')}>
             <div className={`p-2 rounded-xl transition-transform group-hover:scale-105 duration-300 ${darkMode ? 'bg-blue-500/10 text-blue-300 ring-1 ring-blue-400/30' : 'bg-white text-blue-600 ring-1 ring-slate-200 shadow-sm'}`}><GraduationCap className="h-5 w-5" /></div>
             <div>
-                <h1 className={`text-2xl font-black tracking-widest font-serif uppercase leading-none ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>
+                <h1 className={`text-2xl font-black tracking-widest font-serif uppercase leading-none bg-clip-text text-transparent ${darkMode ? 'bg-gradient-to-r from-white via-blue-100 to-cyan-200' : 'bg-gradient-to-r from-slate-800 via-blue-700 to-cyan-600'}`}>
                   HSINRU
                 </h1>
                 <p className="text-[9px] text-slate-400 font-bold tracking-widest uppercase mt-0.5 opacity-80">Grade Tracker</p>
@@ -1621,24 +1631,43 @@ export default function App() {
       <main className="pt-28 px-4 max-w-4xl mx-auto relative z-10">
         {mode === 'landing' && (
           <div className="flex flex-col items-center justify-center min-h-[calc(100vh-120px)]">
-            <div className={`p-5 rounded-full mb-6 ring-1 backdrop-blur-3xl transition-transform duration-700 hover:scale-105 ${darkMode ? 'bg-[#141b27] border-white/10 ring-blue-500/30' : 'bg-white border-slate-200 shadow-sm'}`}>
-                <Sparkles className={`w-10 h-10 ${darkMode ? 'text-blue-300' : 'text-blue-600'}`} />
-            </div>
-            <h2 className={`text-xl md:text-3xl font-black font-serif tracking-tighter mb-4 text-center py-6 px-4 leading-normal ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>Make Progress Visible</h2>
-            <p className="text-slate-400 text-xs font-medium tracking-wide mb-6">2025-2026 Learning Journey</p>
-            <ExamCountdown isDarkMode={darkMode} />
-              
-            <div className="w-full max-w-sm space-y-4 mt-8">
-               <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className={`group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 hover:scale-[1.01] active:scale-[0.98] transition-all duration-300 backdrop-blur-2xl ${darkMode ? 'bg-[#111827]/88 border-white/10 hover:border-blue-500/30 shadow-lg shadow-black/30' : 'bg-white/92 border-slate-200/80 hover:border-blue-200 shadow-sm'}`}>
-                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-colors shadow-inner ${darkMode ? 'bg-blue-500/10 text-blue-400 ring-1 ring-blue-500/20' : 'bg-blue-50 text-blue-600'}`}><LayoutDashboard className="w-6 h-6" /></div>
-                  <div className="text-left flex-1"><h3 className={`text-lg font-bold ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}>老師通道</h3><p className="text-xs text-slate-400 mt-0.5">管理成績與設定</p></div>
-                  <ChevronRight className="w-5 h-5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
-               </button>
-               <button onClick={() => { setViewData(null); setSearchError(''); setMode('parent'); }} className={`group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 hover:scale-[1.01] active:scale-[0.98] transition-all duration-300 backdrop-blur-2xl ${darkMode ? 'bg-[#111827]/88 border-white/10 hover:border-blue-500/30 shadow-lg shadow-black/30' : 'bg-white/92 border-slate-200/80 hover:border-blue-200 shadow-sm'}`}>
-                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-colors shadow-inner ${darkMode ? 'bg-blue-500/10 text-blue-400 ring-1 ring-blue-500/20' : 'bg-blue-50 text-blue-600'}`}><BarChart3 className="w-6 h-6" /></div>
-                  <div className="text-left flex-1"><h3 className={`text-lg font-bold ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}>家長查詢</h3><p className="text-xs text-slate-400 mt-0.5">輸入學號查看分析</p></div>
-                  <ChevronRight className="w-5 h-5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
-               </button>
+            <div className={`relative w-full max-w-3xl rounded-[2.5rem] overflow-hidden border ${darkMode ? 'bg-[#101722]/88 border-white/10 shadow-2xl shadow-black/45' : 'bg-white/95 border-slate-200/80 shadow-[0_24px_80px_rgba(15,23,42,0.08)]'}`}>
+              <div
+                className={`pointer-events-none absolute inset-0 ${darkMode ? 'opacity-90' : 'opacity-100'}`}
+                style={darkMode ? {
+                  backgroundImage: 'radial-gradient(circle at 12% 12%, rgba(10,132,255,0.22) 0%, transparent 36%), radial-gradient(circle at 88% 14%, rgba(100,210,255,0.14) 0%, transparent 30%)'
+                } : {
+                  backgroundImage: 'radial-gradient(circle at 12% 12%, rgba(10,132,255,0.16) 0%, transparent 40%), radial-gradient(circle at 88% 14%, rgba(255,159,10,0.12) 0%, transparent 30%)'
+                }}
+              />
+              <div
+                className={`pointer-events-none absolute inset-0 ${darkMode ? 'opacity-15' : 'opacity-20'}`}
+                style={{
+                  backgroundImage: 'repeating-linear-gradient(135deg, rgba(148,163,184,0.26) 0px, rgba(148,163,184,0.26) 1px, transparent 1px, transparent 14px)'
+                }}
+              />
+
+              <div className="relative z-10 flex flex-col items-center justify-center px-6 py-12 md:py-14">
+                <div className={`p-5 rounded-full mb-6 ring-1 backdrop-blur-3xl transition-transform duration-700 hover:scale-105 ${darkMode ? 'bg-gradient-to-br from-blue-500/20 to-cyan-500/10 ring-blue-300/35' : 'bg-gradient-to-br from-blue-100 to-cyan-100 ring-blue-200 shadow-sm'}`}>
+                    <Sparkles className={`w-10 h-10 ${darkMode ? 'text-blue-200' : 'text-blue-700'}`} />
+                </div>
+                <h2 className={`text-3xl md:text-5xl font-black font-serif tracking-tight mb-4 text-center leading-[1.05] bg-clip-text text-transparent ${darkMode ? 'bg-gradient-to-r from-white via-blue-100 to-cyan-200' : 'bg-gradient-to-r from-slate-900 via-blue-700 to-cyan-600'}`}>Make Progress Visible</h2>
+                <p className="text-slate-400 text-xs font-semibold tracking-[0.18em] mb-6 uppercase">2025-2026 Learning Journey</p>
+                <ExamCountdown isDarkMode={darkMode} />
+                  
+                <div className="w-full max-w-md space-y-4 mt-8">
+                   <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className={`group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 hover:scale-[1.01] active:scale-[0.98] transition-all duration-300 backdrop-blur-2xl ${darkMode ? 'bg-gradient-to-br from-[#0f172a]/90 to-[#0c1322]/90 border-white/12 hover:border-blue-500/35 shadow-lg shadow-black/35' : 'bg-gradient-to-br from-white to-slate-50 border-slate-200/80 hover:border-blue-200 shadow-sm'}`}>
+                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-colors shadow-inner ${darkMode ? 'bg-gradient-to-br from-blue-500/25 to-cyan-500/20 text-blue-300 ring-1 ring-blue-300/30' : 'bg-gradient-to-br from-blue-100 to-cyan-100 text-blue-700'}`}><LayoutDashboard className="w-6 h-6" /></div>
+                      <div className="text-left flex-1"><h3 className={`text-lg font-bold ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>老師通道</h3><p className="text-xs text-slate-400 mt-0.5">管理成績與設定</p></div>
+                      <ChevronRight className="w-5 h-5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
+                   </button>
+                   <button onClick={() => { setViewData(null); setSearchError(''); setMode('parent'); }} className={`group w-full p-5 rounded-[1.5rem] border flex items-center gap-5 hover:scale-[1.01] active:scale-[0.98] transition-all duration-300 backdrop-blur-2xl ${darkMode ? 'bg-gradient-to-br from-[#0f172a]/90 to-[#0c1322]/90 border-white/12 hover:border-blue-500/35 shadow-lg shadow-black/35' : 'bg-gradient-to-br from-white to-slate-50 border-slate-200/80 hover:border-blue-200 shadow-sm'}`}>
+                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-colors shadow-inner ${darkMode ? 'bg-gradient-to-br from-blue-500/25 to-cyan-500/20 text-blue-300 ring-1 ring-blue-300/30' : 'bg-gradient-to-br from-blue-100 to-cyan-100 text-blue-700'}`}><BarChart3 className="w-6 h-6" /></div>
+                      <div className="text-left flex-1"><h3 className={`text-lg font-bold ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>家長查詢</h3><p className="text-xs text-slate-400 mt-0.5">輸入學號查看分析</p></div>
+                      <ChevronRight className="w-5 h-5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
+                   </button>
+                </div>
+              </div>
             </div>
           </div>
         )}

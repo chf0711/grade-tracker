@@ -27,6 +27,12 @@ const ENCODED_PASSWORDS = ['QmVuMTEwNzA1', 'MjQ5MTIxMg=='];
 const SECURITY_CODE = '1107';
 const QUERY_COUNT_RESET_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000;
 
+const runtimeFirebaseConfig =
+  typeof window !== 'undefined' ? window.__firebase_config : undefined;
+const runtimeAppId = typeof window !== 'undefined' ? window.__app_id : undefined;
+const runtimeInitialAuthToken =
+  typeof window !== 'undefined' ? window.__initial_auth_token : undefined;
+
 const realFirebaseConfig = {
   apiKey: "AIzaSyChK1IiE6YhHZ_DdxXzpxi8vmBA9A9So9A",
   authDomain: "grade-tracker-9ccb3.firebaseapp.com",
@@ -39,11 +45,11 @@ const realFirebaseConfig = {
 let app, auth, db, appId = 'grade-tracker-v1';
 
 try {
-  if (typeof __firebase_config !== 'undefined') {
-    const config = JSON.parse(__firebase_config);
+  if (typeof runtimeFirebaseConfig !== 'undefined' && runtimeFirebaseConfig) {
+    const config = JSON.parse(runtimeFirebaseConfig);
     if (!getApps().length) app = initializeApp(config);
     else app = getApp();
-    if (typeof __app_id !== 'undefined') appId = __app_id;
+    if (typeof runtimeAppId !== 'undefined' && runtimeAppId) appId = runtimeAppId;
   } 
   else if (realFirebaseConfig.apiKey !== "REPLACE_WITH_YOUR_API_KEY") {
     if (!getApps().length) app = initializeApp(realFirebaseConfig);
@@ -66,7 +72,7 @@ const customDateSort = (a, b) => {
         const m2Adj = m2 < 4 ? m2 + 12 : m2;
         if (m1Adj !== m2Adj) return m1Adj - m2Adj;
         return d1 - d2;
-    } catch (e) { return 0; }
+    } catch { return 0; }
 };
 
 // 將日期字串轉換為 Date 物件（處理跨年）
@@ -78,7 +84,7 @@ const parseDateStr = (dateStr) => {
         const d = parseInt(dStr, 10);
         const y = m >= 4 ? 2025 : 2026;
         return new Date(y, m - 1, d);
-    } catch (e) { return null; }
+    } catch { return null; }
 };
 
 // 將 Date 物件轉換為日期字串
@@ -136,7 +142,7 @@ const getWeekendID = (dateStr, availableDates = null) => {
         }
         
         return dateStr;
-    } catch (e) { return dateStr; }
+    } catch { return dateStr; }
 };
 
 const getSundayDate = (satDateStr) => {
@@ -148,7 +154,7 @@ const getSundayDate = (satDateStr) => {
         const dateObj = new Date(y, m - 1, d);
         dateObj.setDate(dateObj.getDate() + 1); 
         return `${String(dateObj.getMonth() + 1).padStart(2, '0')}/${String(dateObj.getDate()).padStart(2, '0')}`;
-    } catch(e) { return satDateStr; }
+    } catch { return satDateStr; }
 }
 
 const getWeekendDisplayLabel = (dateStr) => {
@@ -164,7 +170,7 @@ const getWeekendDisplayLabel = (dateStr) => {
         sunDate.setDate(dateObj.getDate() + 1);
         const sunD = String(sunDate.getDate()).padStart(2, '0');
         return `${String(m).padStart(2,'0')}/${String(d).padStart(2,'0')}-${sunD}`;
-    } catch (e) { return dateStr; }
+    } catch { return dateStr; }
 };
 
 const PHASES = [
@@ -235,9 +241,12 @@ const getProbabilityVisual = (probValue, isDarkMode) => {
     const hue = prob <= 25 ? 0 : Math.round(Math.pow(prob / 100, 0.72) * 130);
     const saturation = prob <= 25 ? 100 : (isDarkMode ? 96 : 94);
     const textLightness = isDarkMode ? 72 : (prob <= 25 ? 42 : 36);
+    const badgeTextColor = prob <= 25
+        ? '#ffffff'
+        : `hsl(${hue} ${saturation}% ${isDarkMode ? 78 : 34}%)`;
     const badgeAlphaStart = prob <= 25 ? (isDarkMode ? 0.65 : 0.48) : (isDarkMode ? 0.48 : 0.3);
     const badgeAlphaEnd = prob <= 25 ? (isDarkMode ? 0.82 : 0.68) : (isDarkMode ? 0.64 : 0.44);
-    const hueEnd = clamp(hue + (prob <= 25 ? 8 : 14), 0, 140);
+    const hueEnd = clamp(hue + (prob <= 25 ? 10 : 14), 0, 140);
 
     return {
         textStyle: {
@@ -247,7 +256,7 @@ const getProbabilityVisual = (probValue, isDarkMode) => {
                 : 'none'
         },
         badgeStyle: {
-            color: `hsl(${hue} ${saturation}% ${isDarkMode ? 78 : 34}%)`,
+            color: badgeTextColor,
             background: `linear-gradient(135deg, hsla(${hue}, ${saturation}%, ${isDarkMode ? 56 : 54}%, ${badgeAlphaStart}) 0%, hsla(${hueEnd}, ${saturation}%, ${isDarkMode ? 48 : 50}%, ${badgeAlphaEnd}) 100%)`,
             border: `1px solid hsla(${hue}, ${saturation}%, ${isDarkMode ? 72 : 42}%, ${prob <= 25 ? (isDarkMode ? 0.72 : 0.52) : (isDarkMode ? 0.5 : 0.3)})`,
             boxShadow: prob <= 25
@@ -610,10 +619,14 @@ export default function App() {
   const [teacherClassFilter, setTeacherClassFilter] = useState('A班'); 
   const [avgSettingsClassFilter, setAvgSettingsClassFilter] = useState('A班'); 
   const [batchDate, setBatchDate] = useState(''); 
+  const [isBatchDirty, setIsBatchDirty] = useState(false);
   const [allStudentsData, setAllStudentsData] = useState([]); 
   const [cachedClassData, setCachedClassData] = useState([]); 
   const [sortByPR, setSortByPR] = useState(false);
   const [sortByProb, setSortByProb] = useState(false);
+  const [queryStatsById, setQueryStatsById] = useState({});
+  const [queryStatsLastResetAt, setQueryStatsLastResetAt] = useState('');
+  const [queryStatsLoading, setQueryStatsLoading] = useState(false);
     
   const [loading, setLoading] = useState(false);
   const [searchId, setSearchId] = useState('');
@@ -630,10 +643,6 @@ export default function App() {
   const [admissionProbabilities, setAdmissionProbabilities] = useState({});
 
   const [xlsxLoaded, setXlsxLoaded] = useState(false);
-  const [isBatchDirty, setIsBatchDirty] = useState(false);
-  const [queryStatsById, setQueryStatsById] = useState({});
-  const [queryStatsLastResetAt, setQueryStatsLastResetAt] = useState('');
-  const [queryStatsLoading, setQueryStatsLoading] = useState(false);
   const darkMode = false;
 
   // 預先建立依照考試日期排序好的日期清單，避免在 render 階段重複 sort
@@ -682,32 +691,6 @@ export default function App() {
       });
       return gradeMaps;
   }, [allStudentsData, getTestDateID]);
-
-  const queryStatsRows = useMemo(
-      () =>
-          Object.entries(queryStatsById)
-              .map(([id, count]) => ({ id, count: Number(count) || 0 }))
-              .filter((row) => row.id && row.count > 0)
-              .sort((a, b) => b.count - a.count || a.id.localeCompare(b.id)),
-      [queryStatsById]
-  );
-
-  const totalQueryCount = useMemo(
-      () => queryStatsRows.reduce((sum, row) => sum + row.count, 0),
-      [queryStatsRows]
-  );
-
-  const queryStatsResetLabel = useMemo(() => {
-      if (!queryStatsLastResetAt) return '-';
-      const parsed = new Date(queryStatsLastResetAt);
-      if (Number.isNaN(parsed.getTime())) return '-';
-      return parsed.toLocaleString('zh-TW', {
-          month: '2-digit',
-          day: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit'
-      });
-  }, [queryStatsLastResetAt]);
 
   useEffect(() => {
       const storedAuth = localStorage.getItem('teacher_auth');
@@ -802,7 +785,9 @@ export default function App() {
     const initAuth = async () => {
       try {
         if (!auth) return;
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await signInWithCustomToken(auth, __initial_auth_token);
+        if (typeof runtimeInitialAuthToken !== 'undefined' && runtimeInitialAuthToken) {
+          await signInWithCustomToken(auth, runtimeInitialAuthToken);
+        }
         else await signInAnonymously(auth);
       } catch (e) { console.error(e); }
     };
@@ -836,6 +821,11 @@ export default function App() {
       if (!hasPendingBatchChanges) return true;
       return window.confirm('批量成績尚未儲存，確定要離開目前頁面嗎？');
   }, [hasPendingBatchChanges]);
+
+  const runWithBatchDiscardGuard = useCallback((action) => {
+      if (!confirmDiscardBatchChanges()) return;
+      action();
+  }, [confirmDiscardBatchChanges]);
 
   useEffect(() => {
       if (!hasPendingBatchChanges) return undefined;
@@ -966,7 +956,6 @@ export default function App() {
           loadQueryStats();
       }
   }, [mode, isAuthenticated, loadQueryStats]);
-
   const executeWithSecurity = (action) => {
       setPendingAction(() => action);
       setSecurityInput('');
@@ -1078,7 +1067,10 @@ export default function App() {
           let dbAverages = {};
           if (docSnap.exists()) dbAverages = docSnap.data().averages || {};
           setClassAverages({ ...localComputedAverages, ...dbAverages });
-      } catch (e) { setClassAverages(localComputedAverages); }
+      } catch (e) {
+          console.error('Load class averages error:', e);
+          setClassAverages(localComputedAverages);
+      }
   };
 
   useEffect(() => {
@@ -1109,7 +1101,10 @@ export default function App() {
       try {
           await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'class_averages_v18'), { averages: classAverages }, { merge: true });
           setStatusMsg("設定已儲存"); setTimeout(() => setStatusMsg(''), 2000); setShowAvgModal(false);
-      } catch (e) { setStatusMsg("儲存失敗"); }
+      } catch (e) {
+          console.error('Save class averages error:', e);
+          setStatusMsg("儲存失敗");
+      }
   };
 
   const handleDeleteDate = (dateToDelete) => setDeleteTarget(dateToDelete);
@@ -1129,10 +1124,11 @@ export default function App() {
   };
 
   const handleLogout = () => {
-      if (!confirmDiscardBatchChanges()) return;
-      setIsAuthenticated(false);
-      localStorage.removeItem('teacher_auth');
-      setMode('landing');
+      runWithBatchDiscardGuard(() => {
+          setIsAuthenticated(false);
+          localStorage.removeItem('teacher_auth');
+          setMode('landing');
+      });
   };
 
   const loadAllStudents = async () => {
@@ -1194,7 +1190,10 @@ export default function App() {
         const gradesObj = {}; availableDates.forEach(d => gradesObj[d] = { chi: '', eng: '', math: '', total: '', class: 'A班' });
         setGrades(gradesObj); setStatusMsg('新學生模式');
       }
-    } catch (e) { setStatusMsg('讀取錯誤'); }
+    } catch (e) {
+      console.error('Load student error:', e);
+      setStatusMsg('讀取錯誤');
+    }
     setLoading(false);
   };
 
@@ -1215,7 +1214,6 @@ export default function App() {
   };
 
   const handleBatchGradeChange = useCallback((studentId, subject, value) => {
-      setIsBatchDirty(true);
       setAllStudentsData(prev => prev.map(s => {
           if (s.id !== studentId) return s;
           const currentGrades = s.grades || {};
@@ -1242,6 +1240,7 @@ export default function App() {
           }
           return { ...s, grades: { ...currentGrades, [targetDate]: updatedDateGrades } };
       }));
+      setIsBatchDirty(true);
   }, [batchDate, teacherClassFilter, getTestDateID]); 
 
   const handleExcelUpload = (e) => {
@@ -1500,9 +1499,9 @@ export default function App() {
               }
           });
           if(updated) {
-              setIsBatchDirty(true);
               setStatusMsg(`已貼上 ${rows.length} 筆資料`);
               setTimeout(() => setStatusMsg(''), 2000);
+              setIsBatchDirty(true);
           }
           return newData;
       });
@@ -1593,7 +1592,10 @@ export default function App() {
         setAllStudentsData(prev => prev.filter(s => s.id !== studentToDelete.id));
         setCurrentStudentId(null); setStudentName(''); setGrades({});
         setStatusMsg(`已刪除`); setTimeout(() => setStatusMsg(''), 2000); setStudentToDelete(null);
-    } catch (e) { setStatusMsg("刪除失敗"); }
+    } catch (e) {
+      console.error('Delete student error:', e);
+      setStatusMsg("刪除失敗");
+    }
   };
 
   const handleSaveGrades = async () => {
@@ -1608,70 +1610,10 @@ export default function App() {
           return [...prev, { id: currentStudentId, name: studentName, grades }].sort((a,b) => a.id.localeCompare(b.id));
       });
       setStatusMsg('儲存成功'); setTimeout(() => setStatusMsg(''), 2000);
-    } catch (e) { setStatusMsg('儲存失敗'); }
-  };
-
-  const handleExportBatchExcel = () => {
-      if (!xlsxLoaded || !window.XLSX) {
-          setStatusMsg('Excel 套件載入中，請稍後再試');
-          setTimeout(() => setStatusMsg(''), 2000);
-          return;
-      }
-
-      if (!batchRowsForDisplay.length) {
-          setStatusMsg('目前批量頁面沒有可下載的資料');
-          setTimeout(() => setStatusMsg(''), 2000);
-          return;
-      }
-
-      const displayDateLabel = weekendLabelByDate[batchDate] || batchDate || '-';
-      const displayRows = batchRowsForDisplay.map((row, index) => ({
-          序號: index + 1,
-          日期: displayDateLabel,
-          學號: row.student.id,
-          姓名: row.student.name,
-          班級: row.dateGrades.class || 'A班',
-          國文: row.dateGrades.chi || '',
-          英文: row.dateGrades.eng || '',
-          數學: row.dateGrades.math || '',
-          總分: row.dateGrades.total || '',
-          PR: row.prValue !== '-' ? row.prValue : '',
-          錄取機率: row.probValue !== '-' ? `${row.probValue}%` : ''
-      }));
-
-      const fullRows = [];
-      allStudentsData.forEach((student) => {
-          Object.entries(student.grades || {}).forEach(([date, grade]) => {
-              fullRows.push({
-                  學號: student.id,
-                  姓名: student.name,
-                  日期: weekendLabelByDate[date] || date,
-                  班級: grade.class || 'A班',
-                  國文: grade.chi || '',
-                  英文: grade.eng || '',
-                  數學: grade.math || '',
-                  總分: grade.total || ''
-              });
-          });
-      });
-
-      const wb = window.XLSX.utils.book_new();
-      const wsDisplay = window.XLSX.utils.json_to_sheet(displayRows);
-      window.XLSX.utils.book_append_sheet(wb, wsDisplay, '批量顯示');
-
-      if (fullRows.length > 0) {
-          const wsAll = window.XLSX.utils.json_to_sheet(fullRows);
-          window.XLSX.utils.book_append_sheet(wb, wsAll, '完整資料');
-      }
-
-      const safeDate = (batchDate || 'all').replace(/\//g, '-');
-      const safeClass = teacherClassFilter.replace(/[^\w\u4e00-\u9fa5]/g, '');
-      const stamp = new Date().toISOString().slice(0, 10);
-      const fileName = `batch_${safeDate}_${safeClass}_${stamp}.xlsx`;
-      window.XLSX.writeFile(wb, fileName);
-
-      setStatusMsg(`已下載 ${fileName}`);
-      setTimeout(() => setStatusMsg(''), 2000);
+    } catch (e) {
+      console.error('Save grades error:', e);
+      setStatusMsg('儲存失敗');
+    }
   };
 
   const handleSaveBatchGrades = async () => {
@@ -1680,11 +1622,54 @@ export default function App() {
           if (db) {
               const batchPromises = allStudentsData.map(student => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${student.id}`), { id: student.id, name: student.name, grades: student.grades, lastUpdated: new Date().toISOString() }, { merge: true }));
               await Promise.all(batchPromises);
+              setIsBatchDirty(false);
+              setStatusMsg("全班儲存成功"); setTimeout(() => setStatusMsg(''), 2000);
           }
-          setIsBatchDirty(false);
-          setStatusMsg("全班儲存成功");
+      } catch (e) {
+          console.error('Save batch grades error:', e);
+          setStatusMsg("儲存失敗");
+      }
+  };
+
+  const handleExportBatchExcel = () => {
+      if (!window.XLSX || !xlsxLoaded) {
+          setStatusMsg('Excel 模組載入中，請稍後');
           setTimeout(() => setStatusMsg(''), 2000);
-      } catch (e) { setStatusMsg("儲存失敗"); }
+          return;
+      }
+      if (!batchRowsForDisplay.length) {
+          setStatusMsg('目前沒有可匯出的資料');
+          setTimeout(() => setStatusMsg(''), 2000);
+          return;
+      }
+
+      const rows = batchRowsForDisplay.map((row, index) => ({
+          '序號': index + 1,
+          '學號': row.student.id,
+          '姓名': row.student.name || '',
+          '班級': row.dateGrades.class || '',
+          '國文': row.dateGrades.chi ?? '',
+          '英文': row.dateGrades.eng ?? '',
+          '數學': row.dateGrades.math ?? '',
+          '總分': row.dateGrades.total ?? '',
+          'PR': row.prValue === '-' ? '' : row.prValue,
+          '錄取機率(%)': row.probValue === '-' ? '' : row.probValue,
+          '查詢次數': queryStatsById[row.student.id] || 0
+      }));
+
+      const worksheet = window.XLSX.utils.json_to_sheet(rows);
+      worksheet['!cols'] = [
+          { wch: 6 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 12 }, { wch: 10 }
+      ];
+
+      const workbook = window.XLSX.utils.book_new();
+      window.XLSX.utils.book_append_sheet(workbook, worksheet, '批量成績');
+
+      const safeClass = String(teacherClassFilter).replace(/[^\w\u4e00-\u9fa5-]/g, '');
+      const safeDate = String(batchDate || '').replace('/', '-');
+      window.XLSX.writeFile(workbook, `batch_${safeDate}_${safeClass}.xlsx`);
+      setStatusMsg('已下載批量 Excel');
+      setTimeout(() => setStatusMsg(''), 2000);
   };
 
   const handleParentSearch = async () => {
@@ -1806,7 +1791,10 @@ export default function App() {
         setViewData({ ...data, chartData: allChartData, average: avg, prob: studentProb });
         incrementQueryCount(data.id);
       } else { setSearchError('查無此學號'); }
-    } catch (e) { setSearchError('系統忙碌'); }
+    } catch (e) {
+      console.error('Parent search error:', e);
+      setSearchError('系統忙碌');
+    }
     setLoading(false);
   };
 
@@ -2065,6 +2053,28 @@ export default function App() {
       return computedRows;
   }, [mode, teacherViewMode, allStudentsData, batchDate, teacherClassFilter, getTestDateID, sortByPR, sortByProb, admissionProbabilities, studentGradeMapsByStudentId]);
 
+  const queryStatsRows = useMemo(() => {
+      const nameById = {};
+      allStudentsData.forEach((student) => {
+          nameById[student.id] = student.name || '';
+      });
+
+      return Object.entries(queryStatsById)
+          .map(([id, count]) => ({
+              id,
+              name: nameById[id] || '',
+              count: Number(count) || 0
+          }))
+          .sort((a, b) => b.count - a.count);
+  }, [queryStatsById, allStudentsData]);
+
+  const queryStatsLastResetText = useMemo(() => {
+      if (!queryStatsLastResetAt) return '尚未初始化';
+      const date = new Date(queryStatsLastResetAt);
+      if (Number.isNaN(date.getTime())) return '尚未初始化';
+      return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  }, [queryStatsLastResetAt]);
+
 
   const openStatsModal = (date, grades, className) => {
       setStatsModalData({
@@ -2127,7 +2137,10 @@ export default function App() {
       {/* Header */}
       <header className={`fixed top-0 w-full backdrop-blur-2xl z-30 border-b transition-all duration-300 ${darkMode ? 'bg-[#121a17]/88 border-emerald-200/10 shadow-lg shadow-black/25' : 'bg-white/40 border-white/60 shadow-[0_10px_35px_rgba(15,23,42,0.08)]'}`}>
         <div className="max-w-4xl mx-auto px-6 h-16 flex justify-between items-center relative z-10">
-          <div className="flex items-center gap-3 cursor-pointer group" onClick={() => { if (confirmDiscardBatchChanges()) setMode('landing'); }}>
+          <div
+            className="flex items-center gap-3 cursor-pointer group"
+            onClick={() => runWithBatchDiscardGuard(() => setMode('landing'))}
+          >
             <div className={`p-2 rounded-xl transition-transform group-hover:scale-105 duration-300 ${darkMode ? 'bg-emerald-500/10 text-emerald-200 ring-1 ring-emerald-300/35' : 'bg-white/74 text-emerald-700 ring-1 ring-white/90 shadow-sm'}`}><GraduationCap className="h-5 w-5" /></div>
             <div>
                 <h1 className={`text-2xl font-black tracking-widest font-serif uppercase leading-none bg-clip-text text-transparent ${darkMode ? 'bg-gradient-to-r from-emerald-50 via-emerald-200 to-lime-200' : 'bg-[linear-gradient(112deg,#0f172a_0%,#047857_34%,#0f766e_66%,#0369a1_100%)] drop-shadow-[0_1px_0_rgba(255,255,255,0.55)]'}`}>
@@ -2137,8 +2150,29 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-                <button onClick={() => { if (!confirmDiscardBatchChanges()) return; if (isAuthenticated) { setMode('teacher'); loadAllStudents(); } else { setMode('teacher_login'); } }} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/92 text-emerald-700 shadow-md shadow-slate-300/40 ring-1 ring-white/95') : 'text-slate-600 hover:text-slate-800 bg-white/52 hover:bg-white/70'}`}>{isAuthenticated ? '後台' : '老師'}</button>
-                <button onClick={() => { if (!confirmDiscardBatchChanges()) return; setViewData(null); setSearchError(''); setMode('parent'); }} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/92 text-emerald-700 shadow-md shadow-slate-300/40 ring-1 ring-white/95') : 'text-slate-600 hover:text-slate-800 bg-white/52 hover:bg-white/70'}`}>家長</button>
+                <button
+                  onClick={() => runWithBatchDiscardGuard(() => {
+                    if (isAuthenticated) {
+                      setMode('teacher');
+                      loadAllStudents();
+                    } else {
+                      setMode('teacher_login');
+                    }
+                  })}
+                  className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/92 text-emerald-700 shadow-md shadow-slate-300/40 ring-1 ring-white/95') : 'text-slate-600 hover:text-slate-800 bg-white/52 hover:bg-white/70'}`}
+                >
+                  {isAuthenticated ? '後台' : '老師'}
+                </button>
+                <button
+                  onClick={() => runWithBatchDiscardGuard(() => {
+                    setViewData(null);
+                    setSearchError('');
+                    setMode('parent');
+                  })}
+                  className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/92 text-emerald-700 shadow-md shadow-slate-300/40 ring-1 ring-white/95') : 'text-slate-600 hover:text-slate-800 bg-white/52 hover:bg-white/70'}`}
+                >
+                  家長
+                </button>
             {isAuthenticated && (
                 <button onClick={handleLogout} className="ml-1 p-2 text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-full transition-colors" title="登出"><LogOut className="w-5 h-5"/></button>
             )}
@@ -2159,12 +2193,29 @@ export default function App() {
                 <ExamCountdown isDarkMode={darkMode} />
                   
                 <div className="w-full max-w-xl grid grid-cols-1 md:grid-cols-2 gap-3 mt-6">
-                   <button onClick={() => { if (!confirmDiscardBatchChanges()) return; if (isAuthenticated) { setMode('teacher'); loadAllStudents(); } else { setMode('teacher_login'); } }} className="group w-full p-5 rounded-[1.45rem] border flex items-center gap-4 transition-all duration-200 backdrop-blur-xl bg-white/76 border-white/85 hover:bg-white/92 hover:border-orange-200/90">
+                   <button
+                      onClick={() => runWithBatchDiscardGuard(() => {
+                        if (isAuthenticated) {
+                          setMode('teacher');
+                          loadAllStudents();
+                        } else {
+                          setMode('teacher_login');
+                        }
+                      })}
+                      className="group w-full p-5 rounded-[1.45rem] border flex items-center gap-4 transition-all duration-200 backdrop-blur-xl bg-white/76 border-white/85 hover:bg-white/92 hover:border-orange-200/90"
+                    >
                       <div className="w-11 h-11 rounded-2xl flex items-center justify-center transition-colors bg-gradient-to-br from-indigo-100 to-sky-100 text-indigo-700"><LayoutDashboard className="w-5 h-5" /></div>
                       <div className="text-left flex-1"><h3 className="text-base font-black text-slate-800">老師通道</h3><p className="text-[11px] text-slate-500 mt-0.5">管理成績與設定</p></div>
                       <ChevronRight className="w-4.5 h-4.5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
                    </button>
-                   <button onClick={() => { if (!confirmDiscardBatchChanges()) return; setViewData(null); setSearchError(''); setMode('parent'); }} className="group w-full p-5 rounded-[1.45rem] border flex items-center gap-4 transition-all duration-200 backdrop-blur-xl bg-white/76 border-white/85 hover:bg-white/92 hover:border-sky-200/90">
+                   <button
+                      onClick={() => runWithBatchDiscardGuard(() => {
+                        setViewData(null);
+                        setSearchError('');
+                        setMode('parent');
+                      })}
+                      className="group w-full p-5 rounded-[1.45rem] border flex items-center gap-4 transition-all duration-200 backdrop-blur-xl bg-white/76 border-white/85 hover:bg-white/92 hover:border-sky-200/90"
+                    >
                       <div className="w-11 h-11 rounded-2xl flex items-center justify-center transition-colors bg-gradient-to-br from-sky-100 to-emerald-100 text-sky-700"><BarChart3 className="w-5 h-5" /></div>
                       <div className="text-left flex-1"><h3 className="text-base font-black text-slate-800">家長查詢</h3><p className="text-[11px] text-slate-500 mt-0.5">輸入學號查看分析</p></div>
                       <ChevronRight className="w-4.5 h-4.5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
@@ -2204,55 +2255,28 @@ export default function App() {
                 <div className={`flex flex-wrap gap-2 max-h-24 overflow-y-auto p-2 rounded-xl border mb-6 no-scrollbar shadow-inner ${darkMode ? 'bg-[#020617]/30 border-white/5' : 'bg-slate-50/50 border-slate-200/60'}`}>
                     {sortedAvailableDatesDesc.map(d => (
                         <div key={d} className={`flex items-center px-2.5 py-1 rounded-lg text-[10px] font-bold border shadow-sm ${darkMode ? 'bg-slate-800 text-slate-300 border-white/5' : 'bg-white text-slate-600 border-slate-100'}`}>
-                            {(weekendLabelByDate[d] || getWeekendDisplayLabel(d))} <button onClick={() => { setDeleteTarget(d); executeWithSecurity(confirmDeleteDate); }} className="ml-1.5 text-slate-400 hover:text-red-500"><X className="w-3 h-3"/></button>
+                            {(weekendLabelByDate[d] || getWeekendDisplayLabel(d))} <button onClick={() => { handleDeleteDate(d); executeWithSecurity(confirmDeleteDate); }} className="ml-1.5 text-slate-400 hover:text-red-500"><X className="w-3 h-3"/></button>
                         </div>
                     ))}
                 </div>
 
                 <div className={`flex p-1 rounded-xl mb-6 shadow-inner ${darkMode ? 'bg-[#020617]/50' : 'bg-slate-100/80'}`}>
-                     <button onClick={() => { if (teacherViewMode === 'batch' && isBatchDirty && !window.confirm('批量成績尚未儲存，確定切換到個人檢視嗎？')) return; setTeacherViewMode('single'); }} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${teacherViewMode==='single' ? (darkMode ? 'bg-slate-800 text-slate-200 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-700 shadow-sm') : 'text-slate-500'}`}>個人檢視</button>
-                     <button onClick={() => setTeacherViewMode('batch')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${teacherViewMode==='batch' ? (darkMode ? 'bg-slate-800 text-blue-400 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-blue-700 shadow-sm') : 'text-slate-500'}`}>批量檢視</button>
-                </div>
-
-                <div className={`mb-6 rounded-2xl border p-4 ${darkMode ? 'bg-[#020617]/45 border-white/10' : 'bg-white/75 border-slate-200/70'}`}>
-                    <div className="flex items-start justify-between gap-3">
-                        <div>
-                            <h4 className={`text-xs font-black tracking-[0.12em] uppercase ${darkMode ? 'text-emerald-200' : 'text-slate-700'}`}>查詢次數監控</h4>
-                            <p className={`text-[11px] mt-1 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                                每 3 天自動重置，上次重置：{queryStatsResetLabel}
-                            </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <div className={`text-[11px] font-black px-3 py-1 rounded-full ${darkMode ? 'bg-white/10 text-slate-200' : 'bg-slate-100 text-slate-700'}`}>
-                                總查詢 {totalQueryCount}
-                            </div>
-                            <button onClick={handleResetQueryStats} disabled={queryStatsLoading} className={`px-3 py-1.5 rounded-lg text-[11px] font-black transition-colors ${darkMode ? 'bg-rose-500/20 text-rose-200 hover:bg-rose-500/30 disabled:opacity-50' : 'bg-rose-100 text-rose-700 hover:bg-rose-200 disabled:opacity-50'}`}>
-                                手動重置
-                            </button>
-                        </div>
-                    </div>
-                    {queryStatsRows.length === 0 ? (
-                        <p className={`mt-3 text-xs font-semibold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>目前尚無查詢紀錄</p>
-                    ) : (
-                        <div className={`mt-3 max-h-40 overflow-y-auto rounded-xl border ${darkMode ? 'border-white/10 bg-[#020617]/55' : 'border-slate-200 bg-white/80'}`}>
-                            <table className="w-full text-xs">
-                                <thead className={`${darkMode ? 'text-slate-400 bg-white/5' : 'text-slate-500 bg-slate-50'}`}>
-                                    <tr>
-                                        <th className="px-3 py-2 text-left font-bold">學號</th>
-                                        <th className="px-3 py-2 text-right font-bold">查詢次數</th>
-                                    </tr>
-                                </thead>
-                                <tbody className={`${darkMode ? 'divide-y divide-white/5' : 'divide-y divide-slate-100'}`}>
-                                    {queryStatsRows.map((row) => (
-                                        <tr key={row.id}>
-                                            <td className={`px-3 py-2 font-mono font-bold ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}>{row.id}</td>
-                                            <td className={`px-3 py-2 text-right font-black ${darkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>{row.count}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    )}
+                     <button
+                       onClick={() => {
+                         if (teacherViewMode === 'single') return;
+                         if (!confirmDiscardBatchChanges()) return;
+                         setTeacherViewMode('single');
+                       }}
+                       className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${teacherViewMode==='single' ? (darkMode ? 'bg-slate-800 text-slate-200 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-700 shadow-sm') : 'text-slate-500'}`}
+                     >
+                       個人檢視
+                     </button>
+                     <button
+                       onClick={() => setTeacherViewMode('batch')}
+                       className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${teacherViewMode==='batch' ? (darkMode ? 'bg-slate-800 text-blue-400 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-blue-700 shadow-sm') : 'text-slate-500'}`}
+                     >
+                       批量檢視
+                     </button>
                 </div>
 
                 {teacherViewMode === 'single' && (
@@ -2291,17 +2315,21 @@ export default function App() {
                                 <button onClick={() => setSortByProb(!sortByProb)} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByProb ? 'bg-blue-600 text-white shadow-blue-500/30' : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
                                     <Percent className="w-3.5 h-3.5" /> 機率排序
                                 </button>
-                                <button onClick={handleExportBatchExcel} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 border ${darkMode ? 'bg-emerald-500/15 text-emerald-200 border-emerald-300/20 hover:bg-emerald-500/25' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'}`}>
-                                    <FileSpreadsheet className="w-3.5 h-3.5" /> 匯出Excel
+                                <button onClick={handleExportBatchExcel} className={`px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1 border ${darkMode ? 'bg-slate-800 text-slate-300 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
+                                    <FileSpreadsheet className="w-3.5 h-3.5" /> 下載 Excel
                                 </button>
-                                <button onClick={handleSaveBatchGrades} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-[0.98] flex items-center gap-1 ${isBatchDirty ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/45 hover:bg-rose-400 animate-[pulse_1.15s_ease-in-out_infinite] ring-2 ring-rose-200/80' : 'bg-blue-600 text-white shadow-md shadow-blue-600/20 hover:bg-blue-500'}`}>
-                                    <Save className="w-3.5 h-3.5"/> {isBatchDirty ? '儲存變更' : '儲存'}
+                                <button
+                                  onClick={handleSaveBatchGrades}
+                                  className={`text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-md transition-all active:scale-[0.98] flex items-center gap-1 ${
+                                    isBatchDirty
+                                      ? 'bg-orange-500 hover:bg-orange-400 animate-pulse shadow-orange-500/30'
+                                      : 'bg-blue-600 hover:bg-blue-500 shadow-blue-600/20'
+                                  }`}
+                                >
+                                  <Save className="w-3.5 h-3.5"/> {isBatchDirty ? '儲存變更' : '儲存'}
                                 </button>
                             </div>
                         </div>
-                        {isBatchDirty && (
-                            <div className="mb-3 text-[11px] font-black tracking-wide text-rose-600 animate-pulse">尚有未儲存變更，請先按「儲存變更」。</div>
-                        )}
 
                         {/* Class Filter Tabs */}
                         <div className={`flex p-1 mb-4 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
@@ -2312,24 +2340,24 @@ export default function App() {
 
                         {/* Fix: Overflow handling for mobile */}
                         <div className={`overflow-x-auto rounded-xl border shadow-inner ${darkMode ? 'border-white/5 bg-[#020617]/30' : 'border-slate-200 bg-white'}`}>
-                            <table className="w-full text-sm text-left min-w-[780px] table-fixed">
+                            <table className="w-full text-sm text-left min-w-[740px] table-fixed">
                                 <colgroup>
-                                    <col className="w-10" />
-                                    <col className="w-24" />
-                                    <col className="w-28" />
-                                    <col className="w-16" />
-                                    <col className="w-[4.6rem]" />
-                                    <col className="w-[4.6rem]" />
-                                    <col className="w-[4.6rem]" />
-                                    <col className="w-[4.8rem]" />
-                                    <col className="w-[3.9rem]" />
-                                    <col className="w-[6.4rem]" />
+                                    <col className="w-9" />
+                                    <col className="w-[5.4rem]" />
+                                    <col className="w-[6.6rem]" />
+                                    <col className="w-[4.3rem]" />
+                                    <col className="w-[4.2rem]" />
+                                    <col className="w-[4.2rem]" />
+                                    <col className="w-[4.2rem]" />
+                                    <col className="w-[4.4rem]" />
+                                    <col className="w-[3.5rem]" />
+                                    <col className="w-[5.8rem]" />
                                 </colgroup>
                                 <thead className={`text-[10px] uppercase sticky top-0 z-10 ${darkMode ? 'text-slate-400 bg-slate-900' : 'text-slate-400 bg-slate-50'}`}>
                                     <tr>
                                         <th className="px-2 py-3 text-center font-bold">#</th>
-                                        <th className="px-2 py-3 font-bold">學號</th>
-                                        <th className="px-2 py-3 font-bold">姓名</th>
+                                        <th className="px-2 py-3 text-center font-bold">學號</th>
+                                        <th className="px-2 py-3 text-center font-bold">姓名</th>
                                         <th className="px-2 py-3 text-center text-slate-500">班級</th>
                                         <th className="px-1 py-3 text-center text-rose-500">國文</th>
                                         <th className="px-1 py-3 text-center text-amber-500">英文</th>
@@ -2357,6 +2385,50 @@ export default function App() {
                                 </tbody>
                             </table>
                         </div>
+
+                        <div className={`mt-4 rounded-2xl border p-4 ${darkMode ? 'bg-slate-900/40 border-white/10' : 'bg-white/75 border-slate-200/80'}`}>
+                            <div className="flex items-center justify-between mb-3">
+                                <div className="flex items-center gap-2">
+                                    <Info className={`w-4 h-4 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`} />
+                                    <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>查詢次數監控</h4>
+                                </div>
+                                <button
+                                  onClick={handleResetQueryStats}
+                                  disabled={queryStatsLoading}
+                                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors ${
+                                    queryStatsLoading
+                                      ? 'bg-slate-300 text-white cursor-not-allowed'
+                                      : 'bg-red-500 text-white hover:bg-red-400'
+                                  }`}
+                                >
+                                  手動重置
+                                </button>
+                            </div>
+                            <div className={`text-[11px] font-semibold mb-2 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
+                                上次重置：{queryStatsLastResetText}
+                            </div>
+                            <div className={`rounded-xl border overflow-hidden ${darkMode ? 'border-white/10' : 'border-slate-200'}`}>
+                                <div className={`grid grid-cols-[6rem_1fr_5rem] px-3 py-2 text-[10px] font-bold tracking-wide ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>
+                                    <span className="text-center">學號</span>
+                                    <span className="text-center">姓名</span>
+                                    <span className="text-center">次數</span>
+                                </div>
+                                <div className={`${darkMode ? 'bg-slate-900/50' : 'bg-white'}`}>
+                                    {(queryStatsRows.slice(0, 12)).map((row) => (
+                                        <div key={row.id} className={`grid grid-cols-[6rem_1fr_5rem] px-3 py-2 text-xs border-t items-center ${darkMode ? 'border-white/5 text-slate-200' : 'border-slate-100 text-slate-700'}`}>
+                                            <span className="font-mono text-center">{row.id}</span>
+                                            <span className="truncate text-center">{row.name || '-'}</span>
+                                            <span className="font-black text-center text-emerald-600">{row.count}</span>
+                                        </div>
+                                    ))}
+                                    {!queryStatsRows.length && (
+                                        <div className={`px-3 py-3 text-center text-xs ${darkMode ? 'text-slate-400' : 'text-slate-400'}`}>
+                                            目前尚無查詢紀錄
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 )}
             </div>
@@ -2372,7 +2444,7 @@ export default function App() {
                       <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border mt-1 inline-block opacity-60 ${darkMode ? 'border-slate-600 text-slate-400' : 'border-slate-200 text-slate-400'}`}>{currentStudentId}</span>
                   </div>
                   <div className="flex gap-2">
-                    <button onClick={() => { setStudentToDelete({ id: currentStudentId, name: studentName }); executeWithSecurity(confirmDeleteStudent); }} className="bg-red-500/10 text-red-500 p-2.5 rounded-xl hover:bg-red-500/20 transition-colors active:scale-95"><Trash2 className="w-5 h-5"/></button>
+                    <button onClick={() => { handleDeleteStudent(); executeWithSecurity(confirmDeleteStudent); }} className="bg-red-500/10 text-red-500 p-2.5 rounded-xl hover:bg-red-500/20 transition-colors active:scale-95"><Trash2 className="w-5 h-5"/></button>
                     <button onClick={handleSaveGrades} className="bg-blue-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-blue-500 shadow-lg shadow-blue-900/20 transition-all active:scale-95 flex items-center gap-2"><Save className="w-4 h-4"/> 儲存</button>
                   </div>
                 </div>
@@ -2550,6 +2622,32 @@ export default function App() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {showAddStudentModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowAddStudentModal(false)}>
+              <div className={`rounded-[2.2rem] p-7 w-full max-w-sm ${darkMode ? 'bg-slate-800 border border-white/10' : 'bg-white shadow-2xl'}`} onClick={e => e.stopPropagation()}>
+                  <h3 className={`text-lg font-black mb-4 ${darkMode ? 'text-white' : 'text-slate-800'}`}>新增學生</h3>
+                  <p className={`text-xs mb-4 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>輸入學號後可建立新學生，或載入既有資料。</p>
+                  <input
+                    type="text"
+                    value={newStudentIdInput}
+                    onChange={(e) => setNewStudentIdInput(e.target.value.toUpperCase())}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddNewStudent()}
+                    className={`w-full p-3 rounded-xl text-center text-lg font-black tracking-widest uppercase outline-none border ${
+                      darkMode
+                        ? 'bg-slate-900 border-white/10 text-white focus:border-blue-400'
+                        : 'bg-slate-50 border-slate-200 text-slate-700 focus:bg-white focus:border-blue-300'
+                    }`}
+                    placeholder="輸入學號"
+                    autoFocus
+                  />
+                  <div className="flex justify-end gap-2 mt-5">
+                      <button onClick={() => setShowAddStudentModal(false)} className={`px-4 py-2 rounded-lg text-sm font-bold ${darkMode ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-500 hover:bg-slate-100'}`}>取消</button>
+                      <button onClick={handleAddNewStudent} className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold">確認</button>
+                  </div>
+              </div>
           </div>
         )}
 

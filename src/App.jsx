@@ -25,6 +25,7 @@ const CLASS_DEFS = [
 const RAW_STUDENT_RECORDS = [];
 const ENCODED_PASSWORDS = ['QmVuMTEwNzA1', 'MjQ5MTIxMg=='];
 const SECURITY_CODE = '1107';
+const QUERY_COUNT_RESET_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000;
 
 const realFirebaseConfig = {
   apiKey: "AIzaSyChK1IiE6YhHZ_DdxXzpxi8vmBA9A9So9A",
@@ -619,6 +620,10 @@ export default function App() {
   const [admissionProbabilities, setAdmissionProbabilities] = useState({});
 
   const [xlsxLoaded, setXlsxLoaded] = useState(false);
+  const [isBatchDirty, setIsBatchDirty] = useState(false);
+  const [queryStatsById, setQueryStatsById] = useState({});
+  const [queryStatsLastResetAt, setQueryStatsLastResetAt] = useState('');
+  const [queryStatsLoading, setQueryStatsLoading] = useState(false);
   const darkMode = false;
 
   // 預先建立依照考試日期排序好的日期清單，避免在 render 階段重複 sort
@@ -667,6 +672,32 @@ export default function App() {
       });
       return gradeMaps;
   }, [allStudentsData, getTestDateID]);
+
+  const queryStatsRows = useMemo(
+      () =>
+          Object.entries(queryStatsById)
+              .map(([id, count]) => ({ id, count: Number(count) || 0 }))
+              .filter((row) => row.id && row.count > 0)
+              .sort((a, b) => b.count - a.count || a.id.localeCompare(b.id)),
+      [queryStatsById]
+  );
+
+  const totalQueryCount = useMemo(
+      () => queryStatsRows.reduce((sum, row) => sum + row.count, 0),
+      [queryStatsRows]
+  );
+
+  const queryStatsResetLabel = useMemo(() => {
+      if (!queryStatsLastResetAt) return '-';
+      const parsed = new Date(queryStatsLastResetAt);
+      if (Number.isNaN(parsed.getTime())) return '-';
+      return parsed.toLocaleString('zh-TW', {
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit'
+      });
+  }, [queryStatsLastResetAt]);
 
   useEffect(() => {
       const storedAuth = localStorage.getItem('teacher_auth');
@@ -789,6 +820,31 @@ export default function App() {
       setBatchDate(latestDate);
   }, [mode, sortedAvailableDatesAsc]);
 
+  const hasPendingBatchChanges = mode === 'teacher' && teacherViewMode === 'batch' && isBatchDirty;
+
+  const confirmDiscardBatchChanges = useCallback(() => {
+      if (!hasPendingBatchChanges) return true;
+      return window.confirm('批量成績尚未儲存，確定要離開目前頁面嗎？');
+  }, [hasPendingBatchChanges]);
+
+  useEffect(() => {
+      if (!hasPendingBatchChanges) return undefined;
+
+      const handleBeforeUnload = (e) => {
+          e.preventDefault();
+          e.returnValue = '';
+      };
+
+      window.addEventListener('beforeunload', handleBeforeUnload);
+      return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasPendingBatchChanges]);
+
+  useEffect(() => {
+      if (mode === 'teacher' && isAuthenticated) {
+          loadQueryStats();
+      }
+  }, [mode, isAuthenticated, loadQueryStats]);
+
   const loadDates = async () => {
       if (!db) return [...availableDates].sort(customDateSort);
       try {
@@ -807,6 +863,99 @@ export default function App() {
           return [...availableDates].sort(customDateSort);
       }
   };
+
+  const shouldResetQueryStats = useCallback((lastResetAt) => {
+      if (!lastResetAt) return true;
+      const ts = new Date(lastResetAt).getTime();
+      if (Number.isNaN(ts)) return true;
+      return Date.now() - ts >= QUERY_COUNT_RESET_INTERVAL_MS;
+  }, []);
+
+  const loadQueryStats = useCallback(async () => {
+      if (!db) {
+          setQueryStatsById({});
+          setQueryStatsLastResetAt('');
+          return;
+      }
+
+      setQueryStatsLoading(true);
+      try {
+          const nowIso = new Date().toISOString();
+          const queryStatsDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'query_stats_v1');
+          const docSnap = await getDoc(queryStatsDocRef);
+          const raw = docSnap.exists() ? docSnap.data() : {};
+          let counts = (raw.counts && typeof raw.counts === 'object') ? raw.counts : {};
+          let lastResetAt = raw.lastResetAt || nowIso;
+
+          if (shouldResetQueryStats(lastResetAt)) {
+              counts = {};
+              lastResetAt = nowIso;
+              await setDoc(queryStatsDocRef, { counts, lastResetAt, updatedAt: nowIso }, { merge: true });
+          }
+
+          setQueryStatsById(counts);
+          setQueryStatsLastResetAt(lastResetAt);
+      } catch (e) {
+          console.error('Load query stats error:', e);
+      } finally {
+          setQueryStatsLoading(false);
+      }
+  }, [shouldResetQueryStats]);
+
+  const incrementQueryCount = useCallback(async (studentId) => {
+      const normalizedId = String(studentId || '').toUpperCase().trim();
+      if (!normalizedId) return;
+
+      setQueryStatsById((prev) => ({ ...prev, [normalizedId]: (prev[normalizedId] || 0) + 1 }));
+
+      if (!db) return;
+
+      try {
+          const nowIso = new Date().toISOString();
+          const queryStatsDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'query_stats_v1');
+          const docSnap = await getDoc(queryStatsDocRef);
+          const raw = docSnap.exists() ? docSnap.data() : {};
+          let counts = (raw.counts && typeof raw.counts === 'object') ? raw.counts : {};
+          let lastResetAt = raw.lastResetAt || nowIso;
+
+          if (shouldResetQueryStats(lastResetAt)) {
+              counts = {};
+              lastResetAt = nowIso;
+          }
+
+          counts[normalizedId] = (Number(counts[normalizedId]) || 0) + 1;
+          await setDoc(queryStatsDocRef, { counts, lastResetAt, updatedAt: nowIso }, { merge: true });
+
+          setQueryStatsById(counts);
+          setQueryStatsLastResetAt(lastResetAt);
+      } catch (e) {
+          console.error('Increment query count error:', e);
+      }
+  }, [shouldResetQueryStats]);
+
+  const handleResetQueryStats = useCallback(async () => {
+      if (!window.confirm('確定要手動重置所有查詢次數嗎？')) return;
+
+      const nowIso = new Date().toISOString();
+      setQueryStatsLoading(true);
+      try {
+          if (db) {
+              const queryStatsDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'query_stats_v1');
+              await setDoc(queryStatsDocRef, { counts: {}, lastResetAt: nowIso, updatedAt: nowIso }, { merge: true });
+          }
+
+          setQueryStatsById({});
+          setQueryStatsLastResetAt(nowIso);
+          setStatusMsg('查詢次數已重置');
+          setTimeout(() => setStatusMsg(''), 2000);
+      } catch (e) {
+          console.error('Reset query stats error:', e);
+          setStatusMsg('重置失敗');
+          setTimeout(() => setStatusMsg(''), 2000);
+      } finally {
+          setQueryStatsLoading(false);
+      }
+  }, []);
 
   const executeWithSecurity = (action) => {
       setPendingAction(() => action);
@@ -969,7 +1118,12 @@ export default function App() {
       } else { setLoginError(true); }
   };
 
-  const handleLogout = () => { setIsAuthenticated(false); localStorage.removeItem('teacher_auth'); setMode('landing'); };
+  const handleLogout = () => {
+      if (!confirmDiscardBatchChanges()) return;
+      setIsAuthenticated(false);
+      localStorage.removeItem('teacher_auth');
+      setMode('landing');
+  };
 
   const loadAllStudents = async () => {
       setLoading(true);
@@ -986,6 +1140,7 @@ export default function App() {
           }
           const sortedStudents = Object.values(studentsMap).sort((a,b) => a.id.localeCompare(b.id));
           setAllStudentsData(sortedStudents);
+          setIsBatchDirty(false);
       } catch (e) { console.error("Load error:", e); }
       setLoading(false);
   };
@@ -1050,6 +1205,7 @@ export default function App() {
   };
 
   const handleBatchGradeChange = useCallback((studentId, subject, value) => {
+      setIsBatchDirty(true);
       setAllStudentsData(prev => prev.map(s => {
           if (s.id !== studentId) return s;
           const currentGrades = s.grades || {};
@@ -1266,6 +1422,7 @@ export default function App() {
 
         const sortedStudents = Object.values(newStudentsMap).sort((a,b) => a.id.localeCompare(b.id));
         setAllStudentsData([...sortedStudents]); 
+        setIsBatchDirty(true);
         
         setStatusMsg(`匯入 ${importCount} 筆資料 (最新日期: ${lastImportedDate})`);
       } catch (error) { console.error(error); setStatusMsg("匯入失敗: 格式錯誤"); }
@@ -1332,7 +1489,11 @@ export default function App() {
                   updated = true;
               }
           });
-          if(updated) { setStatusMsg(`已貼上 ${rows.length} 筆資料`); setTimeout(() => setStatusMsg(''), 2000); }
+          if(updated) {
+              setIsBatchDirty(true);
+              setStatusMsg(`已貼上 ${rows.length} 筆資料`);
+              setTimeout(() => setStatusMsg(''), 2000);
+          }
           return newData;
       });
   }, [batchDate]); // Added batchDate dependency
@@ -1440,14 +1601,79 @@ export default function App() {
     } catch (e) { setStatusMsg('儲存失敗'); }
   };
 
+  const handleExportBatchExcel = () => {
+      if (!xlsxLoaded || !window.XLSX) {
+          setStatusMsg('Excel 套件載入中，請稍後再試');
+          setTimeout(() => setStatusMsg(''), 2000);
+          return;
+      }
+
+      if (!batchRowsForDisplay.length) {
+          setStatusMsg('目前批量頁面沒有可下載的資料');
+          setTimeout(() => setStatusMsg(''), 2000);
+          return;
+      }
+
+      const displayDateLabel = weekendLabelByDate[batchDate] || batchDate || '-';
+      const displayRows = batchRowsForDisplay.map((row, index) => ({
+          序號: index + 1,
+          日期: displayDateLabel,
+          學號: row.student.id,
+          姓名: row.student.name,
+          班級: row.dateGrades.class || 'A班',
+          國文: row.dateGrades.chi || '',
+          英文: row.dateGrades.eng || '',
+          數學: row.dateGrades.math || '',
+          總分: row.dateGrades.total || '',
+          PR: row.prValue !== '-' ? row.prValue : '',
+          錄取機率: row.probValue !== '-' ? `${row.probValue}%` : ''
+      }));
+
+      const fullRows = [];
+      allStudentsData.forEach((student) => {
+          Object.entries(student.grades || {}).forEach(([date, grade]) => {
+              fullRows.push({
+                  學號: student.id,
+                  姓名: student.name,
+                  日期: weekendLabelByDate[date] || date,
+                  班級: grade.class || 'A班',
+                  國文: grade.chi || '',
+                  英文: grade.eng || '',
+                  數學: grade.math || '',
+                  總分: grade.total || ''
+              });
+          });
+      });
+
+      const wb = window.XLSX.utils.book_new();
+      const wsDisplay = window.XLSX.utils.json_to_sheet(displayRows);
+      window.XLSX.utils.book_append_sheet(wb, wsDisplay, '批量顯示');
+
+      if (fullRows.length > 0) {
+          const wsAll = window.XLSX.utils.json_to_sheet(fullRows);
+          window.XLSX.utils.book_append_sheet(wb, wsAll, '完整資料');
+      }
+
+      const safeDate = (batchDate || 'all').replace(/\//g, '-');
+      const safeClass = teacherClassFilter.replace(/[^\w\u4e00-\u9fa5]/g, '');
+      const stamp = new Date().toISOString().slice(0, 10);
+      const fileName = `batch_${safeDate}_${safeClass}_${stamp}.xlsx`;
+      window.XLSX.writeFile(wb, fileName);
+
+      setStatusMsg(`已下載 ${fileName}`);
+      setTimeout(() => setStatusMsg(''), 2000);
+  };
+
   const handleSaveBatchGrades = async () => {
       setStatusMsg("批次儲存中...");
       try {
           if (db) {
               const batchPromises = allStudentsData.map(student => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${student.id}`), { id: student.id, name: student.name, grades: student.grades, lastUpdated: new Date().toISOString() }, { merge: true }));
               await Promise.all(batchPromises);
-              setStatusMsg("全班儲存成功"); setTimeout(() => setStatusMsg(''), 2000);
           }
+          setIsBatchDirty(false);
+          setStatusMsg("全班儲存成功");
+          setTimeout(() => setStatusMsg(''), 2000);
       } catch (e) { setStatusMsg("儲存失敗"); }
   };
 
@@ -1568,6 +1794,7 @@ export default function App() {
         }
 
         setViewData({ ...data, chartData: allChartData, average: avg, prob: studentProb });
+        incrementQueryCount(data.id);
       } else { setSearchError('查無此學號'); }
     } catch (e) { setSearchError('系統忙碌'); }
     setLoading(false);
@@ -1890,7 +2117,7 @@ export default function App() {
       {/* Header */}
       <header className={`fixed top-0 w-full backdrop-blur-2xl z-30 border-b transition-all duration-300 ${darkMode ? 'bg-[#121a17]/88 border-emerald-200/10 shadow-lg shadow-black/25' : 'bg-white/40 border-white/60 shadow-[0_10px_35px_rgba(15,23,42,0.08)]'}`}>
         <div className="max-w-4xl mx-auto px-6 h-16 flex justify-between items-center relative z-10">
-          <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setMode('landing')}>
+          <div className="flex items-center gap-3 cursor-pointer group" onClick={() => { if (confirmDiscardBatchChanges()) setMode('landing'); }}>
             <div className={`p-2 rounded-xl transition-transform group-hover:scale-105 duration-300 ${darkMode ? 'bg-emerald-500/10 text-emerald-200 ring-1 ring-emerald-300/35' : 'bg-white/74 text-emerald-700 ring-1 ring-white/90 shadow-sm'}`}><GraduationCap className="h-5 w-5" /></div>
             <div>
                 <h1 className={`text-2xl font-black tracking-widest font-serif uppercase leading-none bg-clip-text text-transparent ${darkMode ? 'bg-gradient-to-r from-emerald-50 via-emerald-200 to-lime-200' : 'bg-[linear-gradient(112deg,#0f172a_0%,#047857_34%,#0f766e_66%,#0369a1_100%)] drop-shadow-[0_1px_0_rgba(255,255,255,0.55)]'}`}>
@@ -1900,8 +2127,8 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-                <button onClick={() => { if (isAuthenticated) { setMode('teacher'); loadAllStudents(); } else { setMode('teacher_login'); } }} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/92 text-emerald-700 shadow-md shadow-slate-300/40 ring-1 ring-white/95') : 'text-slate-600 hover:text-slate-800 bg-white/52 hover:bg-white/70'}`}>{isAuthenticated ? '後台' : '老師'}</button>
-                <button onClick={() => { setViewData(null); setSearchError(''); setMode('parent'); }} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/92 text-emerald-700 shadow-md shadow-slate-300/40 ring-1 ring-white/95') : 'text-slate-600 hover:text-slate-800 bg-white/52 hover:bg-white/70'}`}>家長</button>
+                <button onClick={() => { if (!confirmDiscardBatchChanges()) return; if (isAuthenticated) { setMode('teacher'); loadAllStudents(); } else { setMode('teacher_login'); } }} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/92 text-emerald-700 shadow-md shadow-slate-300/40 ring-1 ring-white/95') : 'text-slate-600 hover:text-slate-800 bg-white/52 hover:bg-white/70'}`}>{isAuthenticated ? '後台' : '老師'}</button>
+                <button onClick={() => { if (!confirmDiscardBatchChanges()) return; setViewData(null); setSearchError(''); setMode('parent'); }} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/92 text-emerald-700 shadow-md shadow-slate-300/40 ring-1 ring-white/95') : 'text-slate-600 hover:text-slate-800 bg-white/52 hover:bg-white/70'}`}>家長</button>
             {isAuthenticated && (
                 <button onClick={handleLogout} className="ml-1 p-2 text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-full transition-colors" title="登出"><LogOut className="w-5 h-5"/></button>
             )}
@@ -1922,12 +2149,12 @@ export default function App() {
                 <ExamCountdown isDarkMode={darkMode} />
                   
                 <div className="w-full max-w-xl grid grid-cols-1 md:grid-cols-2 gap-3 mt-6">
-                   <button onClick={() => { if (isAuthenticated) { setMode('teacher'); loadAllStudents(); } else { setMode('teacher_login'); } }} className="group w-full p-5 rounded-[1.45rem] border flex items-center gap-4 transition-all duration-200 backdrop-blur-xl bg-white/76 border-white/85 hover:bg-white/92 hover:border-orange-200/90">
+                   <button onClick={() => { if (!confirmDiscardBatchChanges()) return; if (isAuthenticated) { setMode('teacher'); loadAllStudents(); } else { setMode('teacher_login'); } }} className="group w-full p-5 rounded-[1.45rem] border flex items-center gap-4 transition-all duration-200 backdrop-blur-xl bg-white/76 border-white/85 hover:bg-white/92 hover:border-orange-200/90">
                       <div className="w-11 h-11 rounded-2xl flex items-center justify-center transition-colors bg-gradient-to-br from-indigo-100 to-sky-100 text-indigo-700"><LayoutDashboard className="w-5 h-5" /></div>
                       <div className="text-left flex-1"><h3 className="text-base font-black text-slate-800">老師通道</h3><p className="text-[11px] text-slate-500 mt-0.5">管理成績與設定</p></div>
                       <ChevronRight className="w-4.5 h-4.5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
                    </button>
-                   <button onClick={() => { setViewData(null); setSearchError(''); setMode('parent'); }} className="group w-full p-5 rounded-[1.45rem] border flex items-center gap-4 transition-all duration-200 backdrop-blur-xl bg-white/76 border-white/85 hover:bg-white/92 hover:border-sky-200/90">
+                   <button onClick={() => { if (!confirmDiscardBatchChanges()) return; setViewData(null); setSearchError(''); setMode('parent'); }} className="group w-full p-5 rounded-[1.45rem] border flex items-center gap-4 transition-all duration-200 backdrop-blur-xl bg-white/76 border-white/85 hover:bg-white/92 hover:border-sky-200/90">
                       <div className="w-11 h-11 rounded-2xl flex items-center justify-center transition-colors bg-gradient-to-br from-sky-100 to-emerald-100 text-sky-700"><BarChart3 className="w-5 h-5" /></div>
                       <div className="text-left flex-1"><h3 className="text-base font-black text-slate-800">家長查詢</h3><p className="text-[11px] text-slate-500 mt-0.5">輸入學號查看分析</p></div>
                       <ChevronRight className="w-4.5 h-4.5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
@@ -1973,8 +2200,49 @@ export default function App() {
                 </div>
 
                 <div className={`flex p-1 rounded-xl mb-6 shadow-inner ${darkMode ? 'bg-[#020617]/50' : 'bg-slate-100/80'}`}>
-                     <button onClick={() => setTeacherViewMode('single')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${teacherViewMode==='single' ? (darkMode ? 'bg-slate-800 text-slate-200 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-700 shadow-sm') : 'text-slate-500'}`}>個人檢視</button>
+                     <button onClick={() => { if (teacherViewMode === 'batch' && isBatchDirty && !window.confirm('批量成績尚未儲存，確定切換到個人檢視嗎？')) return; setTeacherViewMode('single'); }} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${teacherViewMode==='single' ? (darkMode ? 'bg-slate-800 text-slate-200 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-700 shadow-sm') : 'text-slate-500'}`}>個人檢視</button>
                      <button onClick={() => setTeacherViewMode('batch')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${teacherViewMode==='batch' ? (darkMode ? 'bg-slate-800 text-blue-400 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-blue-700 shadow-sm') : 'text-slate-500'}`}>批量檢視</button>
+                </div>
+
+                <div className={`mb-6 rounded-2xl border p-4 ${darkMode ? 'bg-[#020617]/45 border-white/10' : 'bg-white/75 border-slate-200/70'}`}>
+                    <div className="flex items-start justify-between gap-3">
+                        <div>
+                            <h4 className={`text-xs font-black tracking-[0.12em] uppercase ${darkMode ? 'text-emerald-200' : 'text-slate-700'}`}>查詢次數監控</h4>
+                            <p className={`text-[11px] mt-1 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                每 3 天自動重置，上次重置：{queryStatsResetLabel}
+                            </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <div className={`text-[11px] font-black px-3 py-1 rounded-full ${darkMode ? 'bg-white/10 text-slate-200' : 'bg-slate-100 text-slate-700'}`}>
+                                總查詢 {totalQueryCount}
+                            </div>
+                            <button onClick={handleResetQueryStats} disabled={queryStatsLoading} className={`px-3 py-1.5 rounded-lg text-[11px] font-black transition-colors ${darkMode ? 'bg-rose-500/20 text-rose-200 hover:bg-rose-500/30 disabled:opacity-50' : 'bg-rose-100 text-rose-700 hover:bg-rose-200 disabled:opacity-50'}`}>
+                                手動重置
+                            </button>
+                        </div>
+                    </div>
+                    {queryStatsRows.length === 0 ? (
+                        <p className={`mt-3 text-xs font-semibold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>目前尚無查詢紀錄</p>
+                    ) : (
+                        <div className={`mt-3 max-h-40 overflow-y-auto rounded-xl border ${darkMode ? 'border-white/10 bg-[#020617]/55' : 'border-slate-200 bg-white/80'}`}>
+                            <table className="w-full text-xs">
+                                <thead className={`${darkMode ? 'text-slate-400 bg-white/5' : 'text-slate-500 bg-slate-50'}`}>
+                                    <tr>
+                                        <th className="px-3 py-2 text-left font-bold">學號</th>
+                                        <th className="px-3 py-2 text-right font-bold">查詢次數</th>
+                                    </tr>
+                                </thead>
+                                <tbody className={`${darkMode ? 'divide-y divide-white/5' : 'divide-y divide-slate-100'}`}>
+                                    {queryStatsRows.map((row) => (
+                                        <tr key={row.id}>
+                                            <td className={`px-3 py-2 font-mono font-bold ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}>{row.id}</td>
+                                            <td className={`px-3 py-2 text-right font-black ${darkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>{row.count}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
                 </div>
 
                 {teacherViewMode === 'single' && (
@@ -2013,9 +2281,17 @@ export default function App() {
                                 <button onClick={() => setSortByProb(!sortByProb)} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByProb ? 'bg-blue-600 text-white shadow-blue-500/30' : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
                                     <Percent className="w-3.5 h-3.5" /> 機率排序
                                 </button>
-                                <button onClick={handleSaveBatchGrades} className="bg-blue-600 text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-md shadow-blue-600/20 hover:bg-blue-500 transition-all active:scale-[0.98] flex items-center gap-1"><Save className="w-3.5 h-3.5"/> 儲存</button>
+                                <button onClick={handleExportBatchExcel} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 border ${darkMode ? 'bg-emerald-500/15 text-emerald-200 border-emerald-300/20 hover:bg-emerald-500/25' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'}`}>
+                                    <FileSpreadsheet className="w-3.5 h-3.5" /> 匯出Excel
+                                </button>
+                                <button onClick={handleSaveBatchGrades} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all active:scale-[0.98] flex items-center gap-1 ${isBatchDirty ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/45 hover:bg-rose-400 animate-[pulse_1.15s_ease-in-out_infinite] ring-2 ring-rose-200/80' : 'bg-blue-600 text-white shadow-md shadow-blue-600/20 hover:bg-blue-500'}`}>
+                                    <Save className="w-3.5 h-3.5"/> {isBatchDirty ? '儲存變更' : '儲存'}
+                                </button>
                             </div>
                         </div>
+                        {isBatchDirty && (
+                            <div className="mb-3 text-[11px] font-black tracking-wide text-rose-600 animate-pulse">尚有未儲存變更，請先按「儲存變更」。</div>
+                        )}
 
                         {/* Class Filter Tabs */}
                         <div className={`flex p-1 mb-4 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>

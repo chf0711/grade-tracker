@@ -303,10 +303,10 @@ const calculateProbLogic = (targetStudent, scoresByDate, mathScoresByDate, stude
              const rank = scores.indexOf(myTotal) + 1;
              const pr = Math.floor(((scores.length - rank) / scores.length) * 100);
              
-             // PDF 規則：一般週考(前兩階段)基準 PR55；模考衝刺基準 PR50。
+             // PDF 規則：一般週考(前兩階段)基準 PR55；模考衝刺基準 PR48。
              const isMock = index >= 36 || date.includes('09/29') || weekendID.includes('09/29') || date.includes('12/20') || weekendID.includes('12/20'); 
              const weight = isMock ? 2.5 : 1; 
-             const baseline = isMock ? 50 : 55;
+             const baseline = isMock ? 48 : 55;
 
              // 達標即 50%：先把各階段 PR 正規化到共同軸，再做加權平均
              const diff = pr - baseline; 
@@ -494,10 +494,12 @@ const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, 
 
     return (
         <tr className={`${darkMode ? 'hover:bg-slate-800/50' : 'hover:bg-white/50'} transition-colors`}>
-            <td className="px-3 py-2 text-xs font-bold text-slate-500">{sIndex + 1}</td>
-            <td className="px-3 py-2 font-mono text-xs font-bold text-slate-500">{student.id}</td>
-            <td className={`px-3 py-2 font-bold text-xs ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>{student.name}</td>
-            <td className="px-1 py-1">
+            <td className="w-10 px-2 py-2 text-center text-xs font-bold text-slate-500">{sIndex + 1}</td>
+            <td className="w-24 px-2 py-2 font-mono text-xs font-bold text-slate-500">{student.id}</td>
+            <td className={`w-28 px-2 py-2 font-bold text-xs ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+                <div className="truncate">{student.name}</div>
+            </td>
+            <td className="w-16 px-1 py-1">
                 <select 
                     value={dateGrades.class || 'A班'} 
                     onChange={(e) => handleBatchGradeChange(student.id, 'class', e.target.value)}
@@ -507,7 +509,7 @@ const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, 
                 </select>
             </td>
             {['chi', 'eng', 'math'].map((sub) => (
-                <td key={sub} className="px-1 py-1">
+                <td key={sub} className="w-[4.6rem] px-1 py-1">
                     <input 
                         id={`cell-${sIndex}-${sub}`} 
                         type="text" 
@@ -520,9 +522,9 @@ const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, 
                     />
                 </td>
             ))}
-            <td className="px-1 py-1 text-center"><div className="text-sm font-bold text-blue-500">{dateGrades.total}</div></td>
-            <td className="px-1 py-1 text-center"><div className={`text-xs font-bold ${darkMode ? 'text-indigo-300' : 'text-indigo-600'}`}>{prValue !== '-' ? prValue : ''}</div></td>
-            <td className="px-1 py-1 text-center">
+            <td className="w-[4.8rem] px-1 py-1 text-center"><div className="text-sm font-bold text-blue-500">{dateGrades.total}</div></td>
+            <td className="w-[3.9rem] px-1 py-1 text-center"><div className={`text-xs font-bold ${darkMode ? 'text-indigo-300' : 'text-indigo-600'}`}>{prValue !== '-' ? prValue : ''}</div></td>
+            <td className="w-[6.4rem] px-1 py-1 text-center">
                 <div className="text-xs font-black inline-block px-2 py-0.5 rounded-full min-w-[56px] text-center" style={probVisual ? probVisual.badgeStyle : undefined}>
                     {probValue !== '-' ? `${probValue}%` : ''}
                 </div>
@@ -774,8 +776,18 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-      if (availableDates.length > 0 && !batchDate) setBatchDate(availableDates[availableDates.length - 1]);
-  }, [availableDates]);
+      if (!sortedAvailableDatesAsc.length) return;
+      const latestDate = sortedAvailableDatesAsc[sortedAvailableDatesAsc.length - 1];
+      if (!batchDate || !sortedAvailableDatesAsc.includes(batchDate)) {
+          setBatchDate(latestDate);
+      }
+  }, [sortedAvailableDatesAsc, batchDate]);
+
+  useEffect(() => {
+      if (mode !== 'teacher' || !sortedAvailableDatesAsc.length) return;
+      const latestDate = sortedAvailableDatesAsc[sortedAvailableDatesAsc.length - 1];
+      setBatchDate(latestDate);
+  }, [mode, sortedAvailableDatesAsc]);
 
   const loadDates = async () => {
       if (!db) return [...availableDates].sort(customDateSort);
@@ -1881,14 +1893,14 @@ export default function App() {
           <div className="flex items-center gap-3 cursor-pointer group" onClick={() => setMode('landing')}>
             <div className={`p-2 rounded-xl transition-transform group-hover:scale-105 duration-300 ${darkMode ? 'bg-emerald-500/10 text-emerald-200 ring-1 ring-emerald-300/35' : 'bg-white/74 text-emerald-700 ring-1 ring-white/90 shadow-sm'}`}><GraduationCap className="h-5 w-5" /></div>
             <div>
-                <h1 className={`text-2xl font-black tracking-widest font-serif uppercase leading-none bg-clip-text text-transparent ${darkMode ? 'bg-gradient-to-r from-emerald-50 via-emerald-200 to-lime-200' : 'bg-gradient-to-r from-slate-800 via-emerald-700 to-cyan-700'}`}>
+                <h1 className={`text-2xl font-black tracking-widest font-serif uppercase leading-none bg-clip-text text-transparent ${darkMode ? 'bg-gradient-to-r from-emerald-50 via-emerald-200 to-lime-200' : 'bg-[linear-gradient(112deg,#0f172a_0%,#047857_34%,#0f766e_66%,#0369a1_100%)] drop-shadow-[0_1px_0_rgba(255,255,255,0.55)]'}`}>
                   HSINRU
                 </h1>
                 <p className="text-[9px] text-slate-500/90 font-bold tracking-widest uppercase mt-0.5">Grade Tracker</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-                <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/92 text-emerald-700 shadow-md shadow-slate-300/40 ring-1 ring-white/95') : 'text-slate-600 hover:text-slate-800 bg-white/52 hover:bg-white/70'}`}>{isAuthenticated ? '後台' : '老師'}</button>
+                <button onClick={() => { if (isAuthenticated) { setMode('teacher'); loadAllStudents(); } else { setMode('teacher_login'); } }} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/92 text-emerald-700 shadow-md shadow-slate-300/40 ring-1 ring-white/95') : 'text-slate-600 hover:text-slate-800 bg-white/52 hover:bg-white/70'}`}>{isAuthenticated ? '後台' : '老師'}</button>
                 <button onClick={() => { setViewData(null); setSearchError(''); setMode('parent'); }} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/92 text-emerald-700 shadow-md shadow-slate-300/40 ring-1 ring-white/95') : 'text-slate-600 hover:text-slate-800 bg-white/52 hover:bg-white/70'}`}>家長</button>
             {isAuthenticated && (
                 <button onClick={handleLogout} className="ml-1 p-2 text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-full transition-colors" title="登出"><LogOut className="w-5 h-5"/></button>
@@ -1905,12 +1917,12 @@ export default function App() {
                 <div className="px-4 py-1.5 rounded-full mb-5 border border-white/90 bg-white/72 text-[10px] tracking-[0.2em] font-black uppercase text-slate-600">
                     HSINRU CENTRAL
                 </div>
-                <h2 className="whitespace-nowrap text-[1.28rem] sm:text-[1.82rem] md:text-[2.7rem] font-black font-serif tracking-tight mb-3 text-center leading-[1.12] bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 via-sky-700 to-emerald-700">Make Progress Visible</h2>
+                <h2 className="whitespace-nowrap text-[clamp(1.38rem,6.8vw,2.7rem)] sm:text-[1.9rem] md:text-[2.7rem] font-black font-serif tracking-[-0.02em] sm:tracking-tight mb-3 text-center leading-[1.1] bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 via-sky-700 to-emerald-700">Make Progress Visible</h2>
                 <p className="text-[11px] font-bold tracking-[0.18em] mb-6 uppercase text-slate-600">2025-2026 Learning Journey</p>
                 <ExamCountdown isDarkMode={darkMode} />
                   
                 <div className="w-full max-w-xl grid grid-cols-1 md:grid-cols-2 gap-3 mt-6">
-                   <button onClick={() => isAuthenticated ? setMode('teacher') : setMode('teacher_login')} className="group w-full p-5 rounded-[1.45rem] border flex items-center gap-4 transition-all duration-200 backdrop-blur-xl bg-white/76 border-white/85 hover:bg-white/92 hover:border-orange-200/90">
+                   <button onClick={() => { if (isAuthenticated) { setMode('teacher'); loadAllStudents(); } else { setMode('teacher_login'); } }} className="group w-full p-5 rounded-[1.45rem] border flex items-center gap-4 transition-all duration-200 backdrop-blur-xl bg-white/76 border-white/85 hover:bg-white/92 hover:border-orange-200/90">
                       <div className="w-11 h-11 rounded-2xl flex items-center justify-center transition-colors bg-gradient-to-br from-indigo-100 to-sky-100 text-indigo-700"><LayoutDashboard className="w-5 h-5" /></div>
                       <div className="text-left flex-1"><h3 className="text-base font-black text-slate-800">老師通道</h3><p className="text-[11px] text-slate-500 mt-0.5">管理成績與設定</p></div>
                       <ChevronRight className="w-4.5 h-4.5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
@@ -2014,19 +2026,31 @@ export default function App() {
 
                         {/* Fix: Overflow handling for mobile */}
                         <div className={`overflow-x-auto rounded-xl border shadow-inner ${darkMode ? 'border-white/5 bg-[#020617]/30' : 'border-slate-200 bg-white'}`}>
-                            <table className="w-full text-sm text-left min-w-[500px]">
+                            <table className="w-full text-sm text-left min-w-[780px] table-fixed">
+                                <colgroup>
+                                    <col className="w-10" />
+                                    <col className="w-24" />
+                                    <col className="w-28" />
+                                    <col className="w-16" />
+                                    <col className="w-[4.6rem]" />
+                                    <col className="w-[4.6rem]" />
+                                    <col className="w-[4.6rem]" />
+                                    <col className="w-[4.8rem]" />
+                                    <col className="w-[3.9rem]" />
+                                    <col className="w-[6.4rem]" />
+                                </colgroup>
                                 <thead className={`text-[10px] uppercase sticky top-0 z-10 ${darkMode ? 'text-slate-400 bg-slate-900' : 'text-slate-400 bg-slate-50'}`}>
                                     <tr>
-                                        <th className="px-3 py-3 font-bold w-12">#</th>
-                                        <th className="px-3 py-3 font-bold">學號</th>
-                                        <th className="px-3 py-3 font-bold">姓名</th>
+                                        <th className="px-2 py-3 text-center font-bold">#</th>
+                                        <th className="px-2 py-3 font-bold">學號</th>
+                                        <th className="px-2 py-3 font-bold">姓名</th>
                                         <th className="px-2 py-3 text-center text-slate-500">班級</th>
-                                        <th className="px-2 py-3 text-center text-rose-500">國文</th>
-                                        <th className="px-2 py-3 text-center text-amber-500">英文</th>
-                                        <th className="px-2 py-3 text-center text-cyan-500">數學</th>
-                                        <th className="px-2 py-3 text-center font-bold text-blue-500">總分</th>
-                                        <th className="px-2 py-3 text-center font-bold text-indigo-500">PR</th>
-                                        <th className="px-2 py-3 text-center font-bold text-slate-500">錄取機率</th>
+                                        <th className="px-1 py-3 text-center text-rose-500">國文</th>
+                                        <th className="px-1 py-3 text-center text-amber-500">英文</th>
+                                        <th className="px-1 py-3 text-center text-cyan-500">數學</th>
+                                        <th className="px-1 py-3 text-center font-bold text-blue-500">總分</th>
+                                        <th className="px-1 py-3 text-center font-bold text-indigo-500">PR</th>
+                                        <th className="px-1 py-3 text-center font-bold text-slate-500">錄取機率</th>
                                     </tr>
                                 </thead>
                                 <tbody className={`divide-y ${darkMode ? 'divide-slate-800' : 'divide-slate-100'}`}>

@@ -185,6 +185,14 @@ const TAB_DOT_BG_CLASS = {
     eng: 'bg-amber-500',
     math: 'bg-cyan-500'
 };
+const EMPTY_GRADE = { chi: '', eng: '', math: '', total: '', class: 'A班' };
+
+const hasAnySubjectScore = (gradeObj) => {
+    if (!gradeObj) return false;
+    return (gradeObj.chi !== '' && gradeObj.chi !== undefined) ||
+           (gradeObj.eng !== '' && gradeObj.eng !== undefined) ||
+           (gradeObj.math !== '' && gradeObj.math !== undefined);
+};
 
 const f1 = (v) => {
     if (v === '' || v === undefined || v === null) return '';
@@ -356,7 +364,7 @@ const DistributionChart = ({ data, colorKey, isDarkMode }) => (
     </div>
 );
 
-const BatchRow = React.memo(({ student, sIndex, batchDate, dateGrades, prValue, probValue, darkMode, handleBatchGradeChange, handleKeyDown, handlePaste }) => {
+const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, darkMode, handleBatchGradeChange, handleKeyDown, handlePaste }) => {
     let probColor = 'text-slate-400';
     if (probValue !== '-') {
         const p = parseInt(probValue);
@@ -524,8 +532,10 @@ export default function App() {
 
   // --- OPTIMIZATION: Debounced Calculation Effect ---
   useEffect(() => {
-      if (allStudentsData.length === 0) return;
+      const shouldCompute = mode === 'teacher' && teacherViewMode === 'batch';
+      if (!shouldCompute || allStudentsData.length === 0) return;
 
+      let rafId = null;
       const timer = setTimeout(() => {
           // 1. Prepare ranking lists
           const scoresByDate = {}; 
@@ -574,11 +584,14 @@ export default function App() {
               probs[s.id] = calculateProbLogic(s, scoresByDate, mathScoresByDate, studentGradeMaps, availableDates);
           });
           
-          setAdmissionProbabilities(probs);
+          rafId = requestAnimationFrame(() => setAdmissionProbabilities(probs));
       }, 500);
 
-      return () => clearTimeout(timer);
-  }, [allStudentsData, availableDates, getTestDateID]);
+      return () => {
+          clearTimeout(timer);
+          if (rafId) cancelAnimationFrame(rafId);
+      };
+  }, [allStudentsData, availableDates, getTestDateID, mode, teacherViewMode]);
 
   useEffect(() => {
       if (mode === 'parent' && viewData) {
@@ -640,17 +653,22 @@ export default function App() {
   }, [availableDates]);
 
   const loadDates = async () => {
-      if (!db) return;
+      if (!db) return [...availableDates].sort(customDateSort);
       try {
           const docSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'));
           if (docSnap.exists() && docSnap.data().list) {
-              const loadedDates = docSnap.data().list.sort(customDateSort);
+              const loadedDates = [...docSnap.data().list].sort(customDateSort);
               setAvailableDates(loadedDates);
+              return loadedDates;
           } else {
              const initialDates = [...DEFAULT_EXAM_STARTS].sort(customDateSort);
              setAvailableDates(initialDates);
+             return initialDates;
           }
-      } catch(e) { console.error("Error loading dates:", e); }
+      } catch(e) {
+          console.error("Error loading dates:", e);
+          return [...availableDates].sort(customDateSort);
+      }
   };
 
   const executeWithSecurity = (action) => {
@@ -684,48 +702,64 @@ export default function App() {
 
   const localComputedAverages = useMemo(() => {
       const avgs = {};
-      const validClassKeys = CLASS_DEFS.map(c => c.id);
-      
-      availableDates.forEach(date => {
-          const groups = {};
+      const validClassSet = new Set(CLASS_DEFS.map(c => c.id));
+
+      const createBuckets = () => {
+          const buckets = { all: { t:0, c:0, e:0, m:0, count:0 } };
           CLASS_DEFS.forEach(c => {
-              groups[c.id] = { t:0, c:0, e:0, m:0, count:0 };
+              buckets[c.id] = { t:0, c:0, e:0, m:0, count:0 };
           });
-          groups['all'] = { t:0, c:0, e:0, m:0, count:0 };
-          
-          const currentWeekendID = getTestDateID(date);
+          return buckets;
+      };
 
-          allStudentsData.forEach(s => {
-             Object.keys(s.grades || {}).forEach(gradeDate => {
-                 if (getTestDateID(gradeDate) === currentWeekendID) {
-                      const grades = s.grades[gradeDate];
-                      const math = parseFloat(grades.math) || 0;
-                      const eng = parseFloat(grades.eng) || 0;
-                      const chi = parseFloat(grades.chi) || 0;
-                      const total = parseFloat(grades.total) || 0;
-                      
-                      let studentClass = grades.class || 'A班'; 
-                      if (!validClassKeys.includes(studentClass)) studentClass = 'A班';
+      const dateToWeekendID = {};
+      const groupsByWeekendID = {};
 
-                      if (grades.total !== '' && total > 0) {
-                          if (groups[studentClass]) {
-                              groups[studentClass].t += total;
-                              groups[studentClass].m += math;
-                              groups[studentClass].e += eng;
-                              groups[studentClass].c += chi;
-                              groups[studentClass].count++;
-                          }
-                          groups['all'].t += total;
-                          groups['all'].m += math;
-                          groups['all'].e += eng;
-                          groups['all'].c += chi;
-                          groups['all'].count++;
-                      }
-                 }
-             });
+      availableDates.forEach(date => {
+          const weekendID = getTestDateID(date);
+          dateToWeekendID[date] = weekendID;
+          if (!groupsByWeekendID[weekendID]) {
+              groupsByWeekendID[weekendID] = createBuckets();
+          }
+      });
+
+      allStudentsData.forEach(student => {
+          Object.entries(student.grades || {}).forEach(([gradeDate, grade]) => {
+              const weekendID = getTestDateID(gradeDate);
+              const groups = groupsByWeekendID[weekendID];
+              if (!groups) return;
+
+              const total = parseFloat(grade.total) || 0;
+              if (grade.total === '' || total <= 0) return;
+
+              const math = parseFloat(grade.math) || 0;
+              const eng = parseFloat(grade.eng) || 0;
+              const chi = parseFloat(grade.chi) || 0;
+
+              let studentClass = grade.class || 'A班';
+              if (!validClassSet.has(studentClass)) studentClass = 'A班';
+
+              if (groups[studentClass]) {
+                  groups[studentClass].t += total;
+                  groups[studentClass].m += math;
+                  groups[studentClass].e += eng;
+                  groups[studentClass].c += chi;
+                  groups[studentClass].count++;
+              }
+
+              groups.all.t += total;
+              groups.all.m += math;
+              groups.all.e += eng;
+              groups.all.c += chi;
+              groups.all.count++;
           });
+      });
 
+      availableDates.forEach(date => {
+          const weekendID = dateToWeekendID[date];
+          const groups = groupsByWeekendID[weekendID] || createBuckets();
           avgs[date] = {};
+
           Object.keys(groups).forEach(key => {
               const g = groups[key];
               if (g.count > 0) {
@@ -1284,7 +1318,10 @@ export default function App() {
     if (!user || !searchId.trim()) return;
     setSearchError(''); setViewData(null); setLoading(true);
     try {
-      await loadDates(); 
+      const latestDates = await loadDates();
+      const effectiveDates = (latestDates && latestDates.length > 0) ? latestDates : sortedAvailableDatesAsc;
+      const sortedDates = [...effectiveDates].sort(customDateSort);
+      const getSearchDateID = (dateStr) => getWeekendID(dateStr, effectiveDates);
       let data = null;
       let fullClassData = [];
       if (db) {
@@ -1303,17 +1340,16 @@ export default function App() {
       }
       if (data) {
         const allChartData = [];
-        const sortedDates = sortedAvailableDatesAsc; 
         
         // 建立 availableDates 的 weekendID Set，用於快速查找（使用新的連續日期邏輯）
-        const availableWeekendIDs = new Set(sortedDates.map(d => getTestDateID(d)));
+        const availableWeekendIDs = new Set(sortedDates.map(d => getSearchDateID(d)));
         
         // 遍歷學生所有成績，確保連續日期的成績也能被找到
         if (data.grades) {
           Object.entries(data.grades).forEach(([gradeDate, weekData]) => {
             if (!weekData || !weekData.total) return;
             
-            const weekendID = getTestDateID(gradeDate);
+            const weekendID = getSearchDateID(gradeDate);
             // 只處理在 availableDates 範圍內的成績
             if (!availableWeekendIDs.has(weekendID)) return;
             
@@ -1365,12 +1401,12 @@ export default function App() {
             // Re-build the scores map quickly for this calculation
             const scoresByDate = {}; 
             const mathScoresByDate = {}; 
-            availableDates.forEach(d => { scoresByDate[d] = []; mathScoresByDate[d] = []; });
+            sortedDates.forEach(d => { scoresByDate[d] = []; mathScoresByDate[d] = []; });
             
             contextData.forEach(s => {
                 if (!s.grades) return;
                 Object.entries(s.grades).forEach(([date, g]) => {
-                    const wid = getTestDateID(date);
+                    const wid = getSearchDateID(date);
                     if (g.total && !isNaN(parseFloat(g.total))) {
                          if (!scoresByDate[wid]) scoresByDate[wid] = [];
                          scoresByDate[wid].push(parseFloat(g.total));
@@ -1388,10 +1424,10 @@ export default function App() {
             const studentGradeMap = {};
             studentGradeMap[data.id] = {};
             Object.entries(data.grades || {}).forEach(([date, g]) => {
-                studentGradeMap[data.id][getTestDateID(date)] = g;
+                studentGradeMap[data.id][getSearchDateID(date)] = g;
             });
             
-            studentProb = calculateProbLogic(data, scoresByDate, mathScoresByDate, studentGradeMap, availableDates);
+            studentProb = calculateProbLogic(data, scoresByDate, mathScoresByDate, studentGradeMap, sortedDates);
         }
 
         setViewData({ ...data, chartData: allChartData, average: avg, prob: studentProb });
@@ -1542,35 +1578,64 @@ export default function App() {
       return buckets.map(b => ({ range: b.label, count: b.count, isMyRange: b.isMyRange }));
   };
 
-  const getBatchStudentPR = (student, batchDate) => {
-      if (!student.grades) return '-';
-      const currentWeekendID = getTestDateID(batchDate);
-      let targetDate = batchDate;
-      const existingKey = Object.keys(student.grades).find(k => getTestDateID(k) === currentWeekendID);
-      if (existingKey) targetDate = existingKey;
-      
-      const g = student.grades[targetDate];
-      if (!g || !g.total) return '-';
-      const myVal = parseFloat(g.total);
-      if (isNaN(myVal)) return '-';
+  const batchRowsForDisplay = useMemo(() => {
+      const weekendID = getTestDateID(batchDate);
+      const rows = [];
+      const totals = [];
+      const totalByStudentId = {};
 
-      const allScores = [];
-      allStudentsData.forEach(s => {
-          if (!s.grades) return;
-          const sKey = Object.keys(s.grades).find(k => getTestDateID(k) === currentWeekendID);
-          if (sKey) {
-              const val = parseFloat(s.grades[sKey].total);
-              if (!isNaN(val)) allScores.push(val);
+      allStudentsData.forEach(student => {
+          const studentGrades = student.grades || {};
+          const targetDate = Object.keys(studentGrades).find(k => getTestDateID(k) === weekendID);
+          if (!targetDate) return;
+
+          const dateGrades = studentGrades[targetDate] || EMPTY_GRADE;
+          const totalVal = parseFloat(dateGrades.total);
+          if (!isNaN(totalVal)) {
+              totals.push(totalVal);
+              totalByStudentId[student.id] = totalVal;
           }
-      });
-      
-      if (allScores.length < 50) return '-';
 
-      allScores.sort((a, b) => b - a);
-      const rank = allScores.indexOf(myVal) + 1;
-      const total = allScores.length;
-      return Math.floor(((total - rank) / total) * 100);
-  };
+          const currentClass = dateGrades.class || 'A班';
+          if (currentClass !== teacherClassFilter) return;
+          if (!hasAnySubjectScore(dateGrades)) return;
+
+          rows.push({ student, dateGrades });
+      });
+
+      const prByStudentId = {};
+      if (totals.length >= 50) {
+          const sortedTotals = [...totals].sort((a, b) => b - a);
+          Object.entries(totalByStudentId).forEach(([studentId, totalVal]) => {
+              const rank = sortedTotals.indexOf(totalVal) + 1;
+              prByStudentId[studentId] = rank > 0 ? Math.floor(((sortedTotals.length - rank) / sortedTotals.length) * 100) : '-';
+          });
+      }
+
+      const computedRows = rows.map((row) => {
+          const prValue = prByStudentId[row.student.id] ?? '-';
+          const probValue = admissionProbabilities[row.student.id] || '-';
+          const prSortValue = prValue === '-' ? -1 : prValue;
+          const probNumeric = probValue === '-' ? -1 : Number(probValue);
+          const probSortValue = isNaN(probNumeric) ? -1 : probNumeric;
+
+          return {
+              ...row,
+              prValue,
+              probValue,
+              prSortValue,
+              probSortValue
+          };
+      });
+
+      if (sortByPR) {
+          computedRows.sort((a, b) => b.prSortValue - a.prSortValue);
+      } else if (sortByProb) {
+          computedRows.sort((a, b) => b.probSortValue - a.probSortValue);
+      }
+
+      return computedRows;
+  }, [allStudentsData, batchDate, teacherClassFilter, getTestDateID, sortByPR, sortByProb, admissionProbabilities]);
 
 
   const openStatsModal = (date, grades, className) => {
@@ -1631,13 +1696,13 @@ export default function App() {
       <main className="pt-28 px-4 max-w-4xl mx-auto relative z-10">
         {mode === 'landing' && (
           <div className="flex flex-col items-center justify-center min-h-[calc(100vh-120px)]">
-            <div className={`relative w-full max-w-3xl rounded-[2.5rem] overflow-hidden border ${darkMode ? 'bg-[#101722]/88 border-white/10 shadow-2xl shadow-black/45' : 'bg-white/95 border-slate-200/80 shadow-[0_24px_80px_rgba(15,23,42,0.08)]'}`}>
+            <div className={`relative w-full max-w-3xl rounded-[2.5rem] overflow-hidden ${darkMode ? 'bg-[#101722]/88 shadow-2xl shadow-black/45' : 'bg-white/95 shadow-[0_24px_80px_rgba(15,23,42,0.08)]'}`}>
               <div
                 className={`pointer-events-none absolute inset-0 ${darkMode ? 'opacity-90' : 'opacity-100'}`}
                 style={darkMode ? {
-                  backgroundImage: 'radial-gradient(circle at 12% 12%, rgba(10,132,255,0.22) 0%, transparent 36%), radial-gradient(circle at 88% 14%, rgba(100,210,255,0.14) 0%, transparent 30%)'
+                  backgroundImage: 'radial-gradient(circle at 10% 10%, rgba(10,132,255,0.34) 0%, transparent 42%), radial-gradient(circle at 90% 14%, rgba(100,210,255,0.22) 0%, transparent 34%), linear-gradient(140deg, rgba(15,23,42,0.0) 0%, rgba(15,23,42,0.32) 72%)'
                 } : {
-                  backgroundImage: 'radial-gradient(circle at 12% 12%, rgba(10,132,255,0.16) 0%, transparent 40%), radial-gradient(circle at 88% 14%, rgba(255,159,10,0.12) 0%, transparent 30%)'
+                  backgroundImage: 'radial-gradient(circle at 10% 10%, rgba(10,132,255,0.28) 0%, transparent 44%), radial-gradient(circle at 90% 14%, rgba(255,159,10,0.2) 0%, transparent 32%), linear-gradient(145deg, rgba(255,255,255,0.4) 0%, rgba(248,250,252,0.78) 70%)'
                 }}
               />
               <div
@@ -1651,7 +1716,7 @@ export default function App() {
                 <div className={`p-5 rounded-full mb-6 ring-1 backdrop-blur-3xl transition-transform duration-700 hover:scale-105 ${darkMode ? 'bg-gradient-to-br from-blue-500/20 to-cyan-500/10 ring-blue-300/35' : 'bg-gradient-to-br from-blue-100 to-cyan-100 ring-blue-200 shadow-sm'}`}>
                     <Sparkles className={`w-10 h-10 ${darkMode ? 'text-blue-200' : 'text-blue-700'}`} />
                 </div>
-                <h2 className={`text-3xl md:text-5xl font-black font-serif tracking-tight mb-4 text-center leading-[1.05] bg-clip-text text-transparent ${darkMode ? 'bg-gradient-to-r from-white via-blue-100 to-cyan-200' : 'bg-gradient-to-r from-slate-900 via-blue-700 to-cyan-600'}`}>Make Progress Visible</h2>
+                <h2 className={`text-[2.05rem] md:text-[3.45rem] font-black font-serif tracking-tight mb-4 text-center leading-[1.16] bg-clip-text text-transparent ${darkMode ? 'bg-gradient-to-r from-white via-blue-100 to-cyan-200' : 'bg-gradient-to-r from-slate-900 via-blue-700 to-cyan-600'}`}>Make Progress Visible</h2>
                 <p className="text-slate-400 text-xs font-semibold tracking-[0.18em] mb-6 uppercase">2025-2026 Learning Journey</p>
                 <ExamCountdown isDarkMode={darkMode} />
                   
@@ -1772,69 +1837,20 @@ export default function App() {
                                     </tr>
                                 </thead>
                                 <tbody className={`divide-y ${darkMode ? 'divide-slate-800' : 'divide-slate-100'}`}>
-                                    {(() => {
-                                        let displayedStudents = allStudentsData.filter(s => {
-                                            if (!s.grades) return false;
-
-                                            const weekendId = getTestDateID(batchDate);
-                                            const matchingKey = Object.keys(s.grades).find(k => getTestDateID(k) === weekendId);
-                                            if (!matchingKey) return false;
-
-                                            const gradeObj = s.grades[matchingKey];
-                                            const currentClass = gradeObj?.class || 'A班';
-                                            if (currentClass !== teacherClassFilter) return false;
-
-                                            // Check if any score exists
-                                            const hasScore = (gradeObj.chi !== '' && gradeObj.chi !== undefined) || 
-                                                             (gradeObj.eng !== '' && gradeObj.eng !== undefined) || 
-                                                             (gradeObj.math !== '' && gradeObj.math !== undefined);
-                                            return hasScore;
-                                        });
-
-                                        if (sortByPR) {
-                                            displayedStudents.sort((a, b) => {
-                                                const prA = getBatchStudentPR(a, batchDate);
-                                                const prB = getBatchStudentPR(b, batchDate);
-                                                const valA = prA === '-' ? -1 : prA;
-                                                const valB = prB === '-' ? -1 : prB;
-                                                return valB - valA;
-                                            });
-                                        } else if (sortByProb) {
-                                            displayedStudents.sort((a, b) => {
-                                                const probA = admissionProbabilities[a.id] === '-' ? -1 : admissionProbabilities[a.id];
-                                                const probB = admissionProbabilities[b.id] === '-' ? -1 : admissionProbabilities[b.id];
-                                                return probB - probA;
-                                            });
-                                        }
-
-                                        return displayedStudents.map((student, sIndex) => {
-                                            let targetDate = batchDate;
-                                            if (student.grades) {
-                                                const batchDateID = getTestDateID(batchDate);
-                                                const existingKey = Object.keys(student.grades).find(k => getTestDateID(k) === batchDateID);
-                                                if (existingKey) targetDate = existingKey;
-                                            }
-
-                                            const dateGrades = student.grades?.[targetDate] || { chi: '', eng: '', math: '', total: '', class: 'A班' };
-                                            const prVal = getBatchStudentPR(student, batchDate);
-                                            const probVal = admissionProbabilities[student.id] || '-';
-
-                                            return (
-                                            <BatchRow 
-                                                key={student.id} 
-                                                student={student} 
-                                                sIndex={sIndex} 
-                                                batchDate={batchDate} 
-                                                dateGrades={dateGrades} 
-                                                prValue={prVal}
-                                                probValue={probVal}
-                                                darkMode={darkMode} 
-                                                handleBatchGradeChange={handleBatchGradeChange} 
-                                                handleKeyDown={handleKeyDown} 
-                                                handlePaste={handlePaste} 
-                                            />
-                                            )});
-                                    })()}
+                                    {batchRowsForDisplay.map((row, sIndex) => (
+                                        <BatchRow 
+                                            key={row.student.id} 
+                                            student={row.student} 
+                                            sIndex={sIndex} 
+                                            dateGrades={row.dateGrades} 
+                                            prValue={row.prValue}
+                                            probValue={row.probValue}
+                                            darkMode={darkMode} 
+                                            handleBatchGradeChange={handleBatchGradeChange} 
+                                            handleKeyDown={handleKeyDown} 
+                                            handlePaste={handlePaste} 
+                                        />
+                                    ))}
                                 </tbody>
                             </table>
                         </div>

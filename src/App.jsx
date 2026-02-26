@@ -224,6 +224,59 @@ const calculateTotal = (chi, eng, math) => {
     return (c + e + m).toFixed(1);
 };
 
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+const getProbabilityVisual = (probValue, isDarkMode) => {
+    const parsed = Number(probValue);
+    if (!Number.isFinite(parsed)) return null;
+
+    const prob = clamp(parsed, 1, 99);
+    const hue = Math.round((prob / 100) * 120); // 0:red -> 120:green
+    const saturation = isDarkMode ? 90 : 84;
+    const textLightness = isDarkMode ? 68 : 40;
+    const badgeLightness = isDarkMode ? 54 : 46;
+
+    return {
+        textStyle: { color: `hsl(${hue} ${saturation}% ${textLightness}%)` },
+        badgeStyle: {
+            color: `hsl(${hue} ${saturation}% ${isDarkMode ? 72 : 36}%)`,
+            backgroundColor: `hsla(${hue}, ${saturation}%, ${badgeLightness}%, ${isDarkMode ? 0.2 : 0.12})`,
+            border: `1px solid hsla(${hue}, ${saturation}%, ${isDarkMode ? 66 : 40}%, ${isDarkMode ? 0.45 : 0.24})`
+        }
+    };
+};
+
+const buildDistributionTemplate = (maxScore) => {
+    const thresholds = [];
+    if (maxScore === 300) {
+        for (let i = 290; i >= 150; i -= 10) thresholds.push(i);
+    } else {
+        const floor = maxScore === 80 ? 40 : 60;
+        const start = maxScore - 10;
+        for (let i = start; i >= floor; i -= 10) thresholds.push(i);
+    }
+
+    const buckets = thresholds.map((min, i) => {
+        let label = `${min}-${min + 9}`;
+        let max = min + 9;
+        if (i === 0) {
+            label = `${min}-${maxScore}`;
+            max = maxScore;
+        }
+        return { min, max, label };
+    });
+
+    const bottomThreshold = thresholds[thresholds.length - 1] || 0;
+    buckets.push({ min: 0, max: bottomThreshold - 1, label: `<${bottomThreshold}` });
+
+    return { buckets };
+};
+
+const resolveDistributionBucketIndex = (value, template) => {
+    if (!Number.isFinite(value)) return -1;
+    return template.buckets.findIndex((bucket) => value >= bucket.min && value <= bucket.max);
+};
+
 // --- Helper Logic for Probability ---
 const calculateProbLogic = (targetStudent, scoresByDate, mathScoresByDate, studentGradeMaps, availableDates) => {
     let weightedPRSum = 0;
@@ -346,32 +399,44 @@ const SingleSubjectChart = ({ data, subjectKey, avgKey, colorKey, title, domain,
     </div>
 );
 
-const DistributionChart = ({ data, colorKey, isDarkMode }) => (
-    <div className="h-56 w-full mt-6">
-        <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data} margin={{ top: 10, right: 0, bottom: 40, left: -20 }}>
-                <CartesianGrid stroke={isDarkMode ? "#334155" : "#94a3b8"} strokeOpacity={0.2} vertical={false} strokeDasharray="3 3" />
-                <XAxis dataKey="range" tick={{fontSize: 9, fill: isDarkMode ? '#94a3b8' : '#475569', fontWeight: 500}} tickLine={false} axisLine={false} interval={0} angle={-45} textAnchor="end" dy={10} />
-                <YAxis tick={{fontSize: 10, fill: isDarkMode ? '#94a3b8' : '#475569'}} tickLine={false} axisLine={false} allowDecimals={false} />
-                <Tooltip cursor={{fill: isDarkMode ? '#334155' : '#cbd5e1', opacity: 0.4}} contentStyle={{ borderRadius: '12px', border: 'none', backgroundColor: isDarkMode ? '#1e293b' : '#fff', color: isDarkMode ? '#fff' : '#000', fontSize: '12px' }} />
-                <Bar dataKey="count" name="人數" radius={[4, 4, 0, 0]}>
-                    {data.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.isMyRange ? COLORS[colorKey].hex : (isDarkMode ? '#475569' : '#cbd5e1')} />
-                    ))}
-                </Bar>
-            </BarChart>
-        </ResponsiveContainer>
-    </div>
-);
+const DistributionChart = ({ data, colorKey, isDarkMode }) => {
+    const maxCount = data.reduce((max, bucket) => Math.max(max, bucket.count || 0), 0);
+
+    return (
+        <div className={`h-60 w-full mt-6 rounded-2xl border px-2 py-3 ${isDarkMode ? 'bg-slate-900/30 border-white/5' : 'bg-white/40 border-slate-200/60'}`}>
+            <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={data} margin={{ top: 6, right: 2, bottom: 38, left: -22 }}>
+                    <CartesianGrid stroke={isDarkMode ? "#334155" : "#94a3b8"} strokeOpacity={0.18} vertical={false} strokeDasharray="3 3" />
+                    <XAxis dataKey="range" tick={{fontSize: 9, fill: isDarkMode ? '#94a3b8' : '#475569', fontWeight: 600}} tickLine={false} axisLine={false} interval={0} angle={-45} textAnchor="end" dy={10} />
+                    <YAxis tick={{fontSize: 10, fill: isDarkMode ? '#94a3b8' : '#475569'}} tickLine={false} axisLine={false} allowDecimals={false} />
+                    <Tooltip
+                        cursor={{fill: isDarkMode ? '#334155' : '#cbd5e1', opacity: 0.28}}
+                        contentStyle={{
+                            borderRadius: '14px',
+                            border: isDarkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(148,163,184,0.2)',
+                            backgroundColor: isDarkMode ? 'rgba(15,23,42,0.95)' : 'rgba(255,255,255,0.96)',
+                            color: isDarkMode ? '#f8fafc' : '#0f172a',
+                            fontSize: '12px',
+                            fontWeight: 600
+                        }}
+                    />
+                    <Bar dataKey="count" name="人數" radius={[7, 7, 3, 3]}>
+                        {data.map((entry, index) => {
+                            if (entry.isMyRange) {
+                                return <Cell key={`cell-${index}`} fill={COLORS[colorKey].hex} fillOpacity={0.95} />;
+                            }
+                            const opacity = maxCount > 0 ? 0.25 + ((entry.count || 0) / maxCount) * 0.45 : 0.25;
+                            return <Cell key={`cell-${index}`} fill={isDarkMode ? '#64748b' : '#94a3b8'} fillOpacity={opacity} />;
+                        })}
+                    </Bar>
+                </BarChart>
+            </ResponsiveContainer>
+        </div>
+    );
+};
 
 const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, darkMode, handleBatchGradeChange, handleKeyDown, handlePaste }) => {
-    let probColor = 'text-slate-400';
-    if (probValue !== '-') {
-        const p = parseInt(probValue);
-        if (p >= 80) probColor = 'text-blue-500';
-        else if (p >= 50) probColor = 'text-amber-500';
-        else probColor = 'text-rose-500';
-    }
+    const probVisual = getProbabilityVisual(probValue, darkMode);
 
     return (
         <tr className={`${darkMode ? 'hover:bg-slate-800/50' : 'hover:bg-white/50'} transition-colors`}>
@@ -404,7 +469,7 @@ const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, 
             <td className="px-1 py-1 text-center"><div className="text-sm font-bold text-blue-500">{dateGrades.total}</div></td>
             <td className="px-1 py-1 text-center"><div className={`text-xs font-bold ${darkMode ? 'text-indigo-300' : 'text-indigo-600'}`}>{prValue !== '-' ? prValue : ''}</div></td>
             <td className="px-1 py-1 text-center">
-                <div className={`text-xs font-black ${probColor} inline-block px-2 py-0.5 rounded-full`}>
+                <div className="text-xs font-black inline-block px-2 py-0.5 rounded-full min-w-[56px] text-center" style={probVisual ? probVisual.badgeStyle : undefined}>
                     {probValue !== '-' ? `${probValue}%` : ''}
                 </div>
             </td>
@@ -1493,6 +1558,34 @@ export default function App() {
       return index;
   }, [cachedClassData, getTestDateID]);
 
+  const distributionProfileByWeekendClass = useMemo(() => {
+      const profile = {};
+
+      Object.entries(scoreIndexByWeekendAndClass).forEach(([weekendID, byClass]) => {
+          profile[weekendID] = {};
+
+          Object.entries(byClass).forEach(([classKey, bySubject]) => {
+              profile[weekendID][classKey] = {};
+
+              ['total', 'chi', 'eng', 'math'].forEach((subject) => {
+                  const maxScore = getMaxScore(weekendID, subject, availableDates);
+                  const template = buildDistributionTemplate(maxScore);
+                  const counts = new Array(template.buckets.length).fill(0);
+                  const scoreList = bySubject[subject] || [];
+
+                  scoreList.forEach((score) => {
+                      const bucketIdx = resolveDistributionBucketIndex(score, template);
+                      if (bucketIdx >= 0) counts[bucketIdx] += 1;
+                  });
+
+                  profile[weekendID][classKey][subject] = { template, counts };
+              });
+          });
+      });
+
+      return profile;
+  }, [scoreIndexByWeekendAndClass, availableDates]);
+
   // 計算單科或總分在「本班」中的名次（#1, #2...）
   const calculateRank = (date, subject, myScore, myClass) => {
       if (!cachedClassData.length || !myScore) return '-';
@@ -1537,45 +1630,20 @@ export default function App() {
   const calculateDistribution = (date, subject, myScore, allDates, myClass) => {
       if (!cachedClassData.length) return [];
       const myVal = parseFloat(myScore);
-      let buckets = [];
-      const maxScore = getMaxScore(date, subject, allDates);
-      
-      const thresholds = [];
-      if (maxScore === 300) {
-          for (let i = 290; i >= 150; i -= 10) thresholds.push(i);
-      } else {
-          const floor = maxScore === 80 ? 40 : 60;
-          const start = maxScore - 10;
-          for (let i = start; i >= floor; i -= 10) thresholds.push(i);
-      }
-
-      buckets = thresholds.map((min, i) => {
-          let label = `${min}-${min+9}`;
-          let max = min + 9;
-          if (i === 0) { label = `${min}-${maxScore}`; max = maxScore; }
-          return { min, max, count: 0, label, isMyRange: false };
-      });
-      const bottomThreshold = thresholds[thresholds.length-1];
-      buckets.push({ min: 0, max: bottomThreshold-1, count: 0, label: `<${bottomThreshold}`, isMyRange: false });
-
       const currentWeekendID = getTestDateID(date);
-
       const targetClass = myClass || 'A班';
-      const byWeekend = scoreIndexByWeekendAndClass[currentWeekendID];
-      if (!byWeekend || !byWeekend[targetClass]) return buckets.map(b => ({ range: b.label, count: 0, isMyRange: false }));
+      const precomputed = distributionProfileByWeekendClass[currentWeekendID]?.[targetClass]?.[subject];
 
-      const scoreList = byWeekend[targetClass][subject] || [];
+      const fallbackTemplate = buildDistributionTemplate(getMaxScore(date, subject, allDates));
+      const template = precomputed?.template || fallbackTemplate;
+      const counts = precomputed?.counts || new Array(template.buckets.length).fill(0);
+      const myBucketIdx = resolveDistributionBucketIndex(myVal, template);
 
-      scoreList.forEach(val => {
-          if (isNaN(val)) return;
-          const bucket = buckets.find(b => val >= b.min && val <= b.max);
-          if (bucket) bucket.count++;
-      });
-      if (!isNaN(myVal)) {
-          const myBucket = buckets.find(b => myVal >= b.min && myVal <= b.max);
-          if (myBucket) myBucket.isMyRange = true;
-      }
-      return buckets.map(b => ({ range: b.label, count: b.count, isMyRange: b.isMyRange }));
+      return template.buckets.map((bucket, idx) => ({
+          range: bucket.label,
+          count: counts[idx] || 0,
+          isMyRange: idx === myBucketIdx
+      }));
   };
 
   const batchRowsForDisplay = useMemo(() => {
@@ -1649,6 +1717,29 @@ export default function App() {
           myGrades: grades
       });
   };
+
+  const parentProbVisual = useMemo(
+      () => getProbabilityVisual(viewData?.prob, true),
+      [viewData]
+  );
+
+  const statsSummary = useMemo(() => {
+      if (!statsModalData) return null;
+      const distribution = statsModalData[statsActiveTab] || [];
+      const sampleCount = distribution.reduce((sum, bucket) => sum + (bucket.count || 0), 0);
+      const myRange = distribution.find((bucket) => bucket.isMyRange)?.range || '-';
+      const peakBucket = distribution.reduce((top, bucket) => {
+          if (!top || (bucket.count || 0) > (top.count || 0)) return bucket;
+          return top;
+      }, null);
+
+      return {
+          sampleCount,
+          myRange,
+          peakRange: peakBucket?.range || '-',
+          peakCount: peakBucket?.count || 0
+      };
+  }, [statsModalData, statsActiveTab]);
 
   if (!user && !db) return <div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400 text-sm font-mono tracking-widest uppercase">Initializing...</div>;
   if (!user) return <div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400 text-sm font-mono tracking-widest uppercase">Connecting...</div>;
@@ -1952,8 +2043,8 @@ export default function App() {
                            {viewData.prob && viewData.prob !== '-' && (
                                <div className="text-right mt-2">
                                    <div className="text-[10px] font-bold text-blue-400/80 uppercase tracking-widest mb-0.5">錄取機率</div>
-                                   <div className="text-4xl font-black text-white flex items-baseline justify-end gap-1">
-                                       {viewData.prob}<span className="text-lg text-blue-500/80 font-bold">%</span>
+                                   <div className="text-4xl font-black flex items-baseline justify-end gap-1" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>
+                                       {viewData.prob}<span className="text-lg font-bold" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>%</span>
                                    </div>
                                    <div className="mt-1 flex items-center justify-end gap-1.5 opacity-50">
                                         <p className="text-[9px] text-slate-300 font-medium">
@@ -2118,7 +2209,7 @@ export default function App() {
         {statsModalData && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setStatsModalData(null)}>
                 <div className={`rounded-[2.5rem] w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh] ${darkMode ? 'bg-slate-800 border border-white/10' : 'bg-white shadow-2xl'}`} onClick={e => e.stopPropagation()}>
-                    <div className={`p-6 border-b flex justify-between items-center ${darkMode ? 'border-white/5 bg-slate-800/50' : 'border-slate-100'}`}>
+                    <div className={`p-6 border-b flex justify-between items-center ${darkMode ? 'border-white/5 bg-slate-800/60' : 'border-slate-100 bg-slate-50/50'}`}>
                         <div>
                             <div className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${darkMode ? 'text-blue-400' : 'text-blue-600'}`}>Score Distribution</div>
                             <h3 className={`text-xl font-bold ${darkMode ? 'text-white' : 'text-slate-800'}`}>{statsModalData.date} 落點分析</h3>
@@ -2137,12 +2228,26 @@ export default function App() {
                                 )
                             })}
                         </div>
+                        <div className="grid grid-cols-3 gap-2 mb-4">
+                            <div className={`rounded-xl px-3 py-2 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                <div className={`text-[10px] font-bold uppercase tracking-wide ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>樣本數</div>
+                                <div className={`text-lg font-black ${darkMode ? 'text-white' : 'text-slate-800'}`}>{statsSummary?.sampleCount || 0}</div>
+                            </div>
+                            <div className={`rounded-xl px-3 py-2 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                <div className={`text-[10px] font-bold uppercase tracking-wide ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>我的區間</div>
+                                <div className={`text-sm font-black ${darkMode ? 'text-blue-300' : 'text-blue-700'}`}>{statsSummary?.myRange || '-'}</div>
+                            </div>
+                            <div className={`rounded-xl px-3 py-2 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                <div className={`text-[10px] font-bold uppercase tracking-wide ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>最多人區間</div>
+                                <div className={`text-sm font-black ${darkMode ? 'text-amber-300' : 'text-amber-700'}`}>{statsSummary?.peakRange || '-'}</div>
+                            </div>
+                        </div>
                         <div className="mb-6">
                             <DistributionChart data={statsModalData[statsActiveTab]} colorKey={statsActiveTab} isDarkMode={darkMode} />
                         </div>
                         <div className={`p-4 rounded-2xl flex justify-between items-center border ${darkMode ? 'bg-white/5 border-white/5' : 'bg-slate-50 border-slate-200'}`}>
                             <span className={`text-sm font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>我的分數</span>
-                            <span className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-slate-800'}`}>{statsModalData.myGrades[statsActiveTab]}</span>
+                            <span className={`text-2xl font-black ${darkMode ? 'text-white' : 'text-slate-800'}`}>{statsModalData.myGrades[statsActiveTab]}</span>
                         </div>
                     </div>
                 </div>

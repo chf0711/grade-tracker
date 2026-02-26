@@ -291,51 +291,26 @@ const calculateProbLogic = (targetStudent, scoresByDate, mathScoresByDate, stude
          const grade = myGrades[weekendID];
          let myTotal = null;
          let myMath = null;
-         let myClass = 'A班';
 
          if (grade) {
              myTotal = parseFloat(grade.total);
              myMath = parseFloat(grade.math);
-             myClass = grade.class || 'A班';
          }
          
          // Total PR Logic
          if (myTotal !== null && !isNaN(myTotal) && scoresByDate[weekendID] && scoresByDate[weekendID].length >= 5) {
              const scores = scoresByDate[weekendID];
              const rank = scores.indexOf(myTotal) + 1;
-             let pr = Math.floor(((scores.length - rank) / scores.length) * 100);
+             const pr = Math.floor(((scores.length - rank) / scores.length) * 100);
              
-             // --- Updated Logic: Define Weight and Baseline per phase ---
+             // PDF 規則：一般週考(前兩階段)基準 PR55；模考衝刺基準 PR50。
              const isMock = index >= 36 || date.includes('09/29') || weekendID.includes('09/29') || date.includes('12/20') || weekendID.includes('12/20'); 
              const weight = isMock ? 2.5 : 1; 
-             const baseline = isMock ? 52 : 56; // Mock baseline 52, Phase 1/2 baseline 56
+             const baseline = isMock ? 50 : 55;
 
-             // --- CLASS A PROTECTION LOGIC (Phase 1 & 2 < 100 samples) ---
-             const isPhase1Or2 = index < 36;
-             const isSmallSample = scores.length < 100;
-             
-             if (isPhase1Or2 && isSmallSample && myClass === 'A班') {
-                 const count = scores.length;
-                 // If bottom 3 -> PR 48
-                 if (rank > count - 3) {
-                     pr = 48;
-                 } else {
-                     // Others: Linear Interpolation from 99 down to 60
-                     if (count - 3 > 1) {
-                         const maxSafePR = 99;
-                         const minSafePR = 60;
-                         const ratio = (rank - 1) / (count - 3 - 1);
-                         pr = maxSafePR - ratio * (maxSafePR - minSafePR);
-                     } else {
-                         pr = 99;
-                     }
-                 }
-             }
-             // ---------------------------------------------
-             
-             // Normalize PR to unified baseline of 52 for averaging
+             // 達標即 50%：先把各階段 PR 正規化到共同軸，再做加權平均
              const diff = pr - baseline; 
-             const normalizedPR = 52 + diff;
+             const normalizedPR = 50 + diff;
 
              weightedPRSum += normalizedPR * weight;
              totalWeight += weight;
@@ -353,23 +328,28 @@ const calculateProbLogic = (targetStudent, scoresByDate, mathScoresByDate, stude
 
     if (totalWeight === 0) return '-';
 
-    const avgPR = weightedPRSum / totalWeight;
+    const avgPR = clamp(weightedPRSum / totalWeight, 0, 100);
     const avgMathPR = mathWeight > 0 ? mathPRSum / mathWeight : 0;
     
-    // --- Probability Mapping (Unified Baseline: 52) ---
+    // PDF 規則：高於標準線性上升；低於標準加速下跌（最低 1%、最高 99%）
     let prob = 0;
-    if (avgPR < 52) {
-        // Curve below 52
-        prob = Math.pow(avgPR / 52, 1.5) * 50;
+    if (avgPR < 50) {
+        prob = Math.pow(avgPR / 50, 1.5) * 50;
     } else {
-        // Linear above 52
-        prob = 50 + ((avgPR - 52) / 48) * 49;
+        prob = 50 + ((avgPR - 50) / 50) * 49;
     }
-    
-    if (avgMathPR > 80) prob += 4;
-    else if (avgMathPR > 60) prob += 2;
-    
-    return Math.min(99, Math.max(1, prob.toFixed(0)));
+
+    // PDF 規則：數學 >60 +2、>80 +4，並採動態增幅，上限 +5
+    let mathBonus = 0;
+    if (avgMathPR > 80) {
+        mathBonus = 4 + ((avgMathPR - 80) / 20);
+    } else if (avgMathPR > 60) {
+        mathBonus = 2 + ((avgMathPR - 60) / 20) * 2;
+    }
+
+    prob += clamp(mathBonus, 0, 5);
+
+    return Math.min(99, Math.max(1, Math.round(prob)));
 };
 
 // --- Components ---
@@ -462,7 +442,7 @@ const ParentAbilityRadar = ({ data, maxValue, isDarkMode, recordCount = 0, phase
             </div>
             <div className="h-64 w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                    <RadarChart data={data} outerRadius="76%">
+                    <RadarChart data={data} outerRadius="84%">
                         <PolarGrid stroke={isDarkMode ? 'rgba(167,243,208,0.24)' : 'rgba(148,163,184,0.28)'} />
                         <PolarAngleAxis dataKey="subject" tick={{ fontSize: 11, fontWeight: 800, fill: isDarkMode ? '#d1fae5' : '#334155' }} />
                         <PolarRadiusAxis
@@ -654,6 +634,38 @@ export default function App() {
       return getWeekendID(dateStr, availableDates);
   }, [availableDates]);
 
+  const weekendLabelByDate = useMemo(() => {
+      const labels = {};
+      sortedAvailableDatesDesc.forEach((date) => {
+          labels[date] = getWeekendDisplayLabel(date);
+      });
+      return labels;
+  }, [sortedAvailableDatesDesc]);
+
+  const dateOrderByWeekendId = useMemo(() => {
+      const orderMap = new Map();
+      sortedAvailableDatesAsc.forEach((date, index) => {
+          orderMap.set(getTestDateID(date), index);
+      });
+      return orderMap;
+  }, [sortedAvailableDatesAsc, getTestDateID]);
+
+  // 將每位學生的日期成績先依週末 ID 正規化，避免在多個流程中重複掃描 grades 物件
+  const studentGradeMapsByStudentId = useMemo(() => {
+      const gradeMaps = {};
+      allStudentsData.forEach((student) => {
+          const weekendGrades = {};
+          Object.entries(student.grades || {}).forEach(([date, grade]) => {
+              const weekendID = getTestDateID(date);
+              if (!(weekendID in weekendGrades)) {
+                  weekendGrades[weekendID] = grade;
+              }
+          });
+          gradeMaps[student.id] = weekendGrades;
+      });
+      return gradeMaps;
+  }, [allStudentsData, getTestDateID]);
+
   useEffect(() => {
       const storedAuth = localStorage.getItem('teacher_auth');
       if (storedAuth === 'true') setIsAuthenticated(true);
@@ -661,13 +673,12 @@ export default function App() {
 
   const hasPriorHistory = useMemo(() => {
       if (!viewData || !viewData.chartData) return true;
-      const sortedAllDates = sortedAvailableDatesAsc;
       return viewData.chartData.some(d => {
           const weekendID = getTestDateID(d.weekendID || d.date);
-          const idx = sortedAllDates.indexOf(weekendID);
+          const idx = dateOrderByWeekendId.get(weekendID);
           return idx >= 0 && idx < 36;
       });
-  }, [viewData, sortedAvailableDatesAsc, getTestDateID]);
+  }, [viewData, getTestDateID, dateOrderByWeekendId]);
 
   // --- OPTIMIZATION: Debounced Calculation Effect ---
   useEffect(() => {
@@ -705,16 +716,7 @@ export default function App() {
           Object.keys(scoresByDate).forEach(d => scoresByDate[d].sort((a, b) => b - a));
           Object.keys(mathScoresByDate).forEach(d => mathScoresByDate[d].sort((a, b) => b - a));
 
-          // 2. Pre-process student grades into fast lookup maps
-          const studentGradeMaps = {};
-          allStudentsData.forEach(s => {
-              if (!s.grades) return;
-              const map = {};
-              Object.entries(s.grades).forEach(([date, g]) => {
-                  map[getTestDateID(date)] = g;
-              });
-              studentGradeMaps[s.id] = map;
-          });
+          const studentGradeMaps = studentGradeMapsByStudentId;
 
           const probs = {};
           
@@ -730,7 +732,7 @@ export default function App() {
           clearTimeout(timer);
           if (rafId) cancelAnimationFrame(rafId);
       };
-  }, [allStudentsData, availableDates, getTestDateID, mode, teacherViewMode]);
+  }, [allStudentsData, availableDates, getTestDateID, mode, teacherViewMode, studentGradeMapsByStudentId]);
 
   useEffect(() => {
       if (mode === 'parent' && viewData) {
@@ -1559,17 +1561,19 @@ export default function App() {
     setLoading(false);
   };
 
+  const shouldBuildParentAnalytics = mode === 'parent' && Boolean(viewData?.chartData);
+
   const parentPhaseData = useMemo(() => {
-      if (!viewData?.chartData) return [];
+      if (!shouldBuildParentAnalytics) return [];
       const currentPhaseConfig = PHASES.find((p) => p.id === activePhase) || PHASES[0];
       const [start, end] = currentPhaseConfig.range;
-      const targetDates = sortedAvailableDatesAsc.slice(start, end);
+      const targetDateSet = new Set(sortedAvailableDatesAsc.slice(start, end));
 
       return viewData.chartData.filter((d) => {
           const wid = d.weekendID || getTestDateID(d.date);
-          return targetDates.includes(wid);
+          return targetDateSet.has(wid);
       });
-  }, [viewData, activePhase, sortedAvailableDatesAsc, getTestDateID]);
+  }, [shouldBuildParentAnalytics, viewData, activePhase, sortedAvailableDatesAsc, getTestDateID]);
 
   const parentRadarData = useMemo(() => {
       if (!parentPhaseData.length) return [];
@@ -1615,11 +1619,16 @@ export default function App() {
       return phase ? phase.name : '';
   }, [activePhase]);
 
+  const parentPhaseDataDesc = useMemo(
+      () => [...parentPhaseData].reverse(),
+      [parentPhaseData]
+  );
+
   // 預先為每個週末 / 班級 / 科目建立排序好的成績索引，避免在畫面 render 時重複掃描全班資料
   const scoreIndexByWeekendAndClass = useMemo(() => {
       const index = {};
 
-      if (!cachedClassData.length) return index;
+      if (!shouldBuildParentAnalytics || !cachedClassData.length) return index;
 
       cachedClassData.forEach(student => {
           Object.entries(student.grades || {}).forEach(([date, g]) => {
@@ -1658,10 +1667,11 @@ export default function App() {
       });
 
       return index;
-  }, [cachedClassData, getTestDateID]);
+  }, [shouldBuildParentAnalytics, cachedClassData, getTestDateID]);
 
   const distributionProfileByWeekendClass = useMemo(() => {
       const profile = {};
+      if (!shouldBuildParentAnalytics) return profile;
 
       Object.entries(scoreIndexByWeekendAndClass).forEach(([weekendID, byClass]) => {
           profile[weekendID] = {};
@@ -1686,7 +1696,7 @@ export default function App() {
       });
 
       return profile;
-  }, [scoreIndexByWeekendAndClass, availableDates]);
+  }, [shouldBuildParentAnalytics, scoreIndexByWeekendAndClass, availableDates]);
 
   // 計算單科或總分在「本班」中的名次（#1, #2...）
   const calculateRank = (date, subject, myScore, myClass) => {
@@ -1749,17 +1759,16 @@ export default function App() {
   };
 
   const batchRowsForDisplay = useMemo(() => {
+      if (mode !== 'teacher' || teacherViewMode !== 'batch' || !batchDate) return [];
+
       const weekendID = getTestDateID(batchDate);
       const rows = [];
       const totals = [];
       const totalByStudentId = {};
 
       allStudentsData.forEach(student => {
-          const studentGrades = student.grades || {};
-          const targetDate = Object.keys(studentGrades).find(k => getTestDateID(k) === weekendID);
-          if (!targetDate) return;
-
-          const dateGrades = studentGrades[targetDate] || EMPTY_GRADE;
+          const dateGrades = studentGradeMapsByStudentId[student.id]?.[weekendID];
+          if (!dateGrades) return;
           const totalVal = parseFloat(dateGrades.total);
           if (!isNaN(totalVal)) {
               totals.push(totalVal);
@@ -1805,7 +1814,7 @@ export default function App() {
       }
 
       return computedRows;
-  }, [allStudentsData, batchDate, teacherClassFilter, getTestDateID, sortByPR, sortByProb, admissionProbabilities]);
+  }, [mode, teacherViewMode, allStudentsData, batchDate, teacherClassFilter, getTestDateID, sortByPR, sortByProb, admissionProbabilities, studentGradeMapsByStudentId]);
 
 
   const openStatsModal = (date, grades, className) => {
@@ -1946,7 +1955,7 @@ export default function App() {
                 <div className={`flex flex-wrap gap-2 max-h-24 overflow-y-auto p-2 rounded-xl border mb-6 no-scrollbar shadow-inner ${darkMode ? 'bg-[#020617]/30 border-white/5' : 'bg-slate-50/50 border-slate-200/60'}`}>
                     {sortedAvailableDatesDesc.map(d => (
                         <div key={d} className={`flex items-center px-2.5 py-1 rounded-lg text-[10px] font-bold border shadow-sm ${darkMode ? 'bg-slate-800 text-slate-300 border-white/5' : 'bg-white text-slate-600 border-slate-100'}`}>
-                            {getWeekendDisplayLabel(d)} <button onClick={() => { setDeleteTarget(d); executeWithSecurity(confirmDeleteDate); }} className="ml-1.5 text-slate-400 hover:text-red-500"><X className="w-3 h-3"/></button>
+                            {(weekendLabelByDate[d] || getWeekendDisplayLabel(d))} <button onClick={() => { setDeleteTarget(d); executeWithSecurity(confirmDeleteDate); }} className="ml-1.5 text-slate-400 hover:text-red-500"><X className="w-3 h-3"/></button>
                         </div>
                     ))}
                 </div>
@@ -1982,7 +1991,7 @@ export default function App() {
                             <div className="flex items-center gap-2">
                                 <span className="text-xs font-bold text-slate-500">日期</span>
                                 <select className={`border rounded-lg px-2 py-1.5 text-xs font-bold outline-none shadow-sm ${darkMode ? 'bg-[#020617]/50 border-white/10 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`} value={batchDate} onChange={(e) => setBatchDate(e.target.value)}>
-                                    {sortedAvailableDatesDesc.map(d => <option key={d} value={d}>{getWeekendDisplayLabel(d)}</option>)}
+                                    {sortedAvailableDatesDesc.map(d => <option key={d} value={d}>{weekendLabelByDate[d] || getWeekendDisplayLabel(d)}</option>)}
                                 </select>
                             </div>
                             <div className="flex gap-2">
@@ -2073,7 +2082,7 @@ export default function App() {
                                 const g = grades[date] || { chi: '', eng: '', math: '', total: '', class: 'A班' };
                                 return (
                                     <tr key={date} className={`${darkMode ? 'hover:bg-white/5' : 'hover:bg-slate-50/80'} transition-colors`}>
-                                            <td className="px-4 py-3 font-mono text-xs font-bold opacity-60">{getWeekendDisplayLabel(date)}</td>
+                                            <td className="px-4 py-3 font-mono text-xs font-bold opacity-60">{weekendLabelByDate[date] || getWeekendDisplayLabel(date)}</td>
                                             <td className="px-2 py-2 text-center">
                                                 <select 
                                                     value={g.class || 'A班'} 
@@ -2182,7 +2191,7 @@ export default function App() {
                 <div className={`p-6 border-t ${darkMode ? 'bg-[#101a15] border-emerald-200/10' : 'bg-white border-slate-50'}`}>
                     <h4 className={`font-bold mb-6 text-xs flex items-center justify-center gap-2 tracking-widest uppercase ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>詳細紀錄</h4>
                     <div className="space-y-4">
-                        {parentPhaseData.slice().reverse().map((d) => {
+                        {parentPhaseDataDesc.map((d) => {
                              // 使用 weekendID（如果存在）或 date，確保日A班/日B班的週日日期也能正確計算排名
                              const dateForRank = d.weekendID || d.date;
                              const totalRank = calculateRank(dateForRank, 'total', d.total, d.class);
@@ -2269,7 +2278,7 @@ export default function App() {
                                   const avg = dateData[avgSettingsClassFilter] || { chi: '', eng: '', math: '', total: '' };
                                   return (
                                       <tr key={date} className={darkMode ? 'bg-transparent' : 'bg-white'}>
-                                          <td className="px-4 py-3 font-mono font-bold text-slate-500">{getWeekendDisplayLabel(date)}</td>
+                                          <td className="px-4 py-3 font-mono font-bold text-slate-500">{weekendLabelByDate[date] || getWeekendDisplayLabel(date)}</td>
                                           {['chi', 'eng', 'math', 'total'].map(sub => (
                                               <td key={sub} className="px-1 py-1.5">
                                                   <input id={`avg-${dateIndex}-${sub}`} type="number" className={`w-full text-center p-2 rounded-xl border outline-none transition-all font-bold ${darkMode ? 'bg-slate-900 border-transparent focus:bg-slate-800 focus:border-blue-500/50 text-slate-200' : 'bg-slate-50 border-slate-100 focus:bg-white focus:border-indigo-300 text-slate-600'} ${sub==='total'?'text-blue-500':''}`} value={avg[sub] || ''} onChange={(e) => handleManualAverageChange(date, avgSettingsClassFilter, sub, e.target.value)} onKeyDown={(e) => handleAvgKeyDown(e, dateIndex, sub)} onPaste={(e) => handleAvgPaste(e, dateIndex, sub)} placeholder="-" />

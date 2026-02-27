@@ -32,6 +32,7 @@ const SECURITY_CODE = String.fromCharCode(49, 49, 48, 55);
 const QUERY_COUNT_RESET_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000;
 const MAX_QUERY_EVENTS = 3000;
 const TEACHER_MESSAGE_DOC_ID = 'teacher_parent_message_v1';
+const STUDENTS_CACHE_TTL_MS = 60 * 1000;
 
 const runtimeFirebaseConfig =
   typeof window !== 'undefined' ? window.__firebase_config : undefined;
@@ -728,7 +729,7 @@ export default function App() {
   const [pendingActionTitle, setPendingActionTitle] = useState('安全驗證');
   const securityInputRef = useRef(null);
     
-  const [teacherViewMode, setTeacherViewMode] = useState('single');
+  const [teacherViewMode, setTeacherViewMode] = useState('batch');
   const [teacherClassFilter, setTeacherClassFilter] = useState('A班'); 
   const [avgSettingsClassFilter, setAvgSettingsClassFilter] = useState('A班'); 
   const [batchDate, setBatchDate] = useState(''); 
@@ -766,6 +767,7 @@ export default function App() {
 
   const [_xlsxLoaded, setXlsxLoaded] = useState(false);
   const xlsxLoadingPromiseRef = useRef(null);
+  const studentsCacheRef = useRef({ loadedAt: 0 });
   const darkMode = false;
   const isLimitedTeacherRole = teacherAuthRole === TEACHER_ROLE.LIMITED;
   const canEditStudentGrades = !isLimitedTeacherRole;
@@ -1227,6 +1229,11 @@ export default function App() {
           loadQueryStats();
       }
   }, [mode, isAuthenticated, loadQueryStats]);
+
+  useEffect(() => {
+      if (mode !== 'teacher') return;
+      setTeacherViewMode('batch');
+  }, [mode]);
 
   useEffect(() => {
       if (!user) return;

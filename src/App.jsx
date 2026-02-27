@@ -97,25 +97,46 @@ const getAcademicSortValue = (dateStr) => {
 };
 
 const PHASE_BOUNDARIES = {
+    p1Start: '04/19',
     p1End: '08/02',
-    mockStart: '12/20'
+    p2Start: '08/09',
+    p2End: '12/13',
+    mockStart: '12/20',
+    mockEnd: '03/20'
 };
-const FORCED_MOCK_DATES = new Set(['09/29']);
 
 const resolvePhaseByDate = (dateStr, allDates = null) => {
     const weekendID = getWeekendID(dateStr, allDates);
     const normalized = normalizeDateToken(weekendID);
     if (!normalized) return 'p2';
 
-    if (FORCED_MOCK_DATES.has(normalized)) return 'mock';
-
     const dateValue = getAcademicSortValue(normalized);
+    const p1StartValue = getAcademicSortValue(PHASE_BOUNDARIES.p1Start);
     const p1EndValue = getAcademicSortValue(PHASE_BOUNDARIES.p1End);
+    const p2StartValue = getAcademicSortValue(PHASE_BOUNDARIES.p2Start);
+    const p2EndValue = getAcademicSortValue(PHASE_BOUNDARIES.p2End);
     const mockStartValue = getAcademicSortValue(PHASE_BOUNDARIES.mockStart);
-    if (Number.isNaN(dateValue) || Number.isNaN(p1EndValue) || Number.isNaN(mockStartValue)) return 'p2';
+    const mockEndValue = getAcademicSortValue(PHASE_BOUNDARIES.mockEnd);
+    if (
+        Number.isNaN(dateValue) ||
+        Number.isNaN(p1StartValue) ||
+        Number.isNaN(p1EndValue) ||
+        Number.isNaN(p2StartValue) ||
+        Number.isNaN(p2EndValue) ||
+        Number.isNaN(mockStartValue) ||
+        Number.isNaN(mockEndValue)
+    ) {
+        return 'p2';
+    }
 
-    if (dateValue >= mockStartValue) return 'mock';
-    if (dateValue <= p1EndValue) return 'p1';
+    if (dateValue >= p1StartValue && dateValue <= p1EndValue) return 'p1';
+    if (dateValue >= p2StartValue && dateValue <= p2EndValue) return 'p2';
+    if (dateValue >= mockStartValue && dateValue <= mockEndValue) return 'mock';
+
+    // 補齊沒有考試的空窗日期，維持最接近下一階段的歸類。
+    if (dateValue < p2StartValue) return 'p1';
+    if (dateValue < mockStartValue) return 'p2';
+    if (dateValue > mockEndValue) return 'mock';
     return 'p2';
 };
 
@@ -274,52 +295,68 @@ const calculateTotal = (chi, eng, math) => {
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
+const toNumberOrNull = (value) => {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+};
+
+const resolveRiskLevel = (score) => {
+    if (score >= 70) return '高風險';
+    if (score >= 45) return '中風險';
+    return '觀察';
+};
+
+const getHeatCellStyle = (ratio, isDarkMode) => {
+    if (!Number.isFinite(ratio)) {
+        return isDarkMode
+            ? { background: 'rgba(15,23,42,0.45)', color: '#94a3b8', border: '1px solid rgba(148,163,184,0.2)' }
+            : { background: 'rgba(248,250,252,0.85)', color: '#94a3b8', border: '1px solid rgba(148,163,184,0.25)' };
+    }
+
+    const bounded = clamp(ratio, 0, 1);
+    const hue = Math.round(bounded * 120);
+    const lightnessStart = isDarkMode ? 32 : 90;
+    const lightnessEnd = isDarkMode ? 24 : 82;
+    const textColor = bounded <= 0.34 ? '#ffffff' : (isDarkMode ? '#dcfce7' : '#052e16');
+
+    return {
+        color: textColor,
+        border: `1px solid hsla(${hue}, 85%, ${isDarkMode ? 62 : 34}%, ${isDarkMode ? 0.35 : 0.25})`,
+        background: `linear-gradient(135deg, hsla(${hue}, 94%, ${lightnessStart}%, ${isDarkMode ? 0.55 : 0.95}) 0%, hsla(${hue}, 90%, ${lightnessEnd}%, ${isDarkMode ? 0.72 : 0.98}) 100%)`,
+        boxShadow: `inset 0 0 0 1px hsla(${hue}, 80%, ${isDarkMode ? 70 : 45}%, ${isDarkMode ? 0.16 : 0.18})`
+    };
+};
+
 const getProbabilityVisual = (probValue, isDarkMode) => {
     const parsed = Number(probValue);
     if (!Number.isFinite(parsed)) return null;
 
     const prob = clamp(parsed, 1, 99);
-    if (prob <= 25) {
-        return {
-            textStyle: {
-                color: isDarkMode ? '#fecaca' : '#dc2626',
-                textShadow: isDarkMode
-                    ? '0 0 14px rgba(248,113,113,0.55)'
-                    : '0 1px 2px rgba(220,38,38,0.38)'
-            },
-            badgeStyle: {
-                color: '#ffffff',
-                background: isDarkMode
-                    ? 'linear-gradient(135deg, rgba(255,89,89,0.86) 0%, rgba(255,42,42,0.9) 56%, rgba(168,15,15,0.96) 100%)'
-                    : 'linear-gradient(135deg, rgba(255,99,99,0.95) 0%, rgba(255,44,44,0.97) 55%, rgba(185,18,27,0.98) 100%)',
-                border: isDarkMode
-                    ? '1px solid rgba(254,202,202,0.65)'
-                    : '1px solid rgba(220,38,38,0.65)',
-                boxShadow: isDarkMode
-                    ? '0 0 0 1px rgba(254,202,202,0.2), 0 10px 22px -12px rgba(239,68,68,0.75)'
-                    : '0 0 0 1px rgba(220,38,38,0.28), 0 10px 22px -12px rgba(220,38,38,0.62)'
-            }
-        };
-    }
-
-    const hue = Math.round(Math.pow(prob / 100, 0.72) * 130);
-    const saturation = isDarkMode ? 96 : 94;
-    const textLightness = isDarkMode ? 72 : 36;
-    const badgeTextColor = `hsl(${hue} ${saturation}% ${isDarkMode ? 78 : 34}%)`;
-    const badgeAlphaStart = isDarkMode ? 0.48 : 0.3;
-    const badgeAlphaEnd = isDarkMode ? 0.64 : 0.44;
-    const hueEnd = clamp(hue + 14, 0, 140);
+    const progress = prob / 100;
+    // 連續色譜：低機率鮮紅(0deg) -> 中段黃橘 -> 高機率綠色(120deg)
+    const hue = Math.round(progress * 120);
+    const hueStart = clamp(hue - 10, 0, 120);
+    const hueEnd = clamp(hue + 10, 0, 120);
+    const saturation = isDarkMode ? 94 : 96;
+    const textLightness = isDarkMode ? 74 : 34;
+    const badgeTextColor = prob <= 45
+        ? '#ffffff'
+        : `hsl(${hue} ${saturation}% ${isDarkMode ? 84 : 24}%)`;
+    const badgeAlphaStart = isDarkMode ? 0.74 : 0.92;
+    const badgeAlphaEnd = isDarkMode ? 0.86 : 0.98;
 
     return {
         textStyle: {
             color: `hsl(${hue} ${saturation}% ${textLightness}%)`,
-            textShadow: 'none'
+            textShadow: prob <= 25
+                ? (isDarkMode ? '0 0 12px rgba(248,113,113,0.45)' : '0 1px 2px rgba(220,38,38,0.35)')
+                : 'none'
         },
         badgeStyle: {
             color: badgeTextColor,
-            background: `linear-gradient(135deg, hsla(${hue}, ${saturation}%, ${isDarkMode ? 56 : 54}%, ${badgeAlphaStart}) 0%, hsla(${hueEnd}, ${saturation}%, ${isDarkMode ? 48 : 50}%, ${badgeAlphaEnd}) 100%)`,
-            border: `1px solid hsla(${hue}, ${saturation}%, ${isDarkMode ? 72 : 42}%, ${isDarkMode ? 0.5 : 0.3})`,
-            boxShadow: `0 8px 18px -12px hsla(${hue}, ${saturation}%, ${isDarkMode ? 62 : 42}%, 0.4)`
+            background: `linear-gradient(135deg, hsla(${hueStart}, ${saturation}%, ${isDarkMode ? 52 : 48}%, ${badgeAlphaStart}) 0%, hsla(${hueEnd}, ${saturation}%, ${isDarkMode ? 46 : 44}%, ${badgeAlphaEnd}) 100%)`,
+            border: `1px solid hsla(${hue}, ${saturation}%, ${isDarkMode ? 78 : 32}%, ${isDarkMode ? 0.52 : 0.42})`,
+            boxShadow: `0 8px 20px -12px hsla(${hue}, ${saturation}%, ${isDarkMode ? 60 : 38}%, ${prob <= 25 ? 0.7 : 0.5})`
         }
     };
 };
@@ -545,6 +582,8 @@ export default function App() {
   const [showSecurityModal, setShowSecurityModal] = useState(false);
   const [securityInput, setSecurityInput] = useState('');
   const [pendingAction, setPendingAction] = useState(null);
+  const [pendingActionTitle, setPendingActionTitle] = useState('安全驗證');
+  const [pendingActionHint, setPendingActionHint] = useState('請輸入安全密碼以繼續');
   const securityInputRef = useRef(null);
     
   const [teacherViewMode, setTeacherViewMode] = useState('single');
@@ -637,6 +676,18 @@ export default function App() {
           orderMap.set(getTestDateID(date), index);
       });
       return orderMap;
+  }, [sortedAvailableDatesAsc, getTestDateID]);
+
+  const orderedWeekendIds = useMemo(() => {
+      const ids = [];
+      const seen = new Set();
+      sortedAvailableDatesAsc.forEach((date) => {
+          const weekendID = getTestDateID(date);
+          if (!weekendID || seen.has(weekendID)) return;
+          seen.add(weekendID);
+          ids.push(weekendID);
+      });
+      return ids;
   }, [sortedAvailableDatesAsc, getTestDateID]);
 
   // 將每位學生的日期成績先依週末 ID 正規化，避免在多個流程中重複掃描 grades 物件
@@ -890,8 +941,6 @@ export default function App() {
   }, [shouldResetQueryStats]);
 
   const handleResetQueryStats = useCallback(async () => {
-      if (!window.confirm('確定要手動重置所有查詢次數嗎？')) return;
-
       const nowIso = new Date().toISOString();
       setQueryStatsLoading(true);
       try {
@@ -918,23 +967,32 @@ export default function App() {
           loadQueryStats();
       }
   }, [mode, isAuthenticated, loadQueryStats]);
-  const executeWithSecurity = (action) => {
+  const closeSecurityModal = useCallback(() => {
+      setShowSecurityModal(false);
+      setPendingAction(null);
+      setSecurityInput('');
+      setPendingActionTitle('安全驗證');
+      setPendingActionHint('請輸入安全密碼以繼續');
+  }, []);
+
+  const executeWithSecurity = useCallback((action, options = {}) => {
+      const { title = '安全驗證', hint = '此操作涉及資料變更，請輸入 1107 以繼續。' } = options;
       setPendingAction(() => action);
+      setPendingActionTitle(title);
+      setPendingActionHint(hint);
       setSecurityInput('');
       setShowSecurityModal(true);
       setTimeout(() => {
           if (securityInputRef.current) securityInputRef.current.focus();
       }, 100);
-  };
+  }, []);
 
   const handleSecurityInput = (e) => {
       const val = e.target.value;
       setSecurityInput(val);
       if (val === SECURITY_CODE) {
           if (pendingAction) pendingAction();
-          setShowSecurityModal(false);
-          setPendingAction(null);
-          setSecurityInput('');
+          closeSecurityModal();
       }
   };
 
@@ -1650,6 +1708,119 @@ export default function App() {
       setTimeout(() => setStatusMsg(''), 2000);
   };
 
+  const handleExportWeeklyReportExcel = async () => {
+      if (!window.XLSX) {
+          setStatusMsg('Excel 模組載入中，請稍後');
+          try {
+              await ensureXlsxReady();
+          } catch (error) {
+              console.error('XLSX load error:', error);
+              setStatusMsg('Excel 模組載入失敗');
+              setTimeout(() => setStatusMsg(''), 2000);
+              return;
+          }
+      }
+
+      if (!batchRowsForDisplay.length) {
+          setStatusMsg('目前沒有可匯出的資料');
+          setTimeout(() => setStatusMsg(''), 2000);
+          return;
+      }
+
+      const workbook = window.XLSX.utils.book_new();
+      const displayDateLabel = weekendLabelByDate[batchDate] || getWeekendDisplayLabel(batchDate) || batchDate;
+
+      const summaryRows = [
+          { 指標: '日期', 數值: displayDateLabel },
+          { 指標: '班級', 數值: teacherClassFilter },
+          { 指標: '人數', 數值: batchWeeklySummary?.count ?? batchRowsForDisplay.length },
+          { 指標: '平均總分', 數值: batchWeeklySummary?.avgTotal !== null && batchWeeklySummary?.avgTotal !== undefined ? Number(f1(batchWeeklySummary.avgTotal)) : '' },
+          { 指標: '平均 PR', 數值: batchWeeklySummary?.avgPR !== null && batchWeeklySummary?.avgPR !== undefined ? Number(f1(batchWeeklySummary.avgPR)) : '' },
+          { 指標: '平均錄取機率(%)', 數值: batchWeeklySummary?.avgProb !== null && batchWeeklySummary?.avgProb !== undefined ? Number(f1(batchWeeklySummary.avgProb)) : '' },
+          { 指標: '風險學生數', 數值: batchWeeklySummary?.riskCount ?? batchRiskAlerts.length },
+          { 指標: '匯出時間', 數值: new Date().toLocaleString() }
+      ];
+      const summarySheet = window.XLSX.utils.json_to_sheet(summaryRows);
+      summarySheet['!cols'] = [{ wch: 16 }, { wch: 24 }];
+      window.XLSX.utils.book_append_sheet(workbook, summarySheet, '週報摘要');
+
+      const detailRows = batchRowsForDisplay.map((row, index) => ({
+          '序號': index + 1,
+          '學號': row.student.id,
+          '姓名': row.student.name || '',
+          '班級': row.dateGrades.class || '',
+          '國文': row.dateGrades.chi ?? '',
+          '英文': row.dateGrades.eng ?? '',
+          '數學': row.dateGrades.math ?? '',
+          '總分': row.dateGrades.total ?? '',
+          'PR': row.prValue === '-' ? '' : row.prValue,
+          '錄取機率(%)': row.probValue === '-' ? '' : row.probValue,
+          '查詢次數': queryStatsById[row.student.id] || 0
+      }));
+      const detailSheet = window.XLSX.utils.json_to_sheet(detailRows);
+      detailSheet['!cols'] = [
+          { wch: 6 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 12 }, { wch: 10 }
+      ];
+      window.XLSX.utils.book_append_sheet(workbook, detailSheet, '班級成績總表');
+
+      const riskRows = batchRiskAlerts.map((item, index) => ({
+          '序號': index + 1,
+          '學號': item.id,
+          '姓名': item.name,
+          '風險等級': item.riskLevel,
+          '風險分數': item.riskScore,
+          '總分': item.total ?? '',
+          'PR': item.pr ?? '',
+          '錄取機率(%)': item.prob ?? '',
+          '較上次總分差': item.totalDelta === null ? '' : Number(f1(item.totalDelta)),
+          '原因': item.reasons.join('、')
+      }));
+      const riskSheet = window.XLSX.utils.json_to_sheet(
+          riskRows.length ? riskRows : [{ 序號: '', 學號: '', 姓名: '', 風險等級: '', 風險分數: '', 原因: '本次無高風險名單' }]
+      );
+      riskSheet['!cols'] = [{ wch: 6 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 8 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 36 }];
+      window.XLSX.utils.book_append_sheet(workbook, riskSheet, '風險預警');
+
+      const heatmapRows = batchHeatmapRows.map((row) => ({
+          '學號': row.id,
+          '姓名': row.name,
+          '國文': row.values.chi ?? '',
+          '國文強度(0-1)': row.ratios.chi !== null ? Number(row.ratios.chi.toFixed(3)) : '',
+          '英文': row.values.eng ?? '',
+          '英文強度(0-1)': row.ratios.eng !== null ? Number(row.ratios.eng.toFixed(3)) : '',
+          '數學': row.values.math ?? '',
+          '數學強度(0-1)': row.ratios.math !== null ? Number(row.ratios.math.toFixed(3)) : '',
+          '總分': row.values.total ?? '',
+          '總分強度(0-1)': row.ratios.total !== null ? Number(row.ratios.total.toFixed(3)) : '',
+          'PR': row.values.pr ?? '',
+          'PR強度(0-1)': row.ratios.pr !== null ? Number(row.ratios.pr.toFixed(3)) : '',
+          '錄取機率(%)': row.values.prob ?? '',
+          '機率強度(0-1)': row.ratios.prob !== null ? Number(row.ratios.prob.toFixed(3)) : '',
+          '風險分數': row.riskScore || ''
+      }));
+      const heatmapSheet = window.XLSX.utils.json_to_sheet(heatmapRows);
+      heatmapSheet['!cols'] = [
+          { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 8 }, { wch: 12 },
+          { wch: 8 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 10 }
+      ];
+      window.XLSX.utils.book_append_sheet(workbook, heatmapSheet, '熱力圖數據');
+
+      const queryRows = batchRowsForDisplay.map((row) => ({
+          '學號': row.student.id,
+          '姓名': row.student.name || '',
+          '查詢次數': Number(queryStatsById[row.student.id] || 0)
+      })).sort((a, b) => b['查詢次數'] - a['查詢次數']);
+      const querySheet = window.XLSX.utils.json_to_sheet(queryRows);
+      querySheet['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 10 }];
+      window.XLSX.utils.book_append_sheet(workbook, querySheet, '查詢次數');
+
+      const safeClass = String(teacherClassFilter).replace(/[^\w\u4e00-\u9fa5-]/g, '');
+      const safeDate = String(batchDate || '').replace('/', '-');
+      window.XLSX.writeFile(workbook, `weekly_report_${safeDate}_${safeClass}.xlsx`);
+      setStatusMsg('已下載週報 Excel');
+      setTimeout(() => setStatusMsg(''), 2000);
+  };
+
   const handleParentSearch = async () => {
     if (!user || !searchId.trim()) return;
     setSearchError(''); setViewData(null); setLoading(true);
@@ -2027,6 +2198,222 @@ export default function App() {
       return computedRows;
   }, [mode, teacherViewMode, allStudentsData, batchDate, teacherClassFilter, getTestDateID, sortByPR, sortByProb, admissionProbabilities, studentGradeMapsByStudentId]);
 
+  const batchRiskAlerts = useMemo(() => {
+      if (mode !== 'teacher' || teacherViewMode !== 'batch' || !batchDate || !batchRowsForDisplay.length) return [];
+
+      const selectedWeekendID = getTestDateID(batchDate);
+      const selectedIndex = orderedWeekendIds.indexOf(selectedWeekendID);
+      const configuredClassAvg = toNumberOrNull(classAverages[selectedWeekendID]?.[teacherClassFilter]?.total);
+
+      const rowTotals = batchRowsForDisplay
+          .map((row) => toNumberOrNull(row.dateGrades.total))
+          .filter((value) => value !== null);
+      const rowAverage = rowTotals.length ? rowTotals.reduce((sum, value) => sum + value, 0) / rowTotals.length : null;
+      const classAvgTotal = configuredClassAvg ?? rowAverage;
+
+      const alerts = batchRowsForDisplay.map((row) => {
+          const prob = toNumberOrNull(row.probValue);
+          const pr = toNumberOrNull(row.prValue);
+          const total = toNumberOrNull(row.dateGrades.total);
+          const queryCount = Number(queryStatsById[row.student.id] || 0);
+
+          const reasons = [];
+          let riskScore = 0;
+          let totalDelta = null;
+
+          if (prob === null) {
+              riskScore += 8;
+              reasons.push('機率資料不足');
+          } else if (prob <= 30) {
+              riskScore += 46;
+              reasons.push(`錄取機率偏低 ${prob}%`);
+          } else if (prob <= 50) {
+              riskScore += 24;
+              reasons.push(`錄取機率需關注 ${prob}%`);
+          }
+
+          if (pr !== null && pr <= 35) {
+              riskScore += 24;
+              reasons.push(`PR 偏低 ${pr}`);
+          } else if (pr !== null && pr <= 50) {
+              riskScore += 12;
+              reasons.push(`PR 低於達標線 ${pr}`);
+          }
+
+          if (total !== null && classAvgTotal !== null) {
+              const gap = classAvgTotal - total;
+              if (gap >= 25) {
+                  riskScore += 24;
+                  reasons.push(`低於班平均 ${f1(gap)} 分`);
+              } else if (gap >= 12) {
+                  riskScore += 12;
+                  reasons.push(`低於班平均 ${f1(gap)} 分`);
+              }
+          }
+
+          if (selectedIndex > 0 && total !== null) {
+              const previousWeekendIds = orderedWeekendIds.slice(0, selectedIndex).reverse();
+              const studentGrades = studentGradeMapsByStudentId[row.student.id] || {};
+              for (const prevWeekendID of previousWeekendIds) {
+                  const prevTotal = toNumberOrNull(studentGrades[prevWeekendID]?.total);
+                  if (prevTotal === null) continue;
+                  totalDelta = total - prevTotal;
+                  if (totalDelta <= -10) {
+                      riskScore += 20;
+                      reasons.push(`較上次下降 ${f1(Math.abs(totalDelta))} 分`);
+                  } else if (totalDelta <= -5) {
+                      riskScore += 10;
+                      reasons.push(`較上次下降 ${f1(Math.abs(totalDelta))} 分`);
+                  }
+                  break;
+              }
+          }
+
+          if (queryCount >= 8) {
+              riskScore += 8;
+              reasons.push('查詢次數偏高');
+          }
+
+          riskScore = Math.round(clamp(riskScore, 0, 100));
+          if (riskScore < 25) return null;
+
+          return {
+              id: row.student.id,
+              name: row.student.name || '',
+              className: row.dateGrades.class || teacherClassFilter,
+              total,
+              pr,
+              prob,
+              totalDelta,
+              queryCount,
+              riskScore,
+              riskLevel: resolveRiskLevel(riskScore),
+              reasons: reasons.slice(0, 3)
+          };
+      }).filter(Boolean);
+
+      return alerts
+          .sort((a, b) => {
+              if (b.riskScore !== a.riskScore) return b.riskScore - a.riskScore;
+              const probA = a.prob ?? 999;
+              const probB = b.prob ?? 999;
+              return probA - probB;
+          })
+          .slice(0, 12);
+  }, [
+      mode,
+      teacherViewMode,
+      batchDate,
+      batchRowsForDisplay,
+      getTestDateID,
+      orderedWeekendIds,
+      classAverages,
+      teacherClassFilter,
+      queryStatsById,
+      studentGradeMapsByStudentId
+  ]);
+
+  const batchHeatmapRows = useMemo(() => {
+      if (mode !== 'teacher' || teacherViewMode !== 'batch' || !batchDate || !batchRowsForDisplay.length) return [];
+
+      const fallbackMaxByMetric = {
+          chi: getMaxScore(batchDate, 'chi', sortedAvailableDatesAsc),
+          eng: getMaxScore(batchDate, 'eng', sortedAvailableDatesAsc),
+          math: getMaxScore(batchDate, 'math', sortedAvailableDatesAsc),
+          total: 300,
+          pr: 99,
+          prob: 99
+      };
+
+      const metricKeys = ['chi', 'eng', 'math', 'total', 'pr', 'prob'];
+      const rawRows = batchRowsForDisplay.map((row) => ({
+          id: row.student.id,
+          name: row.student.name || '',
+          values: {
+              chi: toNumberOrNull(row.dateGrades.chi),
+              eng: toNumberOrNull(row.dateGrades.eng),
+              math: toNumberOrNull(row.dateGrades.math),
+              total: toNumberOrNull(row.dateGrades.total),
+              pr: toNumberOrNull(row.prValue),
+              prob: toNumberOrNull(row.probValue)
+          }
+      }));
+
+      const metricStats = {};
+      metricKeys.forEach((metric) => {
+          const values = rawRows.map((row) => row.values[metric]).filter((value) => value !== null);
+          if (!values.length) {
+              metricStats[metric] = { min: 0, max: fallbackMaxByMetric[metric], fallbackMax: fallbackMaxByMetric[metric] };
+              return;
+          }
+          metricStats[metric] = {
+              min: Math.min(...values),
+              max: Math.max(...values),
+              fallbackMax: fallbackMaxByMetric[metric]
+          };
+      });
+
+      const riskScoreById = {};
+      batchRiskAlerts.forEach((item) => {
+          riskScoreById[item.id] = item.riskScore;
+      });
+
+      const toRatio = (value, metric) => {
+          if (value === null) return null;
+          const stats = metricStats[metric];
+          if (stats.max > stats.min) {
+              return clamp((value - stats.min) / (stats.max - stats.min), 0, 1);
+          }
+          return clamp(value / Math.max(stats.fallbackMax, 1), 0, 1);
+      };
+
+      return rawRows.map((row) => ({
+          ...row,
+          riskScore: riskScoreById[row.id] || 0,
+          ratios: {
+              chi: toRatio(row.values.chi, 'chi'),
+              eng: toRatio(row.values.eng, 'eng'),
+              math: toRatio(row.values.math, 'math'),
+              total: toRatio(row.values.total, 'total'),
+              pr: toRatio(row.values.pr, 'pr'),
+              prob: toRatio(row.values.prob, 'prob')
+          }
+      }));
+  }, [
+      mode,
+      teacherViewMode,
+      batchDate,
+      batchRowsForDisplay,
+      sortedAvailableDatesAsc,
+      batchRiskAlerts
+  ]);
+
+  const batchWeeklySummary = useMemo(() => {
+      if (!batchRowsForDisplay.length) return null;
+
+      const totalValues = batchRowsForDisplay
+          .map((row) => toNumberOrNull(row.dateGrades.total))
+          .filter((value) => value !== null);
+      const probValues = batchRowsForDisplay
+          .map((row) => toNumberOrNull(row.probValue))
+          .filter((value) => value !== null);
+      const prValues = batchRowsForDisplay
+          .map((row) => toNumberOrNull(row.prValue))
+          .filter((value) => value !== null);
+
+      const avgTotal = totalValues.length ? totalValues.reduce((sum, value) => sum + value, 0) / totalValues.length : null;
+      const avgProb = probValues.length ? probValues.reduce((sum, value) => sum + value, 0) / probValues.length : null;
+      const avgPR = prValues.length ? prValues.reduce((sum, value) => sum + value, 0) / prValues.length : null;
+
+      return {
+          count: batchRowsForDisplay.length,
+          avgTotal,
+          avgProb,
+          avgPR,
+          riskCount: batchRiskAlerts.length
+      };
+  }, [batchRowsForDisplay, batchRiskAlerts]);
+
   const queryStatsRows = useMemo(() => {
       const nameById = {};
       allStudentsData.forEach((student) => {
@@ -2229,7 +2616,7 @@ export default function App() {
                 <div className={`flex flex-wrap gap-2 max-h-24 overflow-y-auto p-2 rounded-xl border mb-6 no-scrollbar shadow-inner ${darkMode ? 'bg-[#020617]/30 border-white/5' : 'bg-slate-50/50 border-slate-200/60'}`}>
                     {sortedAvailableDatesDesc.map(d => (
                         <div key={d} className={`flex items-center px-2.5 py-1 rounded-lg text-[10px] font-bold border shadow-sm ${darkMode ? 'bg-slate-800 text-slate-300 border-white/5' : 'bg-white text-slate-600 border-slate-100'}`}>
-                            {(weekendLabelByDate[d] || getWeekendDisplayLabel(d))} <button onClick={() => { handleDeleteDate(d); executeWithSecurity(confirmDeleteDate); }} className="ml-1.5 text-slate-400 hover:text-red-500"><X className="w-3 h-3"/></button>
+                            {(weekendLabelByDate[d] || getWeekendDisplayLabel(d))} <button onClick={() => handleDeleteDate(d)} className="ml-1.5 text-slate-400 hover:text-red-500"><X className="w-3 h-3"/></button>
                         </div>
                     ))}
                 </div>
@@ -2294,6 +2681,9 @@ export default function App() {
                                 </button>
                                 <button onClick={handleExportBatchExcel} className={`px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1 border ${darkMode ? 'bg-slate-800 text-slate-300 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
                                     <FileSpreadsheet className="w-3.5 h-3.5" /> 下載 Excel
+                                </button>
+                                <button onClick={handleExportWeeklyReportExcel} className={`px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1 border ${darkMode ? 'bg-emerald-900/40 text-emerald-200 border-emerald-400/30 hover:bg-emerald-800/50' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'}`}>
+                                    <FileSpreadsheet className="w-3.5 h-3.5" /> 下載週報
                                 </button>
                                 <button
                                   onClick={handleSaveBatchGrades}
@@ -2370,6 +2760,112 @@ export default function App() {
                             </table>
                         </div>
 
+                        <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                            <div className={`rounded-2xl border p-4 ${darkMode ? 'bg-slate-900/40 border-white/10' : 'bg-white/75 border-slate-200/80'}`}>
+                                <div className="flex items-center justify-between mb-3">
+                                    <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>風險預警清單</h4>
+                                    <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>
+                                        {batchRiskAlerts.length} 人
+                                    </span>
+                                </div>
+                                <div className={`text-[11px] mb-3 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                    依「機率、PR、低於班平均、近期下滑」綜合計分，優先顯示需要追蹤的學生。
+                                </div>
+                                <div className="space-y-2">
+                                    {batchRiskAlerts.map((item) => {
+                                        const riskHue = Math.round(clamp((100 - item.riskScore) * 1.2, 0, 120));
+                                        return (
+                                            <div key={item.id} className={`grid grid-cols-[4.6rem_1fr_auto] gap-2 items-center rounded-xl border px-3 py-2 ${darkMode ? 'border-white/10 bg-slate-900/40' : 'border-slate-200 bg-white/90'}`}>
+                                                <div className={`font-mono text-[11px] font-black text-center ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>{item.id}</div>
+                                                <div className="min-w-0">
+                                                    <div className={`text-xs font-bold truncate ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>{item.name || '-'}</div>
+                                                    <div className={`text-[10px] truncate ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                        {item.reasons.join('、')}
+                                                    </div>
+                                                </div>
+                                                <div className="text-right flex flex-col items-end gap-1">
+                                                    <div
+                                                      className="text-[10px] font-black px-2 py-1 rounded-full"
+                                                      style={{
+                                                          color: '#fff',
+                                                          border: `1px solid hsla(${riskHue}, 90%, 60%, 0.4)`,
+                                                          background: `linear-gradient(135deg, hsla(${riskHue}, 95%, 42%, 0.92) 0%, hsla(${Math.max(riskHue - 12, 0)}, 95%, 34%, 0.98) 100%)`
+                                                      }}
+                                                    >
+                                                        {item.riskLevel} {item.riskScore}
+                                                    </div>
+                                                    <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                        {item.prob !== null ? `${item.prob}%` : '--'} / {item.pr !== null ? `PR ${item.pr}` : 'PR --'}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                    {batchRiskAlerts.length === 0 && (
+                                        <div className={`rounded-xl border px-3 py-4 text-center text-xs font-bold ${darkMode ? 'border-white/10 bg-slate-900/40 text-slate-300' : 'border-slate-200 bg-white text-slate-500'}`}>
+                                            本次沒有需要優先處理的高風險學生
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className={`rounded-2xl border p-4 ${darkMode ? 'bg-slate-900/40 border-white/10' : 'bg-white/75 border-slate-200/80'}`}>
+                                <div className="flex items-center justify-between mb-3">
+                                    <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>班級熱力圖</h4>
+                                    <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>
+                                        紅色低分 / 綠色高分
+                                    </span>
+                                </div>
+                                <div className={`overflow-x-auto rounded-xl border ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
+                                    <table className="w-full min-w-[620px] text-[11px] table-fixed">
+                                        <colgroup>
+                                            <col className="w-[5.2rem]" />
+                                            <col className="w-[6.4rem]" />
+                                            <col className="w-[3.8rem]" />
+                                            <col className="w-[3.8rem]" />
+                                            <col className="w-[3.8rem]" />
+                                            <col className="w-[4rem]" />
+                                            <col className="w-[3.5rem]" />
+                                            <col className="w-[5rem]" />
+                                        </colgroup>
+                                        <thead className={darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-500'}>
+                                            <tr>
+                                                <th className="px-2 py-2 text-center font-bold">學號</th>
+                                                <th className="px-2 py-2 text-center font-bold">姓名</th>
+                                                <th className="px-1 py-2 text-center font-bold">國</th>
+                                                <th className="px-1 py-2 text-center font-bold">英</th>
+                                                <th className="px-1 py-2 text-center font-bold">數</th>
+                                                <th className="px-1 py-2 text-center font-bold">總</th>
+                                                <th className="px-1 py-2 text-center font-bold">PR</th>
+                                                <th className="px-1 py-2 text-center font-bold">機率</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className={darkMode ? 'divide-y divide-white/10' : 'divide-y divide-slate-100'}>
+                                            {batchHeatmapRows.map((row) => (
+                                                <tr key={row.id} className={darkMode ? 'hover:bg-slate-800/40' : 'hover:bg-slate-50/50'}>
+                                                    <td className={`px-2 py-2 text-center font-mono font-bold ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>{row.id}</td>
+                                                    <td className={`px-2 py-2 text-center font-bold truncate ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}>{row.name || '-'}</td>
+                                                    <td className="px-1 py-1"><div className="text-center font-black rounded-md py-1" style={getHeatCellStyle(row.ratios.chi, darkMode)}>{f1(row.values.chi) || '-'}</div></td>
+                                                    <td className="px-1 py-1"><div className="text-center font-black rounded-md py-1" style={getHeatCellStyle(row.ratios.eng, darkMode)}>{f1(row.values.eng) || '-'}</div></td>
+                                                    <td className="px-1 py-1"><div className="text-center font-black rounded-md py-1" style={getHeatCellStyle(row.ratios.math, darkMode)}>{f1(row.values.math) || '-'}</div></td>
+                                                    <td className="px-1 py-1"><div className="text-center font-black rounded-md py-1" style={getHeatCellStyle(row.ratios.total, darkMode)}>{f1(row.values.total) || '-'}</div></td>
+                                                    <td className="px-1 py-1"><div className="text-center font-black rounded-md py-1" style={getHeatCellStyle(row.ratios.pr, darkMode)}>{row.values.pr ?? '-'}</div></td>
+                                                    <td className="px-1 py-1"><div className="text-center font-black rounded-md py-1" style={getHeatCellStyle(row.ratios.prob, darkMode)}>{row.values.prob !== null ? `${row.values.prob}%` : '-'}</div></td>
+                                                </tr>
+                                            ))}
+                                            {batchHeatmapRows.length === 0 && (
+                                                <tr>
+                                                    <td colSpan={8} className={`px-3 py-6 text-center text-xs font-bold ${darkMode ? 'text-slate-400' : 'text-slate-400'}`}>
+                                                        目前沒有可顯示的熱力圖資料
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
                         <div className={`mt-4 rounded-2xl border p-4 ${darkMode ? 'bg-slate-900/40 border-white/10' : 'bg-white/75 border-slate-200/80'}`}>
                             <div className="flex items-center justify-between mb-3">
                                 <div className="flex items-center gap-2">
@@ -2377,7 +2873,10 @@ export default function App() {
                                     <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>查詢次數監控</h4>
                                 </div>
                                 <button
-                                  onClick={handleResetQueryStats}
+                                  onClick={() => executeWithSecurity(handleResetQueryStats, {
+                                      title: '重置查詢次數',
+                                      hint: '此操作會清空所有查詢次數統計，請輸入 1107 確認。'
+                                  })}
                                   disabled={queryStatsLoading}
                                   className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors ${
                                     queryStatsLoading
@@ -2428,7 +2927,7 @@ export default function App() {
                       <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border mt-1 inline-block opacity-60 ${darkMode ? 'border-slate-600 text-slate-400' : 'border-slate-200 text-slate-400'}`}>{currentStudentId}</span>
                   </div>
                   <div className="flex gap-2">
-                    <button onClick={() => { handleDeleteStudent(); executeWithSecurity(confirmDeleteStudent); }} className="bg-red-500/10 text-red-500 p-2.5 rounded-xl hover:bg-red-500/20 transition-colors active:scale-95"><Trash2 className="w-5 h-5"/></button>
+                    <button onClick={handleDeleteStudent} className="bg-red-500/10 text-red-500 p-2.5 rounded-xl hover:bg-red-500/20 transition-colors active:scale-95"><Trash2 className="w-5 h-5"/></button>
                     <button onClick={handleSaveGrades} className="bg-blue-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-blue-500 shadow-lg shadow-blue-900/20 transition-all active:scale-95 flex items-center gap-2"><Save className="w-4 h-4"/> 儲存</button>
                   </div>
                 </div>
@@ -2757,13 +3256,13 @@ export default function App() {
         )}
 
         {showSecurityModal && (
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[60] p-6 animate-in fade-in duration-200" onClick={() => {setShowSecurityModal(false); setSecurityInput('');}}>
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[60] p-6 animate-in fade-in duration-200" onClick={closeSecurityModal}>
                 <div className={`p-8 rounded-[2rem] shadow-2xl max-w-xs w-full text-center transform transition-all scale-100 border ${darkMode ? 'bg-slate-800 border-white/10' : 'bg-white border-white/50'}`} onClick={e => e.stopPropagation()}>
                     <div className={`mx-auto mb-6 p-4 rounded-full inline-block shadow-inner ${darkMode ? 'bg-blue-500/10 text-blue-400' : 'bg-blue-50 text-blue-600'}`}>
                         <ShieldCheck className="w-8 h-8" />
                     </div>
-                    <h3 className={`text-lg font-bold mb-2 ${darkMode ? 'text-white' : 'text-slate-800'}`}>安全驗證</h3>
-                    <p className={`text-xs mb-6 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>請輸入安全密碼以繼續</p>
+                    <h3 className={`text-lg font-bold mb-2 ${darkMode ? 'text-white' : 'text-slate-800'}`}>{pendingActionTitle}</h3>
+                    <p className={`text-xs mb-6 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>{pendingActionHint}</p>
                     <input 
                         ref={securityInputRef}
                         type="password" 
@@ -2778,7 +3277,7 @@ export default function App() {
         )}
 
         {(deleteTarget || studentToDelete) && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => { setDeleteTarget(null); setStudentToDelete(null); }}>
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => { setDeleteTarget(null); setStudentToDelete(null); }}>
               <div className={`rounded-[2.5rem] p-8 shadow-2xl max-w-sm w-full animate-in zoom-in duration-300 ${darkMode ? 'bg-slate-800 border border-white/10' : 'bg-white'}`} onClick={e => e.stopPropagation()}>
                   <div className="flex items-center gap-4 mb-6">
                       <div className="bg-red-500/10 p-4 rounded-2xl text-red-500"><AlertTriangle className="w-8 h-8" /></div>
@@ -2789,7 +3288,15 @@ export default function App() {
                   </p>
                   <div className="flex gap-3 justify-end">
                       <button onClick={() => { setDeleteTarget(null); setStudentToDelete(null); }} className={`flex-1 px-4 py-3.5 rounded-xl font-bold text-sm transition-colors ${darkMode ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>取消</button>
-                      <button onClick={() => executeWithSecurity(deleteTarget ? confirmDeleteDate : confirmDeleteStudent)} className="flex-1 px-4 py-3.5 rounded-xl bg-red-500 text-white hover:bg-red-600 font-bold text-sm shadow-lg shadow-red-900/20 transition-all active:scale-95">刪除</button>
+                      <button
+                        onClick={() => executeWithSecurity(deleteTarget ? confirmDeleteDate : confirmDeleteStudent, {
+                            title: deleteTarget ? '刪除測驗日期' : '刪除學生資料',
+                            hint: deleteTarget ? '此操作會永久刪除該日期設定，請輸入 1107 確認。' : '此操作會永久刪除學生資料，請輸入 1107 確認。'
+                        })}
+                        className="flex-1 px-4 py-3.5 rounded-xl bg-red-500 text-white hover:bg-red-600 font-bold text-sm shadow-lg shadow-red-900/20 transition-all active:scale-95"
+                      >
+                        刪除
+                      </button>
                   </div>
               </div>
           </div>

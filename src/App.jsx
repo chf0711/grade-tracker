@@ -22,7 +22,12 @@ const CLASS_DEFS = [
 ];
 
 const RAW_STUDENT_RECORDS = [];
-const ENCODED_PASSWORDS = ['QmVuMTEwNzA1', 'MjQ5MTIxMg=='];
+const FULL_ACCESS_PASSWORD_ENCODED = 'QmVuMTEwNzA1';
+const LIMITED_ACCESS_PASSWORD_ENCODED = 'MjQ5MTIxMg==';
+const TEACHER_ROLE = Object.freeze({
+    FULL: 'full',
+    LIMITED: 'limited'
+});
 const SECURITY_CODE = String.fromCharCode(49, 49, 48, 55);
 const QUERY_COUNT_RESET_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000;
 const MAX_QUERY_EVENTS = 3000;
@@ -612,7 +617,7 @@ const ChartFallback = ({ heightClass = 'h-60' }) => (
     </div>
 );
 
-const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, darkMode, handleBatchGradeChange, handleKeyDown, handlePaste }) => {
+const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, darkMode, canEdit, handleBatchGradeChange, handleKeyDown, handlePaste }) => {
     const probVisual = getProbabilityVisual(probValue, darkMode);
 
     return (
@@ -625,8 +630,9 @@ const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, 
             <td className="w-[3.9rem] px-1 py-1">
                 <select 
                     value={dateGrades.class || 'A班'} 
+                    disabled={!canEdit}
                     onChange={(e) => handleBatchGradeChange(student.id, 'class', e.target.value)}
-                    className={`w-full text-center text-xs font-bold py-1.5 rounded-lg opacity-70 border-none outline-none appearance-none cursor-pointer hover:opacity-100 transition-opacity ${darkMode ? 'bg-slate-900/50 text-slate-400 focus:text-slate-200' : 'bg-slate-100 text-slate-600 focus:text-slate-900'}`}
+                    className={`w-full text-center text-xs font-bold py-1.5 rounded-lg opacity-70 border-none outline-none appearance-none transition-opacity ${canEdit ? 'cursor-pointer hover:opacity-100' : 'cursor-not-allowed opacity-55'} ${darkMode ? 'bg-slate-900/50 text-slate-400 focus:text-slate-200' : 'bg-slate-100 text-slate-600 focus:text-slate-900'}`}
                 >
                     {CLASS_DEFS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
                 </select>
@@ -636,11 +642,12 @@ const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, 
                     <input 
                         id={`cell-${sIndex}-${sub}`} 
                         type="text" 
+                        disabled={!canEdit}
                         className={`w-full text-center p-1.5 rounded-lg border border-transparent outline-none text-xs font-bold transition-all shadow-inner focus:ring-1 ${darkMode ? 'bg-slate-950/50 text-slate-300 focus:bg-slate-900 focus:border-blue-500/50 focus:ring-blue-500/20' : 'bg-slate-50 text-slate-600 focus:bg-white focus:border-blue-200 focus:ring-blue-200'}`} 
                         value={dateGrades[sub] || ''} 
                         onChange={(e) => handleBatchGradeChange(student.id, sub, e.target.value)} 
-                        onKeyDown={(e) => handleKeyDown(e, sIndex, sub)} 
-                        onPaste={(e) => handlePaste(e, sIndex, sub)} 
+                        onKeyDown={canEdit ? (e) => handleKeyDown(e, sIndex, sub) : undefined} 
+                        onPaste={canEdit ? (e) => handlePaste(e, sIndex, sub) : undefined} 
                         placeholder="-" 
                     />
                 </td>
@@ -697,6 +704,7 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [mode, setMode] = useState('landing'); 
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [teacherAuthRole, setTeacherAuthRole] = useState(TEACHER_ROLE.FULL);
   const [passwordInput, setPasswordInput] = useState('');
   const [loginError, setLoginError] = useState(false);
     
@@ -759,6 +767,9 @@ export default function App() {
   const [_xlsxLoaded, setXlsxLoaded] = useState(false);
   const xlsxLoadingPromiseRef = useRef(null);
   const darkMode = false;
+  const isLimitedTeacherRole = teacherAuthRole === TEACHER_ROLE.LIMITED;
+  const canEditStudentGrades = !isLimitedTeacherRole;
+  const canDeleteDates = !isLimitedTeacherRole;
 
   const ensureXlsxReady = useCallback(async () => {
       if (typeof window === 'undefined') return false;
@@ -851,7 +862,11 @@ export default function App() {
 
   useEffect(() => {
       const storedAuth = localStorage.getItem('teacher_auth');
-      if (storedAuth === 'true') setIsAuthenticated(true);
+      const storedRole = localStorage.getItem('teacher_role');
+      if (storedAuth === 'true') {
+          setIsAuthenticated(true);
+          setTeacherAuthRole(storedRole === TEACHER_ROLE.LIMITED ? TEACHER_ROLE.LIMITED : TEACHER_ROLE.FULL);
+      }
   }, []);
 
   const hasPriorHistory = useMemo(() => {
@@ -1038,6 +1053,11 @@ export default function App() {
       if (!confirmDiscardBatchChanges()) return;
       action();
   }, [confirmDiscardBatchChanges]);
+
+  const notifyPermissionDenied = useCallback((message) => {
+      setStatusMsg(message);
+      setTimeout(() => setStatusMsg(''), 2200);
+  }, []);
 
   useEffect(() => {
       if (!hasPendingBatchChanges) return undefined;
@@ -1444,8 +1464,19 @@ export default function App() {
       }
   }, [teacherStudentMessages, teacherStudentMessageDrafts, teacherGlobalMessage, user, persistTeacherMessages]);
 
-  const handleDeleteDate = (dateToDelete) => setDeleteTarget(dateToDelete);
+  const handleDeleteDate = (dateToDelete) => {
+      if (!canDeleteDates) {
+          notifyPermissionDenied('2491212 權限無法刪除日期');
+          return;
+      }
+      setDeleteTarget(dateToDelete);
+  };
   const confirmDeleteDate = async () => {
+      if (!canDeleteDates) {
+          notifyPermissionDenied('2491212 權限無法刪除日期');
+          setDeleteTarget(null);
+          return;
+      }
       if (!deleteTarget) return;
       const newList = availableDates.filter(d => d !== deleteTarget);
       setAvailableDates(newList);
@@ -1456,15 +1487,26 @@ export default function App() {
   const handleLoginSubmit = () => {
       if (!user) return;
       const inputEncoded = btoa(passwordInput);
-      if (ENCODED_PASSWORDS.includes(inputEncoded)) { 
-          setIsAuthenticated(true); localStorage.setItem('teacher_auth', 'true'); setMode('teacher'); loadAllStudents();
+      let nextRole = null;
+      if (inputEncoded === FULL_ACCESS_PASSWORD_ENCODED) nextRole = TEACHER_ROLE.FULL;
+      if (inputEncoded === LIMITED_ACCESS_PASSWORD_ENCODED) nextRole = TEACHER_ROLE.LIMITED;
+
+      if (nextRole) {
+          setIsAuthenticated(true);
+          setTeacherAuthRole(nextRole);
+          localStorage.setItem('teacher_auth', 'true');
+          localStorage.setItem('teacher_role', nextRole);
+          setMode('teacher');
+          loadAllStudents();
       } else { setLoginError(true); }
   };
 
   const handleLogout = () => {
       runWithBatchDiscardGuard(() => {
           setIsAuthenticated(false);
+          setTeacherAuthRole(TEACHER_ROLE.FULL);
           localStorage.removeItem('teacher_auth');
+          localStorage.removeItem('teacher_role');
           setMode('landing');
       });
   };
@@ -1566,6 +1608,10 @@ export default function App() {
   };
 
   const handleGradeChange = (dateKey, subject, value) => {
+    if (!canEditStudentGrades) {
+        notifyPermissionDenied('2491212 權限無法修改學生成績');
+        return;
+    }
     setGrades(prev => {
         const currentData = prev[dateKey] || { chi: '', eng: '', math: '', total: '', class: 'A班' };
         const updatedData = { ...currentData, [subject]: value };
@@ -1575,6 +1621,10 @@ export default function App() {
   };
 
   const handleBatchGradeChange = useCallback((studentId, subject, value) => {
+      if (!canEditStudentGrades) {
+          notifyPermissionDenied('2491212 權限無法修改學生成績');
+          return;
+      }
       setAllStudentsData(prev => prev.map(s => {
           if (s.id !== studentId) return s;
           const currentGrades = s.grades || {};
@@ -1602,9 +1652,13 @@ export default function App() {
           return { ...s, grades: { ...currentGrades, [targetDate]: updatedDateGrades } };
       }));
       setIsBatchDirty(true);
-  }, [batchDate, teacherClassFilter, getTestDateID]); 
+  }, [batchDate, teacherClassFilter, getTestDateID, canEditStudentGrades, notifyPermissionDenied]); 
 
   const handleExcelUpload = async (e) => {
+    if (!canEditStudentGrades) {
+        notifyPermissionDenied('2491212 權限無法修改學生成績');
+        return;
+    }
     const file = e.target.files[0];
     if (!file) return;
     if (!window.XLSX) {
@@ -1838,6 +1892,10 @@ export default function App() {
   const handleAvgKeyDown = useCallback((e, dateIndex, subject) => handleGridKeyDown(e, dateIndex, subject, 'avg', availableDates.length), [availableDates.length, handleGridKeyDown]);
 
   const handlePaste = useCallback((e, startStudentIndex, startSubject) => {
+      if (!canEditStudentGrades) {
+          notifyPermissionDenied('2491212 權限無法修改學生成績');
+          return;
+      }
       e.preventDefault();
       const pasteData = e.clipboardData.getData('text');
       const rows = pasteData.trim().split(/\r\n|\n|\r/);
@@ -1876,9 +1934,13 @@ export default function App() {
           }
           return newData;
       });
-  }, [batchDate]); // Added batchDate dependency
+  }, [batchDate, canEditStudentGrades, notifyPermissionDenied]); // Added batchDate dependency
 
   const handleSinglePaste = (e, startDateIndex, startSubject) => {
+      if (!canEditStudentGrades) {
+          notifyPermissionDenied('2491212 權限無法修改學生成績');
+          return;
+      }
       e.preventDefault();
       const pasteData = e.clipboardData.getData('text');
       const rows = pasteData.trim().split(/\r\n|\n|\r/); 
@@ -1971,6 +2033,10 @@ export default function App() {
 
   const handleSaveGrades = async () => {
     if (!user || !currentStudentId) return;
+    if (!canEditStudentGrades) {
+      notifyPermissionDenied('2491212 權限無法修改學生成績');
+      return;
+    }
     if (!studentName.trim()) { setStatusMsg('請輸入姓名'); return; }
     setStatusMsg('儲存中...');
     try {
@@ -1988,6 +2054,10 @@ export default function App() {
   };
 
   const handleSaveBatchGrades = async () => {
+      if (!canEditStudentGrades) {
+          notifyPermissionDenied('2491212 權限無法修改學生成績');
+          return;
+      }
       setStatusMsg("批次儲存中...");
       try {
           if (db) {
@@ -3099,6 +3169,11 @@ export default function App() {
           <div className="space-y-7">
             <div className={`p-6 rounded-[2rem] border backdrop-blur-2xl relative overflow-hidden ${darkMode ? 'bg-[#0f172a]/70 border-white/10 shadow-xl shadow-black/20 ring-1 ring-white/5' : 'bg-white border-white shadow-[0_24px_52px_rgba(15,23,42,0.1)]'}`}>
                 <div className={`absolute inset-x-0 top-0 h-1 ${darkMode ? 'bg-emerald-300/35' : 'bg-gradient-to-r from-sky-500 via-emerald-500 to-indigo-500'}`} />
+                {isLimitedTeacherRole && (
+                    <div className={`mb-4 mt-1 inline-flex items-center gap-2 text-[10px] font-black tracking-widest uppercase px-3 py-1.5 rounded-full border ${darkMode ? 'bg-amber-500/10 border-amber-300/25 text-amber-200' : 'bg-amber-50 border-amber-200 text-amber-700'}`}>
+                        2491212 權限：唯讀成績
+                    </div>
+                )}
                 <div className="flex justify-between items-center mb-4 pt-1">
                     <div className={`flex items-center gap-2 font-black tracking-wide ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}><Calendar className="w-4 h-4 text-blue-500"/>管理日期</div>
                     <div className="flex gap-2">
@@ -3109,12 +3184,27 @@ export default function App() {
                 <div className={`flex flex-wrap gap-2 max-h-24 overflow-y-auto p-2 rounded-xl border mb-6 no-scrollbar shadow-inner ${darkMode ? 'bg-[#020617]/30 border-white/5' : 'bg-white border-slate-200'}`}>
                     {sortedAvailableDatesDesc.map(d => (
                         <div key={d} className={`flex items-center px-2.5 py-1 rounded-lg text-[10px] font-bold border shadow-sm ${darkMode ? 'bg-slate-800 text-slate-300 border-white/5' : 'bg-white text-slate-600 border-slate-200/60'}`}>
-                            {(weekendLabelByDate[d] || getWeekendDisplayLabel(d))} <button onClick={() => handleDeleteDate(d)} className="ml-1.5 text-slate-400 hover:text-red-500"><X className="w-3 h-3"/></button>
+                            {(weekendLabelByDate[d] || getWeekendDisplayLabel(d))}
+                            {canDeleteDates ? (
+                                <button onClick={() => handleDeleteDate(d)} className="ml-1.5 text-slate-400 hover:text-red-500" title="危險操作：刪除日期">
+                                    <X className="w-3 h-3"/>
+                                </button>
+                            ) : (
+                                <span className="ml-1.5 text-slate-300" title="2491212 權限不可刪除日期">
+                                    <Lock className="w-3 h-3"/>
+                                </span>
+                            )}
                         </div>
                     ))}
                 </div>
 
                 <div className={`flex p-1 rounded-xl mb-6 shadow-inner border ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-100/90 border-slate-200/70'}`}>
+                     <button
+                       onClick={() => setTeacherViewMode('batch')}
+                       className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${teacherViewMode==='batch' ? (darkMode ? 'bg-slate-800 text-blue-400 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-blue-700 shadow-sm') : 'text-slate-500'}`}
+                     >
+                       批量檢視
+                     </button>
                      <button
                        onClick={() => {
                          if (teacherViewMode === 'single') return;
@@ -3124,12 +3214,6 @@ export default function App() {
                        className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${teacherViewMode==='single' ? (darkMode ? 'bg-slate-800 text-slate-200 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-700 shadow-sm') : 'text-slate-500'}`}
                      >
                        個人檢視
-                     </button>
-                     <button
-                       onClick={() => setTeacherViewMode('batch')}
-                       className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${teacherViewMode==='batch' ? (darkMode ? 'bg-slate-800 text-blue-400 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-blue-700 shadow-sm') : 'text-slate-500'}`}
-                     >
-                       批量檢視
                      </button>
                 </div>
 
@@ -3153,10 +3237,16 @@ export default function App() {
                         </div>
                         <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
                             <button onClick={() => setShowAddStudentModal(true)} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all whitespace-nowrap"><UserPlus className="w-4 h-4"/> 新增學生</button>
-                            <label className="cursor-pointer bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all whitespace-nowrap">
-                                <FileSpreadsheet className="w-4 h-4" /> 匯入 Excel
-                                <input type="file" accept=".xlsx, .xls" className="hidden" onChange={handleExcelUpload} />
-                            </label>
+                            {canEditStudentGrades ? (
+                                <label className="cursor-pointer bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all whitespace-nowrap">
+                                    <FileSpreadsheet className="w-4 h-4" /> 匯入 Excel
+                                    <input type="file" accept=".xlsx, .xls" className="hidden" onChange={handleExcelUpload} />
+                                </label>
+                            ) : (
+                                <button type="button" disabled className="bg-slate-300 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap cursor-not-allowed">
+                                    <FileSpreadsheet className="w-4 h-4" /> 匯入 Excel（唯讀）
+                                </button>
+                            )}
                             <button onClick={() => setShowAvgModal(true)} className={`px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors border ${darkMode ? 'text-indigo-300 bg-indigo-500/10 border-indigo-500/20 hover:bg-indigo-500/20' : 'text-indigo-700 bg-white border-indigo-100 hover:bg-indigo-50 shadow-sm'}`}><Edit3 className="w-4 h-4"/> 平均設定</button>
                         </div>
                     </div>
@@ -3194,13 +3284,16 @@ export default function App() {
                                 </button>
                                 <button
                                   onClick={handleSaveBatchGrades}
+                                  disabled={!canEditStudentGrades}
                                   className={`text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-md transition-all active:scale-[0.98] flex items-center gap-1 ${
-                                    isBatchDirty
+                                    !canEditStudentGrades
+                                      ? 'bg-slate-400 cursor-not-allowed shadow-none'
+                                      : isBatchDirty
                                       ? 'bg-orange-500 hover:bg-orange-400 animate-pulse shadow-orange-500/30'
                                       : 'bg-blue-600 hover:bg-blue-500 shadow-blue-600/20'
                                   }`}
                                 >
-                                  <Save className="w-3.5 h-3.5"/> {isBatchDirty ? '儲存變更' : '儲存'}
+                                  <Save className="w-3.5 h-3.5"/> {!canEditStudentGrades ? '唯讀鎖定' : (isBatchDirty ? '儲存變更' : '儲存')}
                                 </button>
                             </div>
                         </div>
@@ -3273,14 +3366,15 @@ export default function App() {
                                     </thead>
                                     <tbody className={`divide-y ${darkMode ? 'divide-slate-800' : 'divide-slate-100'}`}>
                                         {batchRowsForDisplay.map((row, sIndex) => (
-                                            <BatchRow 
-                                                key={row.student.id} 
-                                                student={row.student} 
-                                                sIndex={sIndex} 
-                                                dateGrades={row.dateGrades} 
+                                            <BatchRow
+                                                key={row.student.id}
+                                                student={row.student}
+                                                sIndex={sIndex}
+                                                dateGrades={row.dateGrades}
                                                 prValue={row.prValue}
                                                 probValue={row.probValue}
                                                 darkMode={darkMode} 
+                                                canEdit={canEditStudentGrades}
                                                 handleBatchGradeChange={handleBatchGradeChange} 
                                                 handleKeyDown={handleKeyDown} 
                                                 handlePaste={handlePaste} 
@@ -3595,7 +3689,13 @@ export default function App() {
                   </div>
                   <div className="flex gap-2">
                     <button onClick={handleDeleteStudent} className="bg-red-500/10 text-red-500 p-2.5 rounded-xl hover:bg-red-500/20 transition-colors active:scale-95"><Trash2 className="w-5 h-5"/></button>
-                    <button onClick={handleSaveGrades} className="bg-blue-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-blue-500 shadow-lg shadow-blue-500/30 transition-all active:scale-95 flex items-center gap-2"><Save className="w-4 h-4"/> 儲存</button>
+                    <button
+                      onClick={handleSaveGrades}
+                      disabled={!canEditStudentGrades}
+                      className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 ${canEditStudentGrades ? 'bg-blue-600 text-white hover:bg-blue-500 shadow-lg shadow-blue-500/30 active:scale-95' : 'bg-slate-300 text-white cursor-not-allowed'}`}
+                    >
+                      <Save className="w-4 h-4"/> {canEditStudentGrades ? '儲存' : '唯讀鎖定'}
+                    </button>
                   </div>
                 </div>
                 <div className="max-h-[60vh] overflow-y-auto">
@@ -3618,15 +3718,16 @@ export default function App() {
                                             <td className="px-2 py-2 text-center">
                                                 <select 
                                                     value={g.class || 'A班'} 
+                                                    disabled={!canEditStudentGrades}
                                                     onChange={(e) => handleGradeChange(date, 'class', e.target.value)}
-                                                    className={`w-full text-center p-2 rounded-lg bg-transparent border border-transparent outline-none text-base font-bold transition-all cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 ${darkMode ? 'text-slate-200 focus:bg-slate-800' : 'text-slate-700 focus:bg-white'}`}
+                                                    className={`w-full text-center p-2 rounded-lg bg-transparent border border-transparent outline-none text-base font-bold transition-all ${canEditStudentGrades ? 'cursor-pointer hover:bg-black/5 dark:hover:bg-white/5' : 'cursor-not-allowed opacity-70'} ${darkMode ? 'text-slate-200 focus:bg-slate-800' : 'text-slate-700 focus:bg-white'}`}
                                                 >
                                                     {CLASS_DEFS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
                                                 </select>
                                             </td>
                                             {['chi', 'eng', 'math'].map(sub => (
                                                 <td key={sub} className="px-2 py-2 text-center">
-                                                    <input id={`single-${dateIndex}-${sub}`} type="text" className={`w-full text-center p-2 rounded-lg bg-transparent border border-transparent outline-none text-base font-bold transition-all ${darkMode ? 'focus:bg-slate-800 focus:border-blue-500/50 text-slate-200' : 'focus:bg-white focus:border-blue-200 text-slate-700'}`} value={g[sub]} onChange={(e) => handleGradeChange(date, sub, e.target.value)} onKeyDown={(e) => handleSingleKeyDown(e, dateIndex, sub)} onPaste={(e) => handleSinglePaste(e, dateIndex, sub)} placeholder="-" />
+                                                    <input id={`single-${dateIndex}-${sub}`} type="text" disabled={!canEditStudentGrades} className={`w-full text-center p-2 rounded-lg bg-transparent border border-transparent outline-none text-base font-bold transition-all ${!canEditStudentGrades ? 'cursor-not-allowed opacity-70' : ''} ${darkMode ? 'focus:bg-slate-800 focus:border-blue-500/50 text-slate-200' : 'focus:bg-white focus:border-blue-200 text-slate-700'}`} value={g[sub]} onChange={(e) => handleGradeChange(date, sub, e.target.value)} onKeyDown={canEditStudentGrades ? (e) => handleSingleKeyDown(e, dateIndex, sub) : undefined} onPaste={canEditStudentGrades ? (e) => handleSinglePaste(e, dateIndex, sub) : undefined} placeholder="-" />
                                                 </td>
                                             ))}
                                             <td className="px-2 py-2 text-center"><div className="text-base font-bold text-blue-500 py-2">{g.total}</div></td>

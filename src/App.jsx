@@ -26,6 +26,7 @@ const ENCODED_PASSWORDS = ['QmVuMTEwNzA1', 'MjQ5MTIxMg=='];
 const SECURITY_CODE = String.fromCharCode(49, 49, 48, 55);
 const QUERY_COUNT_RESET_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000;
 const MAX_QUERY_EVENTS = 3000;
+const TEACHER_MESSAGE_DOC_ID = 'teacher_parent_message_v1';
 
 const runtimeFirebaseConfig =
   typeof window !== 'undefined' ? window.__firebase_config : undefined;
@@ -312,11 +313,11 @@ const PROBABILITY_RULES = Object.freeze({
     MOCK_WEIGHT: 2.5,
     NORMAL_BASELINE: 55,
     MOCK_BASELINE: 47,
-    POSITIVE_BASE_SLOPE: 1.36,
-    POSITIVE_SOFT_THRESHOLD: 18,
-    POSITIVE_SOFT_SLOPE: 0.9,
-    POSITIVE_HARD_THRESHOLD: 32,
-    POSITIVE_HARD_SLOPE: 0.42,
+    POSITIVE_BASE_SLOPE: 1.48,
+    POSITIVE_SOFT_THRESHOLD: 16,
+    POSITIVE_SOFT_SLOPE: 1.05,
+    POSITIVE_HARD_THRESHOLD: 30,
+    POSITIVE_HARD_SLOPE: 0.7,
     NEGATIVE_GENTLE_SLOPE: 0.95,
     NEGATIVE_HARD_THRESHOLD: -18,
     NEGATIVE_HARD_SLOPE: 1.3,
@@ -678,6 +679,7 @@ const ExamCountdown = ({ isDarkMode }) => {
 
 export default function App() {
   const [user, setUser] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
   const [mode, setMode] = useState('landing'); 
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
@@ -717,6 +719,10 @@ export default function App() {
   const [queryEvents, setQueryEvents] = useState([]);
   const [queryStatsLastResetAt, setQueryStatsLastResetAt] = useState('');
   const [queryStatsLoading, setQueryStatsLoading] = useState(false);
+  const [teacherMessage, setTeacherMessage] = useState('');
+  const [teacherMessageDraft, setTeacherMessageDraft] = useState('');
+  const [teacherMessageLoading, setTeacherMessageLoading] = useState(false);
+  const [teacherMessageSaving, setTeacherMessageSaving] = useState(false);
     
   const [loading, setLoading] = useState(false);
   const [searchId, setSearchId] = useState('');
@@ -963,20 +969,29 @@ export default function App() {
   useEffect(() => {
     const initAuth = async () => {
       try {
-        if (!auth) return;
+        if (!auth) {
+          setAuthReady(true);
+          return;
+        }
         if (typeof runtimeInitialAuthToken !== 'undefined' && runtimeInitialAuthToken) {
           await signInWithCustomToken(auth, runtimeInitialAuthToken);
         }
         else await signInAnonymously(auth);
-      } catch (e) { console.error(e); }
+      } catch (e) {
+          console.error(e);
+          setAuthReady(true);
+      }
     };
     if (auth) {
         initAuth();
         const unsubscribe = onAuthStateChanged(auth, (u) => {
+          setAuthReady(true);
           setUser(u);
           if (u) { loadDates(); loadClassAverages(); }
         });
         return () => unsubscribe();
+    } else {
+        setAuthReady(true);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1079,6 +1094,27 @@ export default function App() {
       }
   }, [shouldResetQueryStats]);
 
+  const loadTeacherMessage = useCallback(async () => {
+      if (!db) {
+          setTeacherMessage('');
+          setTeacherMessageDraft('');
+          return;
+      }
+
+      setTeacherMessageLoading(true);
+      try {
+          const messageDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', TEACHER_MESSAGE_DOC_ID);
+          const docSnap = await getDoc(messageDocRef);
+          const nextMessage = docSnap.exists() ? String(docSnap.data()?.message || '') : '';
+          setTeacherMessage(nextMessage);
+          setTeacherMessageDraft(nextMessage);
+      } catch (e) {
+          console.error('Load teacher message error:', e);
+      } finally {
+          setTeacherMessageLoading(false);
+      }
+  }, []);
+
   const incrementQueryCount = useCallback(async (studentId) => {
       const normalizedId = String(studentId || '').toUpperCase().trim();
       if (!normalizedId) return;
@@ -1146,6 +1182,11 @@ export default function App() {
           loadQueryStats();
       }
   }, [mode, isAuthenticated, loadQueryStats]);
+
+  useEffect(() => {
+      if (!user) return;
+      loadTeacherMessage();
+  }, [user, loadTeacherMessage]);
   const closeSecurityModal = useCallback(() => {
       setShowSecurityModal(false);
       setPendingAction(null);
@@ -1304,6 +1345,32 @@ export default function App() {
       }
   };
 
+  const handleSaveTeacherMessage = useCallback(async () => {
+      if (!user) return;
+      const normalized = String(teacherMessageDraft || '').trim();
+      setTeacherMessageSaving(true);
+      try {
+          if (db) {
+              const messageDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', TEACHER_MESSAGE_DOC_ID);
+              await setDoc(
+                  messageDocRef,
+                  { message: normalized, updatedAt: new Date().toISOString(), updatedBy: user.uid || '' },
+                  { merge: true }
+              );
+          }
+          setTeacherMessage(normalized);
+          setTeacherMessageDraft(normalized);
+          setStatusMsg(normalized ? '家長端鼓勵語已儲存' : '已清空家長端鼓勵語');
+          setTimeout(() => setStatusMsg(''), 2000);
+      } catch (e) {
+          console.error('Save teacher message error:', e);
+          setStatusMsg('鼓勵語儲存失敗');
+          setTimeout(() => setStatusMsg(''), 2000);
+      } finally {
+          setTeacherMessageSaving(false);
+      }
+  }, [teacherMessageDraft, user]);
+
   const handleDeleteDate = (dateToDelete) => setDeleteTarget(dateToDelete);
   const confirmDeleteDate = async () => {
       if (!deleteTarget) return;
@@ -1314,6 +1381,7 @@ export default function App() {
   };
 
   const handleLoginSubmit = () => {
+      if (!user) return;
       const inputEncoded = btoa(passwordInput);
       if (ENCODED_PASSWORDS.includes(inputEncoded)) { 
           setIsAuthenticated(true); localStorage.setItem('teacher_auth', 'true'); setMode('teacher'); loadAllStudents();
@@ -1343,10 +1411,33 @@ export default function App() {
           }
           const sortedStudents = Object.values(studentsMap).sort((a,b) => a.id.localeCompare(b.id));
           setAllStudentsData(sortedStudents);
+          setCachedClassData(sortedStudents);
           setIsBatchDirty(false);
       } catch (e) { console.error("Load error:", e); }
       setLoading(false);
   };
+
+  useEffect(() => {
+      if (mode !== 'parent' || !user || !db || cachedClassData.length > 0) return;
+      let cancelled = false;
+
+      const preloadClassData = async () => {
+          try {
+              const qSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'students'));
+              if (cancelled) return;
+              const preloaded = [];
+              qSnap.forEach((d) => preloaded.push(d.data()));
+              setCachedClassData(preloaded);
+          } catch (e) {
+              console.error('Preload class data error:', e);
+          }
+      };
+
+      preloadClassData();
+      return () => {
+          cancelled = true;
+      };
+  }, [mode, user, cachedClassData.length]);
 
   const normalizeGrades = (grades) => {
       if (!grades) return {};
@@ -2018,11 +2109,19 @@ export default function App() {
   };
 
   const handleParentSearch = async () => {
-    if (!user || !searchId.trim()) return;
+    if (!searchId.trim()) return;
+    if (!user) {
+      setSearchError('系統連線中，請稍候再查詢');
+      return;
+    }
     setSearchError(''); setViewData(null); setLoading(true);
     try {
-      const latestDates = await loadDates();
-      const effectiveDates = (latestDates && latestDates.length > 0) ? latestDates : sortedAvailableDatesAsc;
+      if (sortedAvailableDatesAsc.length > 0) {
+          void loadDates();
+      }
+      const effectiveDates = sortedAvailableDatesAsc.length > 0
+          ? sortedAvailableDatesAsc
+          : await loadDates();
       const sortedDates = [...effectiveDates].sort(customDateSort);
       const getSearchDateID = (dateStr) => getWeekendID(dateStr, effectiveDates);
       let data = null;
@@ -2754,6 +2853,11 @@ export default function App() {
       [viewData, darkMode]
   );
 
+  const teacherMessageForParent = useMemo(
+      () => String(teacherMessage || '').trim(),
+      [teacherMessage]
+  );
+
   const statsSummary = useMemo(() => {
       if (!statsModalData) return null;
       const distribution = statsModalData[statsActiveTab] || [];
@@ -2773,6 +2877,7 @@ export default function App() {
   }, [statsModalData, statsActiveTab]);
 
   const isLandingMode = mode === 'landing';
+  const isConnectionReady = Boolean(user);
   const sharedBackgroundOpacity = isLandingMode
       ? 1
       : mode === 'teacher'
@@ -2781,8 +2886,7 @@ export default function App() {
               ? 0.74
               : 0.72;
 
-  if (!user && !db) return <div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400 text-sm font-mono tracking-widest uppercase">Initializing...</div>;
-  if (!user) return <div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400 text-sm font-mono tracking-widest uppercase">Connecting...</div>;
+  if (!db) return <div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400 text-sm font-mono tracking-widest uppercase">Initializing...</div>;
 
   return (
     <div className={`${isLandingMode ? 'h-[100dvh] min-h-[100svh] overflow-hidden' : 'min-h-screen pb-32 overflow-x-hidden'} font-sans antialiased transition-colors duration-500 ease-in-out relative ${darkMode ? 'bg-[#111714] text-slate-200' : 'bg-transparent text-slate-800'}`}>
@@ -2794,6 +2898,12 @@ export default function App() {
           backgroundImage: 'repeating-linear-gradient(0deg, rgba(148,163,184,0.1) 0px, rgba(148,163,184,0.1) 1px, transparent 1px, transparent 24px), repeating-linear-gradient(90deg, rgba(148,163,184,0.08) 0px, rgba(148,163,184,0.08) 1px, transparent 1px, transparent 24px), radial-gradient(circle at 12% 15%, rgba(99,102,241,0.22) 0%, transparent 40%), radial-gradient(circle at 86% 12%, rgba(14,165,233,0.22) 0%, transparent 40%), radial-gradient(circle at 80% 84%, rgba(236,72,153,0.16) 0%, transparent 36%), linear-gradient(138deg, #f8fafc 0%, #f3f7ff 46%, #eefcf5 100%)'
         }}
       />
+
+      {!isConnectionReady && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-40 rounded-full px-3 py-1.5 text-[10px] font-black tracking-wide border border-white/90 bg-white/95 text-slate-600 shadow-lg">
+          {authReady ? '連線同步中，資料功能即將可用' : '正在建立連線...'}
+        </div>
+      )}
 
       {/* Header */}
       <header className={`fixed top-0 w-full backdrop-blur-xl z-30 border-b transition-all duration-300 ${darkMode ? 'bg-[#121a17]/88 border-emerald-200/10 shadow-lg shadow-black/25' : 'bg-[linear-gradient(108deg,rgba(255,255,255,0.78)_0%,rgba(244,252,248,0.84)_52%,rgba(241,247,255,0.8)_100%)] border-white/75 shadow-[0_14px_36px_rgba(15,23,42,0.12)]'}`}>
@@ -2814,6 +2924,7 @@ export default function App() {
                 <button
                   onClick={() => runWithBatchDiscardGuard(() => {
                     if (isAuthenticated) {
+                      if (!user) return;
                       setMode('teacher');
                       loadAllStudents();
                     } else {
@@ -2857,6 +2968,7 @@ export default function App() {
                    <button
                       onClick={() => runWithBatchDiscardGuard(() => {
                         if (isAuthenticated) {
+                          if (!user) return;
                           setMode('teacher');
                           loadAllStudents();
                         } else {
@@ -2940,6 +3052,38 @@ export default function App() {
                      >
                        批量檢視
                      </button>
+                </div>
+
+                <div className={`rounded-2xl border p-4 mb-6 ${darkMode ? 'bg-[#020617]/45 border-white/10' : 'bg-slate-50/85 border-slate-200'}`}>
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                        <div className={`text-xs font-black tracking-wide flex items-center gap-2 ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}>
+                            <Info className="w-3.5 h-3.5 text-emerald-500" />
+                            家長端老師鼓勵語
+                        </div>
+                        <span className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                            {teacherMessageLoading ? '讀取中...' : (teacherMessage.trim() ? '目前已顯示' : '未設定')}
+                        </span>
+                    </div>
+                    <textarea
+                      value={teacherMessageDraft}
+                      onChange={(e) => setTeacherMessageDraft(e.target.value)}
+                      rows={3}
+                      maxLength={200}
+                      placeholder="輸入鼓勵學生的一句話（留空並儲存會在家長端隱藏）"
+                      className={`w-full resize-y rounded-xl px-3 py-2 text-sm font-medium outline-none border transition-all ${darkMode ? 'bg-slate-900/60 border-white/10 text-slate-100 focus:border-emerald-400/40' : 'bg-white border-slate-200 text-slate-700 focus:border-emerald-300'}`}
+                    />
+                    <div className="mt-3 flex items-center justify-between gap-2">
+                        <span className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                            {teacherMessageDraft.length}/200
+                        </span>
+                        <button
+                          onClick={handleSaveTeacherMessage}
+                          disabled={teacherMessageSaving || teacherMessageLoading || !user}
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          {teacherMessageSaving ? '儲存中...' : '儲存鼓勵語'}
+                        </button>
+                    </div>
                 </div>
 
                 {teacherViewMode === 'single' && (
@@ -3379,7 +3523,7 @@ export default function App() {
               <div className={`w-full p-2 rounded-2xl border transition-all mb-6 shadow-inner ${darkMode ? 'bg-[#08120d]/70 border-emerald-200/15 focus-within:ring-2 focus-within:ring-emerald-500/20' : 'bg-slate-50 border-slate-200 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100'}`}>
                 <input type="text" placeholder="請輸入學號" className={`w-full bg-transparent border-none px-4 py-3 outline-none text-xl uppercase font-bold text-center tracking-widest placeholder:text-base placeholder:tracking-normal placeholder:font-medium ${darkMode ? 'text-white placeholder:text-slate-600' : 'text-slate-800 placeholder:text-slate-400'}`} value={searchId} onChange={(e) => setSearchId(e.target.value)} />
               </div>
-              <button onClick={handleParentSearch} disabled={loading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-2xl font-bold text-lg shadow-sm transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 tracking-wide">{loading ? '查詢中...' : '開始查詢'}</button>
+              <button onClick={handleParentSearch} disabled={loading || !user} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-2xl font-bold text-lg shadow-sm transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 tracking-wide">{loading ? '查詢中...' : (!user ? '連線中...' : '開始查詢')}</button>
               {searchError && <p className="mt-6 text-red-500 text-xs font-bold bg-red-500/10 inline-block px-4 py-2 rounded-full animate-pulse">{searchError}</p>}
             </div>
             )}
@@ -3420,6 +3564,13 @@ export default function App() {
                 </div>
 
                 <div className="p-6">
+                  {teacherMessageForParent && (
+                  <div className={`mb-6 rounded-2xl border px-4 py-3 ${darkMode ? 'bg-emerald-500/10 border-emerald-300/25 text-emerald-100' : 'bg-emerald-50/85 border-emerald-200 text-emerald-900'}`}>
+                      <div className={`text-[10px] font-black uppercase tracking-widest mb-1.5 ${darkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>老師的話</div>
+                      <p className={`text-sm leading-relaxed font-medium whitespace-pre-line ${darkMode ? 'text-emerald-50' : 'text-slate-700'}`}>{teacherMessageForParent}</p>
+                  </div>
+                  )}
+
                   {hasPriorHistory && (
                   <div className={`flex p-1 mb-6 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#08120d]/70 border-emerald-200/10' : 'bg-slate-50 border-slate-100'}`}>
                       {PHASES.map(phase => (

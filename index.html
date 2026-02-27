@@ -5,9 +5,99 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>grade-tracker</title>
+    <style>
+      #boot-fallback {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #f8fafc;
+        color: #334155;
+        padding: 24px;
+        box-sizing: border-box;
+        font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      #boot-fallback .panel {
+        width: min(92vw, 460px);
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 20px;
+        padding: 20px;
+        box-shadow: 0 14px 32px rgba(15, 23, 42, 0.12);
+      }
+      #boot-fallback .title {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 800;
+        color: #0f172a;
+      }
+      #boot-fallback .detail {
+        margin: 10px 0 0;
+        font-size: 13px;
+        line-height: 1.5;
+        color: #475569;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <div id="boot-fallback">
+      <div class="panel">
+        <h1 class="title" data-boot-title>系統載入中</h1>
+        <p class="detail" data-boot-detail>如果超過 7 秒仍無畫面，請先重新整理；若持續失敗，系統會顯示錯誤訊息。</p>
+      </div>
+    </div>
+    <script>
+      (function () {
+        var RELOAD_KEY = 'grade_tracker_chunk_reload_once';
+        var hasMounted = function () {
+          return document.body && document.body.dataset && document.body.dataset.appMounted === '1';
+        };
+        var setFallback = function (title, detail) {
+          var root = document.getElementById('boot-fallback');
+          if (!root) return;
+          var titleEl = root.querySelector('[data-boot-title]');
+          var detailEl = root.querySelector('[data-boot-detail]');
+          if (titleEl) titleEl.textContent = title || '系統載入中';
+          if (detailEl) detailEl.textContent = detail || '';
+          root.style.display = 'flex';
+        };
+        var isChunkError = function (message) {
+          var text = String(message || '').toLowerCase();
+          return text.indexOf('failed to fetch dynamically imported module') >= 0
+            || text.indexOf('chunkloaderror') >= 0
+            || text.indexOf('loading chunk') >= 0
+            || text.indexOf('importing a module script failed') >= 0;
+        };
+        var tryRecover = function (message) {
+          if (!isChunkError(message)) return false;
+          var reloaded = sessionStorage.getItem(RELOAD_KEY) === '1';
+          if (reloaded) return false;
+          sessionStorage.setItem(RELOAD_KEY, '1');
+          location.reload();
+          return true;
+        };
+        window.addEventListener('error', function (event) {
+          var message = (event && (event.message || (event.error && event.error.message))) || '';
+          if (tryRecover(message)) return;
+          if (!message) return;
+          setFallback('系統載入失敗', message);
+        });
+        window.addEventListener('unhandledrejection', function (event) {
+          var reason = event && event.reason;
+          var message = typeof reason === 'string' ? reason : (reason && reason.message) || '';
+          if (tryRecover(message)) return;
+          if (!message) return;
+          setFallback('系統載入失敗', message);
+        });
+        setTimeout(function () {
+          if (hasMounted()) return;
+          setFallback('載入逾時', '程式初始化超時。請按 Cmd+Shift+R 強制重新整理，或稍後再試。');
+        }, 7000);
+      })();
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

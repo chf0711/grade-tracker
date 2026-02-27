@@ -312,8 +312,9 @@ const PROBABILITY_RULES = Object.freeze({
     NORMAL_BASELINE: 55,
     MOCK_BASELINE: 47,
     POSITIVE_SLOPE: 1.58,
-    NEGATIVE_POWER: 1.2,
-    NEGATIVE_SCALE: 1.34,
+    NEGATIVE_GENTLE_SLOPE: 0.95,
+    NEGATIVE_HARD_THRESHOLD: -18,
+    NEGATIVE_HARD_SLOPE: 1.3,
     MATH_BONUS_THRESHOLD: 60,
     MATH_BONUS_SCALE: 0.1,
     MAX_MATH_BONUS: 5,
@@ -360,17 +361,20 @@ const getProbabilityVisual = (probValue, isDarkMode) => {
 
     const prob = clamp(parsed, 1, 99);
     const progress = prob / 100;
-    // 連續色譜：低機率鮮紅(0deg) -> 中段黃橘 -> 高機率綠色(120deg)
-    const hue = Math.round(progress * 120);
-    const hueStart = clamp(hue - 10, 0, 120);
-    const hueEnd = clamp(hue + 10, 0, 120);
-    const saturation = isDarkMode ? 94 : 96;
-    const textLightness = isDarkMode ? 74 : 34;
+    const easedProgress = Math.pow(progress, 0.92);
+    // 連續色譜：低機率鮮紅(0deg) -> 中段金黃 -> 高機率翠綠(120deg)
+    const hue = Math.round(easedProgress * 120);
+    const hueStart = clamp(hue - 16, 0, 120);
+    const hueMid = clamp(hue + 2, 0, 120);
+    const hueEnd = clamp(hue + 18, 0, 120);
+    const saturation = isDarkMode ? 92 : 94;
+    const textLightness = isDarkMode ? 76 : 30;
     const badgeTextColor = prob <= 45
         ? '#ffffff'
         : `hsl(${hue} ${saturation}% ${isDarkMode ? 84 : 24}%)`;
-    const badgeAlphaStart = isDarkMode ? 0.74 : 0.92;
-    const badgeAlphaEnd = isDarkMode ? 0.86 : 0.98;
+    const badgeAlphaStart = isDarkMode ? 0.72 : 0.88;
+    const badgeAlphaMid = isDarkMode ? 0.82 : 0.95;
+    const badgeAlphaEnd = isDarkMode ? 0.9 : 0.99;
 
     return {
         textStyle: {
@@ -381,9 +385,9 @@ const getProbabilityVisual = (probValue, isDarkMode) => {
         },
         badgeStyle: {
             color: badgeTextColor,
-            background: `linear-gradient(135deg, hsla(${hueStart}, ${saturation}%, ${isDarkMode ? 52 : 48}%, ${badgeAlphaStart}) 0%, hsla(${hueEnd}, ${saturation}%, ${isDarkMode ? 46 : 44}%, ${badgeAlphaEnd}) 100%)`,
-            border: `1px solid hsla(${hue}, ${saturation}%, ${isDarkMode ? 78 : 32}%, ${isDarkMode ? 0.52 : 0.42})`,
-            boxShadow: `0 8px 20px -12px hsla(${hue}, ${saturation}%, ${isDarkMode ? 60 : 38}%, ${prob <= 25 ? 0.7 : 0.5})`
+            background: `linear-gradient(132deg, hsla(${hueStart}, ${saturation}%, ${isDarkMode ? 57 : 50}%, ${badgeAlphaStart}) 0%, hsla(${hueMid}, ${Math.min(saturation + 3, 99)}%, ${isDarkMode ? 50 : 45}%, ${badgeAlphaMid}) 52%, hsla(${hueEnd}, ${saturation}%, ${isDarkMode ? 43 : 40}%, ${badgeAlphaEnd}) 100%)`,
+            border: `1px solid hsla(${hue}, ${Math.min(saturation + 1, 99)}%, ${isDarkMode ? 80 : 30}%, ${isDarkMode ? 0.56 : 0.4})`,
+            boxShadow: `0 10px 22px -14px hsla(${hue}, ${saturation}%, ${isDarkMode ? 64 : 34}%, ${prob <= 25 ? 0.72 : 0.46}), inset 0 1px 0 rgba(255,255,255,${isDarkMode ? 0.14 : 0.28})`
         }
     };
 };
@@ -419,6 +423,23 @@ const resolveDistributionBucketIndex = (value, template) => {
     return template.buckets.findIndex((bucket) => value >= bucket.min && value <= bucket.max);
 };
 
+const buildPRLookupByScore = (scoresDesc) => {
+    if (!Array.isArray(scoresDesc) || scoresDesc.length === 0) return null;
+    const lookup = new Map();
+    const total = scoresDesc.length;
+
+    for (let i = 0; i < total; i++) {
+        const score = scoresDesc[i];
+        if (!lookup.has(score)) {
+            const rank = i + 1;
+            const pr = Math.floor(((total - rank) / total) * 100);
+            lookup.set(score, pr);
+        }
+    }
+
+    return lookup;
+};
+
 // --- Helper Logic for Probability ---
 const calculateProbLogic = (
     targetStudent,
@@ -426,7 +447,9 @@ const calculateProbLogic = (
     mathScoresByDate,
     studentGradeMaps,
     availableDates,
-    probabilityProfiles = null
+    probabilityProfiles = null,
+    totalPRLookupByDate = null,
+    mathPRLookupByDate = null
 ) => {
     let weightedDiffSum = 0;
     let totalWeight = 0;
@@ -451,22 +474,41 @@ const calculateProbLogic = (
 
          // Total PR Logic
          if (myTotal !== null && !isNaN(myTotal) && scoresByDate[weekendID] && scoresByDate[weekendID].length >= 5) {
-             const scores = scoresByDate[weekendID];
-             const rank = scores.indexOf(myTotal) + 1;
-             const pr = Math.floor(((scores.length - rank) / scores.length) * 100);
-             const diff = pr - profile.baseline;
-
-             weightedDiffSum += diff * weight;
-             totalWeight += weight;
+             let pr = null;
+             const fastLookup = totalPRLookupByDate?.[weekendID];
+             if (fastLookup && fastLookup.has(myTotal)) {
+                 pr = fastLookup.get(myTotal);
+             } else {
+                 const scores = scoresByDate[weekendID];
+                 const rank = scores.indexOf(myTotal) + 1;
+                 if (rank > 0) {
+                     pr = Math.floor(((scores.length - rank) / scores.length) * 100);
+                 }
+             }
+             if (pr !== null) {
+                 const diff = pr - profile.baseline;
+                 weightedDiffSum += diff * weight;
+                 totalWeight += weight;
+             }
          }
 
          // Math Bonus
          if (myMath !== null && !isNaN(myMath) && mathScoresByDate[weekendID] && mathScoresByDate[weekendID].length >= 5) {
-             const scores = mathScoresByDate[weekendID];
-             const rank = scores.indexOf(myMath) + 1;
-             const pr = Math.floor(((scores.length - rank) / scores.length) * 100);
-             weightedMathPRSum += pr * weight;
-             totalMathWeight += weight;
+             let pr = null;
+             const fastLookup = mathPRLookupByDate?.[weekendID];
+             if (fastLookup && fastLookup.has(myMath)) {
+                 pr = fastLookup.get(myMath);
+             } else {
+                 const scores = mathScoresByDate[weekendID];
+                 const rank = scores.indexOf(myMath) + 1;
+                 if (rank > 0) {
+                     pr = Math.floor(((scores.length - rank) / scores.length) * 100);
+                 }
+             }
+             if (pr !== null) {
+                 weightedMathPRSum += pr * weight;
+                 totalMathWeight += weight;
+             }
          }
     });
 
@@ -475,10 +517,20 @@ const calculateProbLogic = (
     const avgDiff = weightedDiffSum / totalWeight;
     const avgMathPR = totalMathWeight > 0 ? weightedMathPRSum / totalMathWeight : 0;
     
-    // 達標即 50%：高於標準線性上升，低於標準加速下跌。
-    const modelProb = avgDiff >= 0
-        ? 50 + avgDiff * PROBABILITY_RULES.POSITIVE_SLOPE
-        : 50 - Math.pow(Math.abs(avgDiff), PROBABILITY_RULES.NEGATIVE_POWER) * PROBABILITY_RULES.NEGATIVE_SCALE;
+    // 達標即 50%：低於標準先溫和下降，只有明顯落後才加大線性下降。
+    let modelProb = 50;
+    if (avgDiff >= 0) {
+        modelProb = 50 + avgDiff * PROBABILITY_RULES.POSITIVE_SLOPE;
+    } else {
+        const hardThreshold = PROBABILITY_RULES.NEGATIVE_HARD_THRESHOLD;
+        if (avgDiff >= hardThreshold) {
+            modelProb = 50 + avgDiff * PROBABILITY_RULES.NEGATIVE_GENTLE_SLOPE;
+        } else {
+            const thresholdProb = 50 + hardThreshold * PROBABILITY_RULES.NEGATIVE_GENTLE_SLOPE;
+            const extraDrop = Math.abs(avgDiff - hardThreshold) * PROBABILITY_RULES.NEGATIVE_HARD_SLOPE;
+            modelProb = thresholdProb - extraDrop;
+        }
+    }
 
     // 數學加分：平均 PR > 60 起算，連續增幅，上限 +5。
     const mathBonus = clamp(
@@ -787,6 +839,14 @@ export default function App() {
           // Sort scores for ranking
           Object.keys(scoresByDate).forEach(d => scoresByDate[d].sort((a, b) => b - a));
           Object.keys(mathScoresByDate).forEach(d => mathScoresByDate[d].sort((a, b) => b - a));
+          const totalPRLookupByDate = {};
+          const mathPRLookupByDate = {};
+          Object.keys(scoresByDate).forEach((d) => {
+              totalPRLookupByDate[d] = buildPRLookupByScore(scoresByDate[d]);
+          });
+          Object.keys(mathScoresByDate).forEach((d) => {
+              mathPRLookupByDate[d] = buildPRLookupByScore(mathScoresByDate[d]);
+          });
 
           const studentGradeMaps = studentGradeMapsByStudentId;
 
@@ -794,7 +854,16 @@ export default function App() {
           
           // 3. Calculate probs using fast lookups
           allStudentsData.forEach((s) => {
-              probs[s.id] = calculateProbLogic(s, scoresByDate, mathScoresByDate, studentGradeMaps, availableDates, probabilityProfiles);
+              probs[s.id] = calculateProbLogic(
+                  s,
+                  scoresByDate,
+                  mathScoresByDate,
+                  studentGradeMaps,
+                  availableDates,
+                  probabilityProfiles,
+                  totalPRLookupByDate,
+                  mathPRLookupByDate
+              );
           });
           
           rafId = requestAnimationFrame(() => setAdmissionProbabilities(probs));
@@ -1990,6 +2059,14 @@ export default function App() {
             });
             Object.keys(scoresByDate).forEach(d => scoresByDate[d].sort((a, b) => b - a));
             Object.keys(mathScoresByDate).forEach(d => mathScoresByDate[d].sort((a, b) => b - a));
+            const totalPRLookupByDate = {};
+            const mathPRLookupByDate = {};
+            Object.keys(scoresByDate).forEach((d) => {
+                totalPRLookupByDate[d] = buildPRLookupByScore(scoresByDate[d]);
+            });
+            Object.keys(mathScoresByDate).forEach((d) => {
+                mathPRLookupByDate[d] = buildPRLookupByScore(mathScoresByDate[d]);
+            });
             
             // Build simple grade map for target student
             const studentGradeMap = {};
@@ -1998,7 +2075,16 @@ export default function App() {
                 studentGradeMap[data.id][getSearchDateID(date)] = g;
             });
             
-            studentProb = calculateProbLogic(data, scoresByDate, mathScoresByDate, studentGradeMap, sortedDates, probabilityProfiles);
+            studentProb = calculateProbLogic(
+                data,
+                scoresByDate,
+                mathScoresByDate,
+                studentGradeMap,
+                sortedDates,
+                probabilityProfiles,
+                totalPRLookupByDate,
+                mathPRLookupByDate
+            );
         }
 
         setViewData({ ...data, chartData: allChartData, average: avg, prob: studentProb });
@@ -2761,7 +2847,7 @@ export default function App() {
                                 <button onClick={() => { setSortByPR((prev) => !prev); setSortByProb(false); }} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByPR ? 'bg-indigo-600 text-white shadow-indigo-500/30' : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
                                     <ArrowDownWideNarrow className="w-3.5 h-3.5" /> PR排序
                                 </button>
-                                <button onClick={() => { setSortByProb((prev) => !prev); setSortByPR(false); }} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByProb ? 'bg-blue-600 text-white shadow-blue-500/30' : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
+                                <button onClick={() => { setSortByProb((prev) => !prev); setSortByPR(false); }} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByProb ? (darkMode ? 'text-white bg-[linear-gradient(122deg,#0b7a4b_0%,#0d9488_46%,#0ea5e9_100%)] shadow-[0_8px_20px_rgba(16,185,129,0.28)] ring-1 ring-emerald-200/30' : 'text-white bg-[linear-gradient(122deg,#059669_0%,#0891b2_46%,#2563eb_100%)] shadow-[0_9px_22px_rgba(14,165,233,0.3)]') : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
                                     <Percent className="w-3.5 h-3.5" /> 機率排序
                                 </button>
                                 <button onClick={handleExportBatchExcel} className={`px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1 border ${darkMode ? 'bg-slate-800 text-slate-300 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>

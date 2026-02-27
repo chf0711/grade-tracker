@@ -249,6 +249,7 @@ const BATCH_INSIGHT_TABS = [
     { id: 'grades', label: '成績總表' },
     { id: 'risk', label: '風險預警' },
     { id: 'heatmap', label: '熱力圖' },
+    { id: 'messages', label: '鼓勵語' },
     { id: 'query', label: '查詢監控' }
 ];
 
@@ -467,6 +468,20 @@ const sanitizeQueryEvents = (rawEvents, lastResetAt = '') => {
         .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
 
     return normalized.slice(-MAX_QUERY_EVENTS);
+};
+
+const normalizeTeacherStudentMessages = (rawMessages) => {
+    if (!rawMessages || typeof rawMessages !== 'object') return {};
+    const normalized = {};
+
+    Object.entries(rawMessages).forEach(([rawId, rawMessage]) => {
+        const id = String(rawId || '').toUpperCase().trim();
+        const message = String(rawMessage || '').trim();
+        if (!id || !message) return;
+        normalized[id] = message;
+    });
+
+    return normalized;
 };
 
 // --- Helper Logic for Probability ---
@@ -719,10 +734,13 @@ export default function App() {
   const [queryEvents, setQueryEvents] = useState([]);
   const [queryStatsLastResetAt, setQueryStatsLastResetAt] = useState('');
   const [queryStatsLoading, setQueryStatsLoading] = useState(false);
-  const [teacherMessage, setTeacherMessage] = useState('');
-  const [teacherMessageDraft, setTeacherMessageDraft] = useState('');
+  const [teacherGlobalMessage, setTeacherGlobalMessage] = useState('');
+  const [teacherGlobalMessageDraft, setTeacherGlobalMessageDraft] = useState('');
+  const [teacherStudentMessages, setTeacherStudentMessages] = useState({});
+  const [teacherStudentMessageDrafts, setTeacherStudentMessageDrafts] = useState({});
   const [teacherMessageLoading, setTeacherMessageLoading] = useState(false);
   const [teacherMessageSaving, setTeacherMessageSaving] = useState(false);
+  const [teacherStudentMessageSavingId, setTeacherStudentMessageSavingId] = useState('');
     
   const [loading, setLoading] = useState(false);
   const [searchId, setSearchId] = useState('');
@@ -1096,8 +1114,10 @@ export default function App() {
 
   const loadTeacherMessage = useCallback(async () => {
       if (!db) {
-          setTeacherMessage('');
-          setTeacherMessageDraft('');
+          setTeacherGlobalMessage('');
+          setTeacherGlobalMessageDraft('');
+          setTeacherStudentMessages({});
+          setTeacherStudentMessageDrafts({});
           return;
       }
 
@@ -1105,9 +1125,14 @@ export default function App() {
       try {
           const messageDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', TEACHER_MESSAGE_DOC_ID);
           const docSnap = await getDoc(messageDocRef);
-          const nextMessage = docSnap.exists() ? String(docSnap.data()?.message || '') : '';
-          setTeacherMessage(nextMessage);
-          setTeacherMessageDraft(nextMessage);
+          const raw = docSnap.exists() ? docSnap.data() : {};
+          const nextGlobalMessage = String(raw?.globalMessage ?? raw?.message ?? '').trim();
+          const nextByStudentMessages = normalizeTeacherStudentMessages(raw?.byStudent);
+
+          setTeacherGlobalMessage(nextGlobalMessage);
+          setTeacherGlobalMessageDraft(nextGlobalMessage);
+          setTeacherStudentMessages(nextByStudentMessages);
+          setTeacherStudentMessageDrafts(nextByStudentMessages);
       } catch (e) {
           console.error('Load teacher message error:', e);
       } finally {
@@ -1345,31 +1370,79 @@ export default function App() {
       }
   };
 
-  const handleSaveTeacherMessage = useCallback(async () => {
+  const persistTeacherMessages = useCallback(async (nextGlobalMessage, nextByStudentMessages) => {
+      const normalizedGlobal = String(nextGlobalMessage || '').trim();
+      const normalizedByStudent = normalizeTeacherStudentMessages(nextByStudentMessages);
+      if (db) {
+          const messageDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', TEACHER_MESSAGE_DOC_ID);
+          await setDoc(messageDocRef, {
+              globalMessage: normalizedGlobal,
+              message: normalizedGlobal,
+              byStudent: normalizedByStudent,
+              updatedAt: new Date().toISOString(),
+              updatedBy: user?.uid || ''
+          });
+      }
+      return { normalizedGlobal, normalizedByStudent };
+  }, [user]);
+
+  const handleSaveGlobalTeacherMessage = useCallback(async () => {
       if (!user) return;
-      const normalized = String(teacherMessageDraft || '').trim();
       setTeacherMessageSaving(true);
       try {
-          if (db) {
-              const messageDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', TEACHER_MESSAGE_DOC_ID);
-              await setDoc(
-                  messageDocRef,
-                  { message: normalized, updatedAt: new Date().toISOString(), updatedBy: user.uid || '' },
-                  { merge: true }
-              );
-          }
-          setTeacherMessage(normalized);
-          setTeacherMessageDraft(normalized);
-          setStatusMsg(normalized ? '家長端鼓勵語已儲存' : '已清空家長端鼓勵語');
+          const { normalizedGlobal, normalizedByStudent } = await persistTeacherMessages(
+              teacherGlobalMessageDraft,
+              teacherStudentMessages
+          );
+          setTeacherGlobalMessage(normalizedGlobal);
+          setTeacherGlobalMessageDraft(normalizedGlobal);
+          setTeacherStudentMessages(normalizedByStudent);
+          setTeacherStudentMessageDrafts(normalizedByStudent);
+          setStatusMsg(normalizedGlobal ? '已儲存全班鼓勵語' : '已清空全班鼓勵語');
           setTimeout(() => setStatusMsg(''), 2000);
       } catch (e) {
-          console.error('Save teacher message error:', e);
-          setStatusMsg('鼓勵語儲存失敗');
+          console.error('Save global teacher message error:', e);
+          setStatusMsg('全班鼓勵語儲存失敗');
           setTimeout(() => setStatusMsg(''), 2000);
       } finally {
           setTeacherMessageSaving(false);
       }
-  }, [teacherMessageDraft, user]);
+  }, [teacherGlobalMessageDraft, teacherStudentMessages, user, persistTeacherMessages]);
+
+  const handleSaveStudentTeacherMessage = useCallback(async (studentId) => {
+      if (!user) return;
+      const normalizedId = String(studentId || '').toUpperCase().trim();
+      if (!normalizedId) return;
+      const draftMessage = String(teacherStudentMessageDrafts[normalizedId] || '').trim();
+      const nextByStudentMessages = { ...teacherStudentMessages };
+      if (draftMessage) nextByStudentMessages[normalizedId] = draftMessage;
+      else delete nextByStudentMessages[normalizedId];
+
+      setTeacherStudentMessageSavingId(normalizedId);
+      try {
+          const { normalizedGlobal, normalizedByStudent } = await persistTeacherMessages(
+              teacherGlobalMessage,
+              nextByStudentMessages
+          );
+          setTeacherGlobalMessage(normalizedGlobal);
+          setTeacherGlobalMessageDraft(normalizedGlobal);
+          setTeacherStudentMessages(normalizedByStudent);
+          setTeacherStudentMessageDrafts((prev) => {
+              const next = { ...prev };
+              if (draftMessage) next[normalizedId] = draftMessage;
+              else delete next[normalizedId];
+              return next;
+          });
+          setStatusMsg(draftMessage ? `已儲存 ${normalizedId} 的個別鼓勵語` : `已清空 ${normalizedId} 的個別鼓勵語`);
+          setTimeout(() => setStatusMsg(''), 2000);
+      } catch (e) {
+          console.error('Save student teacher message error:', e);
+          setStatusMsg('個別鼓勵語儲存失敗');
+          setTimeout(() => setStatusMsg(''), 2000);
+      } finally {
+          setTeacherStudentMessageSavingId('');
+      }
+  }, [teacherStudentMessages, teacherStudentMessageDrafts, teacherGlobalMessage, user, persistTeacherMessages]);
 
   const handleDeleteDate = (dateToDelete) => setDeleteTarget(dateToDelete);
   const confirmDeleteDate = async () => {
@@ -2854,8 +2927,14 @@ export default function App() {
   );
 
   const teacherMessageForParent = useMemo(
-      () => String(teacherMessage || '').trim(),
-      [teacherMessage]
+      () => {
+          const studentId = String(viewData?.id || '').toUpperCase().trim();
+          if (!studentId) return '';
+          const personalMessage = String(teacherStudentMessages[studentId] || '').trim();
+          if (personalMessage) return personalMessage;
+          return String(teacherGlobalMessage || '').trim();
+      },
+      [viewData, teacherStudentMessages, teacherGlobalMessage]
   );
 
   const statsSummary = useMemo(() => {
@@ -3052,38 +3131,6 @@ export default function App() {
                      >
                        批量檢視
                      </button>
-                </div>
-
-                <div className={`rounded-2xl border p-4 mb-6 ${darkMode ? 'bg-[#020617]/45 border-white/10' : 'bg-slate-50/85 border-slate-200'}`}>
-                    <div className="flex items-center justify-between gap-3 mb-3">
-                        <div className={`text-xs font-black tracking-wide flex items-center gap-2 ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}>
-                            <Info className="w-3.5 h-3.5 text-emerald-500" />
-                            家長端老師鼓勵語
-                        </div>
-                        <span className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                            {teacherMessageLoading ? '讀取中...' : (teacherMessage.trim() ? '目前已顯示' : '未設定')}
-                        </span>
-                    </div>
-                    <textarea
-                      value={teacherMessageDraft}
-                      onChange={(e) => setTeacherMessageDraft(e.target.value)}
-                      rows={3}
-                      maxLength={200}
-                      placeholder="輸入鼓勵學生的一句話（留空並儲存會在家長端隱藏）"
-                      className={`w-full resize-y rounded-xl px-3 py-2 text-sm font-medium outline-none border transition-all ${darkMode ? 'bg-slate-900/60 border-white/10 text-slate-100 focus:border-emerald-400/40' : 'bg-white border-slate-200 text-slate-700 focus:border-emerald-300'}`}
-                    />
-                    <div className="mt-3 flex items-center justify-between gap-2">
-                        <span className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                            {teacherMessageDraft.length}/200
-                        </span>
-                        <button
-                          onClick={handleSaveTeacherMessage}
-                          disabled={teacherMessageSaving || teacherMessageLoading || !user}
-                          className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                        >
-                          {teacherMessageSaving ? '儲存中...' : '儲存鼓勵語'}
-                        </button>
-                    </div>
                 </div>
 
                 {teacherViewMode === 'single' && (
@@ -3350,6 +3397,87 @@ export default function App() {
                                             )}
                                         </tbody>
                                     </table>
+                                </div>
+                            </div>
+                        )}
+
+                        {batchInsightTab === 'messages' && (
+                            <div className={`rounded-2xl border p-4 space-y-4 ${darkMode ? 'bg-slate-900/40 border-white/10' : 'bg-white border-slate-200'}`}>
+                                <div className={`rounded-xl border p-3 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                    <div className="flex items-center justify-between gap-2 mb-2">
+                                        <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>全班鼓勵語</h4>
+                                        <span className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                            {teacherMessageLoading ? '讀取中...' : (teacherGlobalMessage ? '已設定' : '未設定')}
+                                        </span>
+                                    </div>
+                                    <textarea
+                                      value={teacherGlobalMessageDraft}
+                                      onChange={(e) => setTeacherGlobalMessageDraft(e.target.value)}
+                                      rows={3}
+                                      maxLength={200}
+                                      placeholder="可發給全班；若某位學生有個別留言，家長端會優先顯示個別留言"
+                                      className={`w-full resize-y rounded-xl px-3 py-2 text-sm font-medium outline-none border transition-all ${darkMode ? 'bg-slate-950/60 border-white/10 text-slate-100 focus:border-emerald-400/40' : 'bg-white border-slate-200 text-slate-700 focus:border-emerald-300'}`}
+                                    />
+                                    <div className="mt-2 flex items-center justify-between gap-2">
+                                        <span className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                            {teacherGlobalMessageDraft.length}/200
+                                        </span>
+                                        <button
+                                          onClick={handleSaveGlobalTeacherMessage}
+                                          disabled={teacherMessageSaving || teacherMessageLoading || !user}
+                                          className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                        >
+                                          {teacherMessageSaving ? '儲存中...' : '儲存全班訊息'}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className={`rounded-xl border p-3 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                    <div className="flex items-center justify-between gap-2 mb-2">
+                                        <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>個別鼓勵語（優先顯示）</h4>
+                                        <span className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                            目前名單 {batchRowsForDisplay.length} 人
+                                        </span>
+                                    </div>
+                                    <div className="max-h-[18rem] overflow-y-auto pr-1 space-y-2">
+                                        {batchRowsForDisplay.map((row) => {
+                                            const studentId = String(row.student.id || '').toUpperCase().trim();
+                                            if (!studentId) return null;
+                                            const isSaving = teacherStudentMessageSavingId === studentId;
+                                            const currentDraft = teacherStudentMessageDrafts[studentId] ?? teacherStudentMessages[studentId] ?? '';
+                                            return (
+                                                <div key={studentId} className={`grid grid-cols-[6.8rem_1fr_auto] gap-2 items-center rounded-lg border px-2 py-2 ${darkMode ? 'bg-slate-950/50 border-white/10' : 'bg-white border-slate-200'}`}>
+                                                    <div className="min-w-0">
+                                                        <div className={`text-[11px] font-mono font-black truncate ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}>{studentId}</div>
+                                                        <div className={`text-[10px] font-bold truncate ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>{row.student.name || '-'}</div>
+                                                    </div>
+                                                    <input
+                                                      type="text"
+                                                      value={currentDraft}
+                                                      maxLength={120}
+                                                      onChange={(e) => {
+                                                          const value = e.target.value;
+                                                          setTeacherStudentMessageDrafts((prev) => ({ ...prev, [studentId]: value }));
+                                                      }}
+                                                      placeholder="留空 = 使用全班訊息"
+                                                      className={`w-full rounded-lg px-2 py-1.5 text-xs font-medium outline-none border ${darkMode ? 'bg-slate-900/70 border-white/10 text-slate-100 focus:border-emerald-400/40' : 'bg-white border-slate-200 text-slate-700 focus:border-emerald-300'}`}
+                                                    />
+                                                    <button
+                                                      onClick={() => handleSaveStudentTeacherMessage(studentId)}
+                                                      disabled={isSaving || teacherMessageLoading || !user}
+                                                      className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-white bg-sky-600 hover:bg-sky-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                                    >
+                                                      {isSaving ? '儲存中' : '儲存'}
+                                                    </button>
+                                                </div>
+                                            );
+                                        })}
+                                        {!batchRowsForDisplay.length && (
+                                            <div className={`rounded-lg border px-3 py-4 text-center text-xs font-bold ${darkMode ? 'border-white/10 bg-slate-950/40 text-slate-400' : 'border-slate-200 bg-white text-slate-500'}`}>
+                                                目前這個日期與班級沒有學生資料，請切換日期或班級後再設定個別鼓勵語
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         )}

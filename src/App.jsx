@@ -589,7 +589,6 @@ export default function App() {
   const [securityInput, setSecurityInput] = useState('');
   const [pendingAction, setPendingAction] = useState(null);
   const [pendingActionTitle, setPendingActionTitle] = useState('安全驗證');
-  const [pendingActionHint, setPendingActionHint] = useState('請輸入安全密碼以繼續');
   const securityInputRef = useRef(null);
     
   const [teacherViewMode, setTeacherViewMode] = useState('single');
@@ -806,6 +805,25 @@ export default function App() {
       ensureXlsxReady().catch(() => {});
   }, [mode, ensureXlsxReady]);
 
+  // 預先載入圖表 chunk，降低第一次打開分析視圖的等待感
+  useEffect(() => {
+      if (typeof window === 'undefined') return undefined;
+
+      const preloadCharts = () => {
+          void import('./components/charts/SingleSubjectChart');
+          void import('./components/charts/DistributionChart');
+          void import('./components/charts/ParentAbilityRadar');
+      };
+
+      if ('requestIdleCallback' in window) {
+          const idleId = window.requestIdleCallback(preloadCharts, { timeout: 1500 });
+          return () => window.cancelIdleCallback?.(idleId);
+      }
+
+      const timer = window.setTimeout(preloadCharts, 700);
+      return () => window.clearTimeout(timer);
+  }, []);
+
   // Intentionally initialize auth listener once at app bootstrap.
   useEffect(() => {
     const initAuth = async () => {
@@ -985,14 +1003,12 @@ export default function App() {
       setPendingAction(null);
       setSecurityInput('');
       setPendingActionTitle('安全驗證');
-      setPendingActionHint('請輸入安全密碼以繼續');
   }, []);
 
   const executeWithSecurity = useCallback((action, options = {}) => {
-      const { title = '安全驗證', hint = '此操作涉及資料變更，請輸入安全密碼以繼續。' } = options;
+      const { title = '安全驗證' } = options;
       setPendingAction(() => action);
       setPendingActionTitle(title);
-      setPendingActionHint(hint);
       setSecurityInput('');
       setShowSecurityModal(true);
       setTimeout(() => {
@@ -1750,6 +1766,9 @@ export default function App() {
           { 指標: '平均總分', 數值: batchWeeklySummary?.avgTotal !== null && batchWeeklySummary?.avgTotal !== undefined ? Number(f1(batchWeeklySummary.avgTotal)) : '' },
           { 指標: '平均 PR', 數值: batchWeeklySummary?.avgPR !== null && batchWeeklySummary?.avgPR !== undefined ? Number(f1(batchWeeklySummary.avgPR)) : '' },
           { 指標: '平均錄取機率(%)', 數值: batchWeeklySummary?.avgProb !== null && batchWeeklySummary?.avgProb !== undefined ? Number(f1(batchWeeklySummary.avgProb)) : '' },
+          { 指標: '預測錄取人數(期望值)', 數值: batchWeeklySummary?.expectedAdmits !== null && batchWeeklySummary?.expectedAdmits !== undefined ? Number(f1(batchWeeklySummary.expectedAdmits)) : '' },
+          { 指標: '預測錄取人數(四捨五入)', 數值: batchWeeklySummary?.expectedAdmitsRounded !== null && batchWeeklySummary?.expectedAdmitsRounded !== undefined ? batchWeeklySummary.expectedAdmitsRounded : '' },
+          { 指標: '機率樣本覆蓋', 數值: `${batchWeeklySummary?.validProbCount ?? 0}/${batchWeeklySummary?.count ?? batchRowsForDisplay.length}` },
           { 指標: '風險學生數', 數值: batchWeeklySummary?.riskCount ?? batchRiskAlerts.length },
           { 指標: 'PR下滑人數', 數值: batchWeeklySummary?.prDropCount ?? 0 },
           { 指標: '匯出時間', 數值: new Date().toLocaleString() }
@@ -1776,6 +1795,19 @@ export default function App() {
           { wch: 6 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 12 }, { wch: 10 }
       ];
       window.XLSX.utils.book_append_sheet(workbook, detailSheet, '班級成績總表');
+
+      const classPredictionRows = batchClassPredictions.map((item) => ({
+          '班級': item.classId,
+          '班級顯示': item.classLabel,
+          '人數': item.count,
+          '機率樣本數': item.validProbCount,
+          '預測錄取(期望值)': item.validProbCount > 0 ? Number(f1(item.expectedAdmits)) : '',
+          '預測錄取(四捨五入)': item.validProbCount > 0 ? item.expectedRounded : '',
+          '波動範圍(約1σ)': item.validProbCount > 0 ? `${f1(item.lowerBound)} ~ ${f1(item.upperBound)}` : ''
+      }));
+      const classPredictionSheet = window.XLSX.utils.json_to_sheet(classPredictionRows);
+      classPredictionSheet['!cols'] = [{ wch: 8 }, { wch: 10 }, { wch: 8 }, { wch: 10 }, { wch: 16 }, { wch: 16 }, { wch: 18 }];
+      window.XLSX.utils.book_append_sheet(workbook, classPredictionSheet, '各班預測錄取');
 
       const riskRows = batchRiskAlerts.map((item, index) => ({
           '序號': index + 1,
@@ -2235,6 +2267,75 @@ export default function App() {
       globalPRByStudentAndWeekend
   ]);
 
+  const batchClassPredictions = useMemo(() => {
+      if (mode !== 'teacher' || teacherViewMode !== 'batch' || !batchDate) return [];
+
+      const weekendID = getTestDateID(batchDate);
+      const statsByClass = {};
+      const baseClassIds = CLASS_DEFS.map((item) => item.id);
+      const dynamicClassIds = [];
+
+      CLASS_DEFS.forEach((item) => {
+          statsByClass[item.id] = {
+              classId: item.id,
+              classLabel: item.label,
+              count: 0,
+              validProbCount: 0,
+              expectedAdmits: 0,
+              variance: 0
+          };
+      });
+
+      allStudentsData.forEach((student) => {
+          const dateGrades = studentGradeMapsByStudentId[student.id]?.[weekendID];
+          if (!dateGrades || !hasAnySubjectScore(dateGrades)) return;
+
+          const classId = dateGrades.class || 'A班';
+          if (!statsByClass[classId]) {
+              statsByClass[classId] = {
+                  classId,
+                  classLabel: classId,
+                  count: 0,
+                  validProbCount: 0,
+                  expectedAdmits: 0,
+                  variance: 0
+              };
+              dynamicClassIds.push(classId);
+          }
+
+          const classStats = statsByClass[classId];
+          classStats.count += 1;
+
+          const rawProb = toNumberOrNull(admissionProbabilities[student.id]);
+          if (rawProb === null) return;
+          const p = clamp(rawProb, 0, 100) / 100;
+          classStats.validProbCount += 1;
+          classStats.expectedAdmits += p;
+          classStats.variance += p * (1 - p);
+      });
+
+      const orderedClassIds = [...baseClassIds, ...dynamicClassIds];
+      return orderedClassIds.map((classId) => {
+          const classStats = statsByClass[classId];
+          const stdDev = Math.sqrt(Math.max(classStats.variance, 0));
+          return {
+              ...classStats,
+              stdDev,
+              expectedRounded: Math.round(classStats.expectedAdmits),
+              lowerBound: Math.max(0, classStats.expectedAdmits - stdDev),
+              upperBound: Math.min(classStats.count, classStats.expectedAdmits + stdDev)
+          };
+      });
+  }, [
+      mode,
+      teacherViewMode,
+      batchDate,
+      getTestDateID,
+      allStudentsData,
+      studentGradeMapsByStudentId,
+      admissionProbabilities
+  ]);
+
   const batchRiskAlerts = useMemo(() => {
       if (mode !== 'teacher' || teacherViewMode !== 'batch' || !batchDate || !batchRowsForDisplay.length) return [];
 
@@ -2426,6 +2527,7 @@ export default function App() {
       const avgTotal = totalValues.length ? totalValues.reduce((sum, value) => sum + value, 0) / totalValues.length : null;
       const avgProb = probValues.length ? probValues.reduce((sum, value) => sum + value, 0) / probValues.length : null;
       const avgPR = prValues.length ? prValues.reduce((sum, value) => sum + value, 0) / prValues.length : null;
+      const expectedAdmits = probValues.length ? probValues.reduce((sum, value) => sum + clamp(value, 0, 100) / 100, 0) : null;
       const prDropCount = batchRiskAlerts.filter((item) => item.prDelta !== null && item.prDelta < 0).length;
 
       return {
@@ -2433,6 +2535,9 @@ export default function App() {
           avgTotal,
           avgProb,
           avgPR,
+          expectedAdmits,
+          expectedAdmitsRounded: expectedAdmits === null ? null : Math.round(expectedAdmits),
+          validProbCount: probValues.length,
           riskCount: batchRiskAlerts.length,
           prDropCount
       };
@@ -2620,9 +2725,8 @@ export default function App() {
                 <div className={`backdrop-blur-2xl p-8 rounded-[2.5rem] w-full max-w-sm text-center border relative overflow-hidden ${darkMode ? 'bg-[#111827]/88 border-white/10 shadow-lg shadow-black/35' : 'bg-white/96 border-white/80 shadow-[0_24px_55px_rgba(15,23,42,0.11)]'}`}>
                     <div className={`absolute top-0 left-0 right-0 h-1 ${darkMode ? 'bg-blue-400/50' : 'bg-gradient-to-r from-sky-500 via-emerald-500 to-indigo-500'}`} />
                     <div className={`inline-flex p-4 rounded-2xl mb-6 shadow-inner ${darkMode ? 'bg-blue-500/10 text-blue-400 ring-1 ring-blue-500/20' : 'bg-blue-50 text-blue-600'}`}><Lock className="w-6 h-6" /></div>
-                    <h2 className={`text-xl font-black mb-2 tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>身份驗證</h2>
-                    <p className={`text-[11px] font-semibold mb-6 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>請輸入老師端密碼</p>
-                    <input type="password" value={passwordInput} onChange={(e) => { setPasswordInput(e.target.value); setLoginError(false); }} onKeyDown={(e) => e.key === 'Enter' && handleLoginSubmit()} className={`w-full p-4 rounded-2xl text-center text-xl font-bold tracking-widest outline-none transition-all mb-6 placeholder:text-base placeholder:tracking-normal placeholder:font-medium border shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5 text-white focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20' : 'bg-slate-50 border-slate-200/60 text-slate-800 focus:bg-white focus:ring-2 focus:ring-blue-100 placeholder:text-slate-400'}`} placeholder="輸入密碼" autoFocus />
+                    <h2 className={`text-xl font-black mb-6 tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>身份驗證</h2>
+                    <input type="password" value={passwordInput} onChange={(e) => { setPasswordInput(e.target.value); setLoginError(false); }} onKeyDown={(e) => e.key === 'Enter' && handleLoginSubmit()} className={`w-full p-4 rounded-2xl text-center text-xl font-bold tracking-widest outline-none transition-all mb-6 placeholder:text-base placeholder:tracking-normal placeholder:font-medium border shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5 text-white focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 placeholder:text-slate-500' : 'bg-slate-50 border-slate-200/60 text-slate-800 focus:bg-white focus:ring-2 focus:ring-blue-100 placeholder:text-slate-400'}`} placeholder="輸入密碼" autoFocus />
                     {loginError && <p className="text-red-500 text-xs font-bold mb-4">密碼錯誤</p>}
                     <button onClick={handleLoginSubmit} className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3.5 rounded-2xl font-bold shadow-lg shadow-blue-500/30 active:scale-[0.98] transition-all">登入</button>
                 </div>
@@ -2731,7 +2835,7 @@ export default function App() {
                             ))}
                         </div>
 
-                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                        <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
                             <div className={`rounded-xl border px-3 py-2 ${darkMode ? 'bg-slate-900/40 border-white/10' : 'bg-white border-slate-200'}`}>
                                 <div className={`text-[10px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>平均 PR</div>
                                 <div className={`text-xl font-black ${darkMode ? 'text-indigo-200' : 'text-indigo-700'}`}>{batchWeeklySummary?.avgPR !== null && batchWeeklySummary?.avgPR !== undefined ? f1(batchWeeklySummary.avgPR) : '--'}</div>
@@ -2740,6 +2844,13 @@ export default function App() {
                                 <div className={`text-[10px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>平均機率</div>
                                 <div className={`text-xl font-black ${darkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>{batchWeeklySummary?.avgProb !== null && batchWeeklySummary?.avgProb !== undefined ? `${f1(batchWeeklySummary.avgProb)}%` : '--'}</div>
                             </div>
+                            <div className={`rounded-xl border px-3 py-2 ${darkMode ? 'bg-emerald-900/25 border-emerald-300/25' : 'bg-emerald-50 border-emerald-200/80'}`}>
+                                <div className={`text-[10px] font-bold tracking-wider uppercase ${darkMode ? 'text-emerald-200/80' : 'text-emerald-700/80'}`}>預測錄取</div>
+                                <div className={`text-xl font-black ${darkMode ? 'text-emerald-100' : 'text-emerald-700'}`}>{batchWeeklySummary?.expectedAdmits !== null && batchWeeklySummary?.expectedAdmits !== undefined ? `${f1(batchWeeklySummary.expectedAdmits)}人` : '--'}</div>
+                                <div className={`text-[10px] mt-0.5 font-bold ${darkMode ? 'text-emerald-200/70' : 'text-emerald-700/70'}`}>
+                                    樣本 {batchWeeklySummary?.validProbCount ?? 0}/{batchWeeklySummary?.count ?? 0}
+                                </div>
+                            </div>
                             <div className={`rounded-xl border px-3 py-2 ${darkMode ? 'bg-slate-900/40 border-white/10' : 'bg-white border-slate-200'}`}>
                                 <div className={`text-[10px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>風險人數</div>
                                 <div className={`text-xl font-black ${darkMode ? 'text-rose-200' : 'text-rose-700'}`}>{batchWeeklySummary?.riskCount ?? 0}</div>
@@ -2747,6 +2858,39 @@ export default function App() {
                             <div className={`rounded-xl border px-3 py-2 ${darkMode ? 'bg-slate-900/40 border-white/10' : 'bg-white border-slate-200'}`}>
                                 <div className={`text-[10px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>PR下滑</div>
                                 <div className={`text-xl font-black ${darkMode ? 'text-amber-200' : 'text-amber-700'}`}>{batchWeeklySummary?.prDropCount ?? 0}</div>
+                            </div>
+                        </div>
+
+                        <div className={`rounded-xl border p-3 ${darkMode ? 'bg-slate-900/35 border-white/10' : 'bg-white border-slate-200'}`}>
+                            <div className="flex items-center justify-between mb-2">
+                                <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>各班預測錄取人數</h4>
+                                <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>獨立事件：Σpᵢ</span>
+                            </div>
+                            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2">
+                                {batchClassPredictions.map((item) => {
+                                    const isActiveClass = item.classId === teacherClassFilter;
+                                    return (
+                                        <div
+                                          key={item.classId}
+                                          className={`rounded-lg border px-3 py-2 ${
+                                            isActiveClass
+                                              ? (darkMode ? 'bg-emerald-900/35 border-emerald-300/35' : 'bg-emerald-50 border-emerald-200')
+                                              : (darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200')
+                                          }`}
+                                        >
+                                            <div className={`text-[11px] font-black ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>{item.classId}</div>
+                                            <div className={`text-lg font-black mt-1 ${darkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>
+                                                {item.validProbCount > 0 ? `${f1(item.expectedAdmits)}人` : '--'}
+                                            </div>
+                                            <div className={`text-[10px] font-bold mt-0.5 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                樣本 {item.validProbCount}/{item.count}
+                                            </div>
+                                            <div className={`text-[10px] font-semibold mt-0.5 ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                                                {item.validProbCount > 0 ? `約 ${f1(item.lowerBound)}-${f1(item.upperBound)} 人` : '尚無機率資料'}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </div>
 
@@ -2930,8 +3074,7 @@ export default function App() {
                                     </div>
                                     <button
                                       onClick={() => executeWithSecurity(handleResetQueryStats, {
-                                          title: '重置查詢次數',
-                                          hint: '此操作會清空所有查詢次數統計，請再次確認後輸入安全密碼。'
+                                          title: '重置查詢次數'
                                       })}
                                       disabled={queryStatsLoading}
                                       className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors ${
@@ -3037,8 +3180,7 @@ export default function App() {
             {!viewData && (
             <div className={`backdrop-blur-2xl p-8 rounded-[2.5rem] shadow-2xl border text-center relative overflow-hidden ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/15 shadow-black/30' : 'bg-white border-white shadow-[0_24px_55px_rgba(15,23,42,0.12)]'}`}>
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-sky-500 via-emerald-500 to-indigo-500"></div>
-              <h2 className={`text-2xl font-black mb-2 tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>查詢成績</h2>
-              <p className={`text-[11px] font-semibold mb-8 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>輸入學號，即可查看成績趨勢與落點分析</p>
+              <h2 className={`text-2xl font-black mb-8 tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>查詢成績</h2>
               <div className={`w-full p-2 rounded-2xl border transition-all mb-6 shadow-inner ${darkMode ? 'bg-[#08120d]/70 border-emerald-200/15 focus-within:ring-2 focus-within:ring-emerald-500/20' : 'bg-slate-50 border-slate-200 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100'}`}>
                 <input type="text" placeholder="請輸入學號" className={`w-full bg-transparent border-none px-4 py-3 outline-none text-xl uppercase font-bold text-center tracking-widest placeholder:text-base placeholder:tracking-normal placeholder:font-medium ${darkMode ? 'text-white placeholder:text-slate-600' : 'text-slate-800 placeholder:text-slate-400'}`} value={searchId} onChange={(e) => setSearchId(e.target.value)} />
               </div>
@@ -3341,8 +3483,7 @@ export default function App() {
                     <div className={`mx-auto mb-6 p-4 rounded-full inline-block shadow-inner ${darkMode ? 'bg-blue-500/10 text-blue-400' : 'bg-blue-50 text-blue-600'}`}>
                         <ShieldCheck className="w-8 h-8" />
                     </div>
-                    <h3 className={`text-lg font-bold mb-2 ${darkMode ? 'text-white' : 'text-slate-800'}`}>{pendingActionTitle}</h3>
-                    <p className={`text-xs mb-6 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>{pendingActionHint}</p>
+                    <h3 className={`text-lg font-bold mb-6 ${darkMode ? 'text-white' : 'text-slate-800'}`}>{pendingActionTitle}</h3>
                     <input 
                         ref={securityInputRef}
                         type="password" 
@@ -3370,8 +3511,7 @@ export default function App() {
                       <button onClick={() => { setDeleteTarget(null); setStudentToDelete(null); }} className={`flex-1 px-4 py-3.5 rounded-xl font-bold text-sm transition-colors ${darkMode ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>取消</button>
                       <button
                         onClick={() => executeWithSecurity(deleteTarget ? confirmDeleteDate : confirmDeleteStudent, {
-                            title: deleteTarget ? '刪除測驗日期' : '刪除學生資料',
-                            hint: deleteTarget ? '此操作會永久刪除該日期設定，請再次確認後輸入安全密碼。' : '此操作會永久刪除學生資料，請再次確認後輸入安全密碼。'
+                            title: deleteTarget ? '刪除測驗日期' : '刪除學生資料'
                         })}
                         className="flex-1 px-4 py-3.5 rounded-xl bg-red-500 text-white hover:bg-red-600 font-bold text-sm shadow-lg shadow-red-900/20 transition-all active:scale-95"
                       >

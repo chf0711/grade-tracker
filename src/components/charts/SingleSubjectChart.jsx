@@ -19,6 +19,13 @@ export default function SingleSubjectChart({
   domain,
   isDarkMode
 }) {
+  const pointCount = Array.isArray(data) ? data.length : 0;
+  const prefersReducedMotion = typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // 兼顧效能：資料點過多或使用者偏好減少動態時，自動停用動畫
+  const shouldAnimate = !prefersReducedMotion && pointCount > 1 && pointCount <= 42;
+
   return (
     <div className={`mb-6 rounded-2xl border px-3 pt-3 pb-2 ${isDarkMode ? 'bg-slate-900/30 border-white/10' : 'bg-white border-slate-200/90 shadow-[0_10px_24px_rgba(15,23,42,0.06)]'}`}>
       <div className="flex items-center justify-between px-1 mb-1">
@@ -71,7 +78,9 @@ export default function SingleSubjectChart({
               strokeOpacity={0.6}
               dot={false}
               activeDot={{ r: 4, fill: '#94a3b8', stroke: 'none' }}
-              isAnimationActive={false}
+              isAnimationActive={shouldAnimate}
+              animationDuration={520}
+              animationEasing="ease-out"
               connectNulls
             />
             <Line
@@ -81,7 +90,10 @@ export default function SingleSubjectChart({
               stroke={lineColor}
               strokeWidth={3}
               activeDot={{ r: 6, strokeWidth: 0 }}
-              isAnimationActive={false}
+              isAnimationActive={shouldAnimate}
+              animationBegin={70}
+              animationDuration={760}
+              animationEasing="ease-out"
               connectNulls
             />
           </LineChart>

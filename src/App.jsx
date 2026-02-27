@@ -100,9 +100,9 @@ const PHASE_BOUNDARIES = {
     p1Start: '04/19',
     p1End: '08/02',
     p2Start: '08/09',
-    p2End: '12/13',
-    mockStart: '12/20',
-    mockEnd: '03/20'
+    p2End: '12/20',
+    mockStart: '12/27',
+    mockEnd: '03/15'
 };
 
 const resolvePhaseByDate = (dateStr, allDates = null) => {
@@ -311,7 +311,6 @@ const PROBABILITY_RULES = Object.freeze({
     MOCK_WEIGHT: 2.5,
     NORMAL_BASELINE: 55,
     MOCK_BASELINE: 47,
-    MOCK_BASELINE_BLEND_DAYS: 7,
     POSITIVE_SLOPE: 1.58,
     NEGATIVE_POWER: 1.2,
     NEGATIVE_SCALE: 1.34,
@@ -324,20 +323,7 @@ const PROBABILITY_RULES = Object.freeze({
 const getProbabilityProfileByWeekend = (weekendID, availableDates) => {
     const phase = resolvePhaseByDate(weekendID, availableDates);
     const weight = phase === 'mock' ? PROBABILITY_RULES.MOCK_WEIGHT : PROBABILITY_RULES.NORMAL_WEIGHT;
-
-    let baseline = phase === 'mock' ? PROBABILITY_RULES.MOCK_BASELINE : PROBABILITY_RULES.NORMAL_BASELINE;
-    const blendWindow = PROBABILITY_RULES.MOCK_BASELINE_BLEND_DAYS;
-    const mockStartDate = parseDateStr(PHASE_BOUNDARIES.mockStart);
-    const currentDate = parseDateStr(weekendID);
-
-    if (blendWindow > 0 && mockStartDate && currentDate) {
-        const dayOffset = Math.round((currentDate.getTime() - mockStartDate.getTime()) / (1000 * 60 * 60 * 24));
-        if (dayOffset < 0 && dayOffset >= -blendWindow) {
-            const t = clamp((dayOffset + blendWindow) / blendWindow, 0, 1);
-            baseline = PROBABILITY_RULES.NORMAL_BASELINE + (PROBABILITY_RULES.MOCK_BASELINE - PROBABILITY_RULES.NORMAL_BASELINE) * t;
-        }
-    }
-
+    const baseline = phase === 'mock' ? PROBABILITY_RULES.MOCK_BASELINE : PROBABILITY_RULES.NORMAL_BASELINE;
     return { weight, baseline };
 };
 

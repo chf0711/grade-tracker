@@ -306,6 +306,41 @@ const toNumberOrNull = (value) => {
     return Number.isFinite(num) ? num : null;
 };
 
+const PROBABILITY_RULES = Object.freeze({
+    NORMAL_WEIGHT: 1,
+    MOCK_WEIGHT: 2.5,
+    NORMAL_BASELINE: 55,
+    MOCK_BASELINE: 47,
+    MOCK_BASELINE_BLEND_DAYS: 7,
+    POSITIVE_SLOPE: 1.58,
+    NEGATIVE_POWER: 1.2,
+    NEGATIVE_SCALE: 1.34,
+    MATH_BONUS_THRESHOLD: 60,
+    MATH_BONUS_SCALE: 0.1,
+    MAX_MATH_BONUS: 5,
+    FULL_CONFIDENCE_WEIGHT: 10
+});
+
+const getProbabilityProfileByWeekend = (weekendID, availableDates) => {
+    const phase = resolvePhaseByDate(weekendID, availableDates);
+    const weight = phase === 'mock' ? PROBABILITY_RULES.MOCK_WEIGHT : PROBABILITY_RULES.NORMAL_WEIGHT;
+
+    let baseline = phase === 'mock' ? PROBABILITY_RULES.MOCK_BASELINE : PROBABILITY_RULES.NORMAL_BASELINE;
+    const blendWindow = PROBABILITY_RULES.MOCK_BASELINE_BLEND_DAYS;
+    const mockStartDate = parseDateStr(PHASE_BOUNDARIES.mockStart);
+    const currentDate = parseDateStr(weekendID);
+
+    if (blendWindow > 0 && mockStartDate && currentDate) {
+        const dayOffset = Math.round((currentDate.getTime() - mockStartDate.getTime()) / (1000 * 60 * 60 * 24));
+        if (dayOffset < 0 && dayOffset >= -blendWindow) {
+            const t = clamp((dayOffset + blendWindow) / blendWindow, 0, 1);
+            baseline = PROBABILITY_RULES.NORMAL_BASELINE + (PROBABILITY_RULES.MOCK_BASELINE - PROBABILITY_RULES.NORMAL_BASELINE) * t;
+        }
+    }
+
+    return { weight, baseline };
+};
+
 const resolveRiskLevel = (score) => {
     if (score >= 70) return '高風險';
     if (score >= 45) return '中風險';
@@ -399,11 +434,18 @@ const resolveDistributionBucketIndex = (value, template) => {
 };
 
 // --- Helper Logic for Probability ---
-const calculateProbLogic = (targetStudent, scoresByDate, mathScoresByDate, studentGradeMaps, availableDates) => {
-    let weightedPRSum = 0;
+const calculateProbLogic = (
+    targetStudent,
+    scoresByDate,
+    mathScoresByDate,
+    studentGradeMaps,
+    availableDates,
+    probabilityProfiles = null
+) => {
+    let weightedDiffSum = 0;
     let totalWeight = 0;
-    let mathPRSum = 0;
-    let mathWeight = 0;
+    let weightedMathPRSum = 0;
+    let totalMathWeight = 0;
     
     const myGrades = studentGradeMaps[targetStudent.id] || {};
 
@@ -418,22 +460,17 @@ const calculateProbLogic = (targetStudent, scoresByDate, mathScoresByDate, stude
              myMath = parseFloat(grade.math);
          }
          
+         const profile = probabilityProfiles?.[weekendID] || getProbabilityProfileByWeekend(weekendID, availableDates);
+         const weight = profile.weight;
+
          // Total PR Logic
          if (myTotal !== null && !isNaN(myTotal) && scoresByDate[weekendID] && scoresByDate[weekendID].length >= 5) {
              const scores = scoresByDate[weekendID];
              const rank = scores.indexOf(myTotal) + 1;
              const pr = Math.floor(((scores.length - rank) / scores.length) * 100);
-             
-             // PDF 規則：一般週考(前兩階段)基準 PR55；模考衝刺基準 PR48。
-             const isMock = resolvePhaseByDate(weekendID, availableDates) === 'mock';
-             const weight = isMock ? 2.5 : 1; 
-             const baseline = isMock ? 48 : 55;
+             const diff = pr - profile.baseline;
 
-             // 達標即 50%：先把各階段 PR 正規化到共同軸，再做加權平均
-             const diff = pr - baseline; 
-             const normalizedPR = 50 + diff;
-
-             weightedPRSum += normalizedPR * weight;
+             weightedDiffSum += diff * weight;
              totalWeight += weight;
          }
 
@@ -442,35 +479,33 @@ const calculateProbLogic = (targetStudent, scoresByDate, mathScoresByDate, stude
              const scores = mathScoresByDate[weekendID];
              const rank = scores.indexOf(myMath) + 1;
              const pr = Math.floor(((scores.length - rank) / scores.length) * 100);
-             mathPRSum += pr;
-             mathWeight++;
+             weightedMathPRSum += pr * weight;
+             totalMathWeight += weight;
          }
     });
 
     if (totalWeight === 0) return '-';
 
-    const avgPR = clamp(weightedPRSum / totalWeight, 0, 100);
-    const avgMathPR = mathWeight > 0 ? mathPRSum / mathWeight : 0;
+    const avgDiff = weightedDiffSum / totalWeight;
+    const avgMathPR = totalMathWeight > 0 ? weightedMathPRSum / totalMathWeight : 0;
     
-    // PDF 規則：高於標準線性上升；低於標準加速下跌（最低 1%、最高 99%）
-    let prob = 0;
-    if (avgPR < 50) {
-        prob = Math.pow(avgPR / 50, 1.5) * 50;
-    } else {
-        prob = 50 + ((avgPR - 50) / 50) * 49;
-    }
+    // 達標即 50%：高於標準線性上升，低於標準加速下跌。
+    const modelProb = avgDiff >= 0
+        ? 50 + avgDiff * PROBABILITY_RULES.POSITIVE_SLOPE
+        : 50 - Math.pow(Math.abs(avgDiff), PROBABILITY_RULES.NEGATIVE_POWER) * PROBABILITY_RULES.NEGATIVE_SCALE;
 
-    // PDF 規則：數學 >60 +2、>80 +4，並採動態增幅，上限 +5
-    let mathBonus = 0;
-    if (avgMathPR > 80) {
-        mathBonus = 4 + ((avgMathPR - 80) / 20);
-    } else if (avgMathPR > 60) {
-        mathBonus = 2 + ((avgMathPR - 60) / 20) * 2;
-    }
+    // 數學加分：平均 PR > 60 起算，連續增幅，上限 +5。
+    const mathBonus = clamp(
+        (avgMathPR - PROBABILITY_RULES.MATH_BONUS_THRESHOLD) * PROBABILITY_RULES.MATH_BONUS_SCALE,
+        0,
+        PROBABILITY_RULES.MAX_MATH_BONUS
+    );
 
-    prob += clamp(mathBonus, 0, 5);
+    const boostedProb = modelProb + mathBonus;
+    const confidence = clamp(totalWeight / PROBABILITY_RULES.FULL_CONFIDENCE_WEIGHT, 0, 1);
+    const stabilizedProb = 50 + (boostedProb - 50) * confidence;
 
-    return Math.min(99, Math.max(1, Math.round(prob)));
+    return Math.round(clamp(stabilizedProb, 1, 99));
 };
 
 // --- Components ---
@@ -734,12 +769,17 @@ export default function App() {
       let rafId = null;
       const timer = setTimeout(() => {
           // 1. Prepare ranking lists
-          const scoresByDate = {}; 
-          const mathScoresByDate = {}; 
-          
-          availableDates.forEach(d => {
-              scoresByDate[d] = [];
-              mathScoresByDate[d] = [];
+          const scoresByDate = {};
+          const mathScoresByDate = {};
+          const probabilityProfiles = {};
+
+          availableDates.forEach((d) => {
+              const weekendID = getTestDateID(d);
+              scoresByDate[weekendID] = [];
+              mathScoresByDate[weekendID] = [];
+              if (!probabilityProfiles[weekendID]) {
+                  probabilityProfiles[weekendID] = getProbabilityProfileByWeekend(weekendID, availableDates);
+              }
           });
           
           // Build Score Arrays
@@ -767,8 +807,8 @@ export default function App() {
           const probs = {};
           
           // 3. Calculate probs using fast lookups
-          allStudentsData.forEach(s => {
-              probs[s.id] = calculateProbLogic(s, scoresByDate, mathScoresByDate, studentGradeMaps, availableDates);
+          allStudentsData.forEach((s) => {
+              probs[s.id] = calculateProbLogic(s, scoresByDate, mathScoresByDate, studentGradeMaps, availableDates, probabilityProfiles);
           });
           
           rafId = requestAnimationFrame(() => setAdmissionProbabilities(probs));
@@ -1936,9 +1976,17 @@ export default function App() {
         
         if (contextData.length > 0) {
             // Re-build the scores map quickly for this calculation
-            const scoresByDate = {}; 
-            const mathScoresByDate = {}; 
-            sortedDates.forEach(d => { scoresByDate[d] = []; mathScoresByDate[d] = []; });
+            const scoresByDate = {};
+            const mathScoresByDate = {};
+            const probabilityProfiles = {};
+            sortedDates.forEach((d) => {
+                const weekendID = getSearchDateID(d);
+                scoresByDate[weekendID] = [];
+                mathScoresByDate[weekendID] = [];
+                if (!probabilityProfiles[weekendID]) {
+                    probabilityProfiles[weekendID] = getProbabilityProfileByWeekend(weekendID, sortedDates);
+                }
+            });
             
             contextData.forEach(s => {
                 if (!s.grades) return;
@@ -1964,7 +2012,7 @@ export default function App() {
                 studentGradeMap[data.id][getSearchDateID(date)] = g;
             });
             
-            studentProb = calculateProbLogic(data, scoresByDate, mathScoresByDate, studentGradeMap, sortedDates);
+            studentProb = calculateProbLogic(data, scoresByDate, mathScoresByDate, studentGradeMap, sortedDates, probabilityProfiles);
         }
 
         setViewData({ ...data, chartData: allChartData, average: avg, prob: studentProb });

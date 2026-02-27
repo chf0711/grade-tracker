@@ -810,17 +810,14 @@ export default function App() {
       if (typeof window === 'undefined') return undefined;
 
       const preloadCharts = () => {
-          void import('./components/charts/SingleSubjectChart');
-          void import('./components/charts/DistributionChart');
-          void import('./components/charts/ParentAbilityRadar');
+          Promise.allSettled([
+              import('./components/charts/SingleSubjectChart'),
+              import('./components/charts/DistributionChart'),
+              import('./components/charts/ParentAbilityRadar')
+          ]).catch(() => {});
       };
 
-      if ('requestIdleCallback' in window) {
-          const idleId = window.requestIdleCallback(preloadCharts, { timeout: 1500 });
-          return () => window.cancelIdleCallback?.(idleId);
-      }
-
-      const timer = window.setTimeout(preloadCharts, 700);
+      const timer = window.setTimeout(preloadCharts, 900);
       return () => window.clearTimeout(timer);
   }, []);
 

@@ -2525,7 +2525,7 @@ export default function App() {
   if (!user) return <div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400 text-sm font-mono tracking-widest uppercase">Connecting...</div>;
 
   return (
-    <div className={`${isLandingMode ? 'h-[100svh] overflow-hidden' : 'min-h-screen pb-32 overflow-x-hidden'} font-sans antialiased transition-colors duration-500 ease-in-out relative ${darkMode ? 'bg-[#111714] text-slate-200' : 'bg-transparent text-slate-800'}`}>
+    <div className={`${isLandingMode ? 'h-[100dvh] min-h-[100svh] overflow-hidden' : 'min-h-screen pb-32 overflow-x-hidden'} font-sans antialiased transition-colors duration-500 ease-in-out relative ${darkMode ? 'bg-[#111714] text-slate-200' : 'bg-transparent text-slate-800'}`}>
       <div
         aria-hidden="true"
         className="fixed inset-0 pointer-events-none z-0 transition-opacity duration-500"
@@ -2536,7 +2536,7 @@ export default function App() {
       />
 
       {/* Header */}
-      <header className={`fixed top-0 w-full backdrop-blur-2xl z-30 border-b transition-all duration-300 ${darkMode ? 'bg-[#121a17]/88 border-emerald-200/10 shadow-lg shadow-black/25' : 'bg-white/86 border-white/90 shadow-[0_14px_40px_rgba(15,23,42,0.1)]'}`}>
+      <header className={`fixed top-0 w-full backdrop-blur-xl z-30 border-b transition-all duration-300 ${darkMode ? 'bg-[#121a17]/88 border-emerald-200/10 shadow-lg shadow-black/25' : 'bg-[linear-gradient(108deg,rgba(255,255,255,0.78)_0%,rgba(244,252,248,0.84)_52%,rgba(241,247,255,0.8)_100%)] border-white/75 shadow-[0_14px_36px_rgba(15,23,42,0.12)]'}`}>
         <div className="max-w-5xl mx-auto px-6 h-16 flex justify-between items-center relative z-10">
           <div
             className="flex items-center gap-3 cursor-pointer group"
@@ -2583,17 +2583,17 @@ export default function App() {
 
       <main className={`${isLandingMode ? 'pt-16' : 'pt-28'} px-4 max-w-5xl mx-auto relative z-10`}>
         {mode === 'landing' && (
-          <div className="h-[calc(100svh-64px)] flex items-center justify-center">
+          <div className="h-[calc(100dvh-64px)] min-h-[calc(100svh-64px)] flex items-center justify-center">
             <div className="w-full max-w-4xl h-full">
-              <div className="relative z-10 h-full flex flex-col items-center justify-center px-4 md:px-6 py-6 md:py-8">
-                <div className="px-4 py-1.5 rounded-full mb-5 border border-white/95 bg-white/92 text-[10px] tracking-[0.22em] font-black uppercase text-slate-600 shadow-[0_8px_24px_rgba(15,23,42,0.08)]">
+              <div className="relative z-10 h-full flex flex-col items-center justify-center px-[clamp(0.9rem,3.6vw,1.55rem)] py-[clamp(0.8rem,2.8vh,1.45rem)]">
+                <div className="px-4 py-1.5 rounded-full mb-[clamp(0.55rem,1.9vh,1.25rem)] border border-white/95 bg-white/92 text-[10px] tracking-[0.22em] font-black uppercase text-slate-600 shadow-[0_8px_24px_rgba(15,23,42,0.08)]">
                     HSINRU CENTRAL
                 </div>
-                <h2 className="whitespace-nowrap text-[clamp(1.45rem,6.8vw,2.85rem)] sm:text-[2rem] md:text-[2.85rem] font-black font-serif tracking-[-0.02em] sm:tracking-tight mb-3 text-center leading-[1.1] bg-clip-text text-transparent bg-[linear-gradient(104deg,#047857_0%,#0f766e_26%,#0891b2_58%,#1d4ed8_100%)] drop-shadow-[0_1px_0_rgba(255,255,255,0.45)]">Make Progress Visible</h2>
-                <p className="text-[11px] font-bold tracking-[0.2em] mb-6 uppercase text-slate-600">2025-2026 Learning Journey</p>
+                <h2 className="w-full px-[clamp(0.2rem,1vw,0.7rem)] whitespace-nowrap text-[clamp(1.2rem,5.35vw,2.9rem)] sm:text-[clamp(1.8rem,4.4vw,2.9rem)] font-black font-serif tracking-[-0.016em] sm:tracking-tight mb-[clamp(0.35rem,1.2vh,0.9rem)] text-center leading-[1.18] bg-clip-text text-transparent bg-[linear-gradient(104deg,#047857_0%,#0f766e_24%,#0891b2_56%,#1d4ed8_100%)] drop-shadow-[0_1px_0_rgba(255,255,255,0.45)]">Make Progress Visible</h2>
+                <p className="text-[clamp(10px,2.35vw,11px)] font-bold tracking-[0.2em] mb-[clamp(0.7rem,2.4vh,1.6rem)] uppercase text-slate-600">2025-2026 Learning Journey</p>
                 <ExamCountdown isDarkMode={darkMode} />
                   
-                <div className="w-full max-w-xl grid grid-cols-1 md:grid-cols-2 gap-3 mt-6">
+                <div className="w-full max-w-xl grid grid-cols-1 md:grid-cols-2 gap-3 mt-[clamp(0.9rem,2.7vh,1.6rem)]">
                    <button
                       onClick={() => runWithBatchDiscardGuard(() => {
                         if (isAuthenticated) {
@@ -2623,7 +2623,7 @@ export default function App() {
                    </button>
                 </div>
 
-                <p className="mt-6 md:mt-8 text-[11px] font-serif font-semibold tracking-[0.14em] text-slate-500/90">
+                <p className="mt-[clamp(0.9rem,3vh,1.8rem)] text-[11px] font-serif font-semibold tracking-[0.14em] text-slate-500/90">
                   Created by CH.Fan
                 </p>
               </div>
@@ -2689,7 +2689,16 @@ export default function App() {
                                 <input id="loadIdInput" type="text" placeholder="輸入學號..." className={`w-full p-3 pl-9 rounded-xl border text-sm font-bold outline-none uppercase tracking-widest placeholder:tracking-normal text-center shadow-inner transition-all ${darkMode ? 'bg-[#020617]/50 border-white/5 text-slate-200 focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20' : 'bg-white border-slate-200 text-slate-700 focus:border-blue-300 focus:ring-2 focus:ring-blue-100'}`} />
                                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
                             </div>
-                            <button onClick={() => document.getElementById('loadIdInput').value && loadStudentForTeacher(document.getElementById('loadIdInput').value.toUpperCase())} className={`px-4 rounded-xl text-xs font-bold whitespace-nowrap transition-colors shadow-sm border ${darkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-white/5' : 'bg-white hover:bg-slate-50 text-slate-600 border-slate-200'}`}>載入</button>
+                            <button
+                              onClick={() => {
+                                const loadInput = document.getElementById('loadIdInput');
+                                const studentId = loadInput?.value?.trim().toUpperCase();
+                                if (studentId) loadStudentForTeacher(studentId);
+                              }}
+                              className={`px-4 rounded-xl text-xs font-bold whitespace-nowrap transition-colors shadow-sm border ${darkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-white/5' : 'bg-white hover:bg-slate-50 text-slate-600 border-slate-200'}`}
+                            >
+                              載入
+                            </button>
                         </div>
                         <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
                             <button onClick={() => setShowAddStudentModal(true)} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all whitespace-nowrap"><UserPlus className="w-4 h-4"/> 新增學生</button>

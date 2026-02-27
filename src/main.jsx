@@ -3,7 +3,6 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 
 const CHUNK_RELOAD_GUARD_KEY = 'grade_tracker_chunk_reload_once';
-const BOOT_WATCH_INSTALLED_KEY = '__gradeTrackerBootWatchInstalled';
 
 const isChunkLoadErrorMessage = (message) => {
   const text = String(message || '').toLowerCase();
@@ -32,6 +31,11 @@ const hideBootFallback = () => {
   if (fallback) fallback.style.display = 'none';
 };
 
+const notifyBootReady = () => {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new Event('grade-tracker:boot-ready'));
+};
+
 const tryRecoverChunkFailure = (message) => {
   if (!isChunkLoadErrorMessage(message)) return false;
   const reloaded = sessionStorage.getItem(CHUNK_RELOAD_GUARD_KEY) === '1';
@@ -39,29 +43,6 @@ const tryRecoverChunkFailure = (message) => {
   sessionStorage.setItem(CHUNK_RELOAD_GUARD_KEY, '1');
   window.location.reload();
   return true;
-};
-
-const installBootWatchers = () => {
-  if (typeof window === 'undefined') return;
-  if (window[BOOT_WATCH_INSTALLED_KEY]) return;
-  window[BOOT_WATCH_INSTALLED_KEY] = true;
-
-  window.addEventListener('error', (event) => {
-    const message = event?.message || event?.error?.message || '';
-    if (tryRecoverChunkFailure(message)) return;
-    if (!message) return;
-    setBootFallbackMessage('系統載入失敗', message);
-  });
-
-  window.addEventListener('unhandledrejection', (event) => {
-    const reason = event?.reason;
-    const message = typeof reason === 'string'
-      ? reason
-      : (reason && typeof reason.message === 'string' ? reason.message : '');
-    if (tryRecoverChunkFailure(message)) return;
-    if (!message) return;
-    setBootFallbackMessage('系統載入失敗', message);
-  });
 };
 
 class AppErrorBoundary extends Component {
@@ -104,7 +85,6 @@ class AppErrorBoundary extends Component {
 }
 
 const bootstrap = async () => {
-  installBootWatchers();
   try {
     const module = await import('./App.jsx');
     const App = module.default;
@@ -122,6 +102,7 @@ const bootstrap = async () => {
     document.body.dataset.appMounted = '1';
     sessionStorage.removeItem(CHUNK_RELOAD_GUARD_KEY);
     hideBootFallback();
+    notifyBootReady();
   } catch (error) {
     const message = error && error.message ? String(error.message) : 'Unknown startup error';
     if (tryRecoverChunkFailure(message)) return;

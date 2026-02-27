@@ -1,0 +1,57 @@
+import React from 'react';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Cell
+} from 'recharts';
+
+export default function DistributionChart({ data, highlightColor, isDarkMode }) {
+  const safeData = Array.isArray(data) ? data : [];
+  const maxCount = safeData.reduce((max, bucket) => Math.max(max, bucket.count || 0), 0);
+
+  return (
+    <div className={`h-60 w-full mt-6 rounded-2xl border px-2 py-3 ${isDarkMode ? 'bg-slate-900/30 border-white/5' : 'bg-white/40 border-slate-200/60'}`}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={safeData} margin={{ top: 6, right: 2, bottom: 38, left: -22 }}>
+          <CartesianGrid stroke={isDarkMode ? '#334155' : '#94a3b8'} strokeOpacity={0.18} vertical={false} strokeDasharray="3 3" />
+          <XAxis
+            dataKey="range"
+            tick={{ fontSize: 9, fill: isDarkMode ? '#94a3b8' : '#475569', fontWeight: 600 }}
+            tickLine={false}
+            axisLine={false}
+            interval={0}
+            angle={-45}
+            textAnchor="end"
+            dy={10}
+          />
+          <YAxis tick={{ fontSize: 10, fill: isDarkMode ? '#94a3b8' : '#475569' }} tickLine={false} axisLine={false} allowDecimals={false} />
+          <Tooltip
+            cursor={{ fill: isDarkMode ? '#334155' : '#cbd5e1', opacity: 0.28 }}
+            contentStyle={{
+              borderRadius: '14px',
+              border: isDarkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(148,163,184,0.2)',
+              backgroundColor: isDarkMode ? 'rgba(15,23,42,0.95)' : 'rgba(255,255,255,0.96)',
+              color: isDarkMode ? '#f8fafc' : '#0f172a',
+              fontSize: '12px',
+              fontWeight: 600
+            }}
+          />
+          <Bar dataKey="count" name="人數" radius={[7, 7, 3, 3]} isAnimationActive={false}>
+            {safeData.map((entry, index) => {
+              if (entry.isMyRange) {
+                return <Cell key={`cell-${index}`} fill={highlightColor} fillOpacity={0.95} />;
+              }
+              const opacity = maxCount > 0 ? 0.25 + ((entry.count || 0) / maxCount) * 0.45 : 0.25;
+              return <Cell key={`cell-${index}`} fill={isDarkMode ? '#64748b' : '#94a3b8'} fillOpacity={opacity} />;
+            })}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}

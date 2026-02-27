@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from 'recharts';
+import React, { Suspense, useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Search, Save, Plus, Check, BarChart3, X, Lock, LayoutDashboard, GraduationCap, Calendar, Clipboard, LogOut, AlertTriangle, UserPlus, Sparkles, Edit3, Trash2, Trophy, Target, FileSpreadsheet, ChevronRight, ArrowLeft, PieChart, Users, BarChart2, ShieldCheck, ArrowDownWideNarrow, Percent, Info } from 'lucide-react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
@@ -73,6 +72,51 @@ const customDateSort = (a, b) => {
         if (m1Adj !== m2Adj) return m1Adj - m2Adj;
         return d1 - d2;
     } catch { return 0; }
+};
+
+const normalizeDateToken = (dateStr) => {
+    if (!dateStr) return '';
+    const clean = String(dateStr).replace(/[^0-9/]/g, '');
+    if (!clean.includes('/')) return '';
+    const [mStr, dStr] = clean.split('/');
+    const m = parseInt(mStr, 10);
+    const d = parseInt(dStr, 10);
+    if (Number.isNaN(m) || Number.isNaN(d)) return '';
+    return `${String(m).padStart(2, '0')}/${String(d).padStart(2, '0')}`;
+};
+
+const getAcademicSortValue = (dateStr) => {
+    const normalized = normalizeDateToken(dateStr);
+    if (!normalized) return Number.NaN;
+    const [mStr, dStr] = normalized.split('/');
+    const month = parseInt(mStr, 10);
+    const day = parseInt(dStr, 10);
+    if (Number.isNaN(month) || Number.isNaN(day)) return Number.NaN;
+    const academicMonth = month < 4 ? month + 12 : month;
+    return academicMonth * 100 + day;
+};
+
+const PHASE_BOUNDARIES = {
+    p1End: '08/02',
+    mockStart: '12/20'
+};
+const FORCED_MOCK_DATES = new Set(['09/29']);
+
+const resolvePhaseByDate = (dateStr, allDates = null) => {
+    const weekendID = getWeekendID(dateStr, allDates);
+    const normalized = normalizeDateToken(weekendID);
+    if (!normalized) return 'p2';
+
+    if (FORCED_MOCK_DATES.has(normalized)) return 'mock';
+
+    const dateValue = getAcademicSortValue(normalized);
+    const p1EndValue = getAcademicSortValue(PHASE_BOUNDARIES.p1End);
+    const mockStartValue = getAcademicSortValue(PHASE_BOUNDARIES.mockStart);
+    if (Number.isNaN(dateValue) || Number.isNaN(p1EndValue) || Number.isNaN(mockStartValue)) return 'p2';
+
+    if (dateValue >= mockStartValue) return 'mock';
+    if (dateValue <= p1EndValue) return 'p1';
+    return 'p2';
 };
 
 // 將日期字串轉換為 Date 物件（處理跨年）
@@ -174,9 +218,9 @@ const getWeekendDisplayLabel = (dateStr) => {
 };
 
 const PHASES = [
-    { id: 'p1', name: '第一階段', range: [0, 17] },
-    { id: 'p2', name: '第二階段', range: [17, 35] },
-    { id: 'mock', name: '模考班', range: [35, 100] } 
+    { id: 'p1', name: '第一階段' },
+    { id: 'p2', name: '第二階段' },
+    { id: 'mock', name: '模考班' } 
 ];
 
 const COLORS = {
@@ -208,10 +252,7 @@ const f1 = (v) => {
 };
 
 const isMockDate = (date, allDates) => {
-    if (!date) return false;
-    const sorted = [...allDates].sort(customDateSort);
-    const idx = sorted.indexOf(date);
-    return idx >= 36 || date.includes('12/20') || date.includes('09/29');
+    return resolvePhaseByDate(date, allDates) === 'mock';
 };
 
 const getMaxScore = (date, subject, allDates) => {
@@ -238,30 +279,47 @@ const getProbabilityVisual = (probValue, isDarkMode) => {
     if (!Number.isFinite(parsed)) return null;
 
     const prob = clamp(parsed, 1, 99);
-    const hue = prob <= 25 ? 0 : Math.round(Math.pow(prob / 100, 0.72) * 130);
-    const saturation = prob <= 25 ? 100 : (isDarkMode ? 96 : 94);
-    const textLightness = isDarkMode ? 72 : (prob <= 25 ? 42 : 36);
-    const badgeTextColor = prob <= 25
-        ? '#ffffff'
-        : `hsl(${hue} ${saturation}% ${isDarkMode ? 78 : 34}%)`;
-    const badgeAlphaStart = prob <= 25 ? (isDarkMode ? 0.65 : 0.48) : (isDarkMode ? 0.48 : 0.3);
-    const badgeAlphaEnd = prob <= 25 ? (isDarkMode ? 0.82 : 0.68) : (isDarkMode ? 0.64 : 0.44);
-    const hueEnd = clamp(hue + (prob <= 25 ? 10 : 14), 0, 140);
+    if (prob <= 25) {
+        return {
+            textStyle: {
+                color: isDarkMode ? '#fecaca' : '#dc2626',
+                textShadow: isDarkMode
+                    ? '0 0 14px rgba(248,113,113,0.55)'
+                    : '0 1px 2px rgba(220,38,38,0.38)'
+            },
+            badgeStyle: {
+                color: '#ffffff',
+                background: isDarkMode
+                    ? 'linear-gradient(135deg, rgba(255,89,89,0.86) 0%, rgba(255,42,42,0.9) 56%, rgba(168,15,15,0.96) 100%)'
+                    : 'linear-gradient(135deg, rgba(255,99,99,0.95) 0%, rgba(255,44,44,0.97) 55%, rgba(185,18,27,0.98) 100%)',
+                border: isDarkMode
+                    ? '1px solid rgba(254,202,202,0.65)'
+                    : '1px solid rgba(220,38,38,0.65)',
+                boxShadow: isDarkMode
+                    ? '0 0 0 1px rgba(254,202,202,0.2), 0 10px 22px -12px rgba(239,68,68,0.75)'
+                    : '0 0 0 1px rgba(220,38,38,0.28), 0 10px 22px -12px rgba(220,38,38,0.62)'
+            }
+        };
+    }
+
+    const hue = Math.round(Math.pow(prob / 100, 0.72) * 130);
+    const saturation = isDarkMode ? 96 : 94;
+    const textLightness = isDarkMode ? 72 : 36;
+    const badgeTextColor = `hsl(${hue} ${saturation}% ${isDarkMode ? 78 : 34}%)`;
+    const badgeAlphaStart = isDarkMode ? 0.48 : 0.3;
+    const badgeAlphaEnd = isDarkMode ? 0.64 : 0.44;
+    const hueEnd = clamp(hue + 14, 0, 140);
 
     return {
         textStyle: {
             color: `hsl(${hue} ${saturation}% ${textLightness}%)`,
-            textShadow: prob <= 25
-                ? (isDarkMode ? '0 0 10px rgba(248,113,113,0.45)' : '0 1px 2px rgba(220,38,38,0.28)')
-                : 'none'
+            textShadow: 'none'
         },
         badgeStyle: {
             color: badgeTextColor,
             background: `linear-gradient(135deg, hsla(${hue}, ${saturation}%, ${isDarkMode ? 56 : 54}%, ${badgeAlphaStart}) 0%, hsla(${hueEnd}, ${saturation}%, ${isDarkMode ? 48 : 50}%, ${badgeAlphaEnd}) 100%)`,
-            border: `1px solid hsla(${hue}, ${saturation}%, ${isDarkMode ? 72 : 42}%, ${prob <= 25 ? (isDarkMode ? 0.72 : 0.52) : (isDarkMode ? 0.5 : 0.3)})`,
-            boxShadow: prob <= 25
-                ? `0 0 0 1px hsla(${hue}, ${saturation}%, ${isDarkMode ? 72 : 50}%, ${isDarkMode ? 0.4 : 0.28}), 0 10px 20px -12px hsla(${hue}, ${saturation}%, ${isDarkMode ? 62 : 44}%, 0.55)`
-                : `0 8px 18px -12px hsla(${hue}, ${saturation}%, ${isDarkMode ? 62 : 42}%, 0.4)`
+            border: `1px solid hsla(${hue}, ${saturation}%, ${isDarkMode ? 72 : 42}%, ${isDarkMode ? 0.5 : 0.3})`,
+            boxShadow: `0 8px 18px -12px hsla(${hue}, ${saturation}%, ${isDarkMode ? 62 : 42}%, 0.4)`
         }
     };
 };
@@ -306,7 +364,7 @@ const calculateProbLogic = (targetStudent, scoresByDate, mathScoresByDate, stude
     
     const myGrades = studentGradeMaps[targetStudent.id] || {};
 
-    availableDates.forEach((date, index) => {
+    availableDates.forEach((date) => {
          const weekendID = getWeekendID(date, availableDates);
          const grade = myGrades[weekendID];
          let myTotal = null;
@@ -324,7 +382,7 @@ const calculateProbLogic = (targetStudent, scoresByDate, mathScoresByDate, stude
              const pr = Math.floor(((scores.length - rank) / scores.length) * 100);
              
              // PDF 規則：一般週考(前兩階段)基準 PR55；模考衝刺基準 PR48。
-             const isMock = index >= 36 || date.includes('09/29') || weekendID.includes('09/29') || date.includes('12/20') || weekendID.includes('12/20'); 
+             const isMock = resolvePhaseByDate(weekendID, availableDates) === 'mock';
              const weight = isMock ? 2.5 : 1; 
              const baseline = isMock ? 48 : 55;
 
@@ -373,153 +431,27 @@ const calculateProbLogic = (targetStudent, scoresByDate, mathScoresByDate, stude
 };
 
 // --- Components ---
-const SingleSubjectChart = ({ data, subjectKey, avgKey, colorKey, title, domain, isDarkMode }) => (
-    <div className="mb-6">
-        <div className="h-56 md:h-64 w-full -ml-2">
-          <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={data} margin={{ top: 20, right: 20, bottom: 0, left: 0 }}>
-                  <CartesianGrid stroke={isDarkMode ? "#334155" : "#94a3b8"} strokeOpacity={0.2} vertical={false} strokeDasharray="3 3" />
-                  <XAxis dataKey="date" tick={{fontSize: 10, fill: isDarkMode ? '#94a3b8' : '#475569', fontWeight: 500, fontFamily: 'system-ui'}} tickLine={false} axisLine={false} dy={10} interval="preserveStartEnd" />
-                  <YAxis domain={domain} tick={{fontSize: 10, fill: isDarkMode ? '#94a3b8' : '#475569', fontWeight: 500, fontFamily: 'system-ui'}} tickLine={false} axisLine={false} width={28} />
-                  <Tooltip 
-                      contentStyle={{ 
-                          borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)', 
-                          boxShadow: isDarkMode ? '0 10px 40px -10px rgba(0,0,0,0.5)' : '0 20px 25px -5px rgba(0, 0, 0, 0.1)', 
-                          padding: '12px 16px', fontSize: '13px', fontWeight: '500',
-                          backgroundColor: isDarkMode ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)',
-                          color: isDarkMode ? '#f8fafc' : '#1e293b'
-                      }} 
-                  />
-                  <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: '12px', fontWeight: 500, color: isDarkMode ? '#94a3b8' : '#475569' }}/>
-                  <Line name="班平均" type="monotone" dataKey={avgKey} stroke="#94a3b8" strokeWidth={2} strokeOpacity={0.6} dot={false} activeDot={{ r: 4, fill: '#94a3b8', stroke: 'none' }} isAnimationActive={false} connectNulls={true} />
-                  <Line name={title} type="monotone" dataKey={subjectKey} stroke={COLORS[colorKey].hex} strokeWidth={3} activeDot={{ r: 6, strokeWidth: 0 }} isAnimationActive={false} connectNulls={true} />
-              </LineChart>
-          </ResponsiveContainer>
-        </div>
+const SingleSubjectChart = React.lazy(() => import('./components/charts/SingleSubjectChart'));
+const DistributionChart = React.lazy(() => import('./components/charts/DistributionChart'));
+const ParentAbilityRadar = React.lazy(() => import('./components/charts/ParentAbilityRadar'));
+
+const ChartFallback = ({ heightClass = 'h-60' }) => (
+    <div className={`${heightClass} rounded-2xl border border-slate-200/70 bg-white/60 flex items-center justify-center text-xs font-bold text-slate-400`}>
+        載入圖表中...
     </div>
 );
-
-const DistributionChart = ({ data, colorKey, isDarkMode }) => {
-    const maxCount = data.reduce((max, bucket) => Math.max(max, bucket.count || 0), 0);
-
-    return (
-        <div className={`h-60 w-full mt-6 rounded-2xl border px-2 py-3 ${isDarkMode ? 'bg-slate-900/30 border-white/5' : 'bg-white/40 border-slate-200/60'}`}>
-            <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={data} margin={{ top: 6, right: 2, bottom: 38, left: -22 }}>
-                    <CartesianGrid stroke={isDarkMode ? "#334155" : "#94a3b8"} strokeOpacity={0.18} vertical={false} strokeDasharray="3 3" />
-                    <XAxis dataKey="range" tick={{fontSize: 9, fill: isDarkMode ? '#94a3b8' : '#475569', fontWeight: 600}} tickLine={false} axisLine={false} interval={0} angle={-45} textAnchor="end" dy={10} />
-                    <YAxis tick={{fontSize: 10, fill: isDarkMode ? '#94a3b8' : '#475569'}} tickLine={false} axisLine={false} allowDecimals={false} />
-                    <Tooltip
-                        cursor={{fill: isDarkMode ? '#334155' : '#cbd5e1', opacity: 0.28}}
-                        contentStyle={{
-                            borderRadius: '14px',
-                            border: isDarkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(148,163,184,0.2)',
-                            backgroundColor: isDarkMode ? 'rgba(15,23,42,0.95)' : 'rgba(255,255,255,0.96)',
-                            color: isDarkMode ? '#f8fafc' : '#0f172a',
-                            fontSize: '12px',
-                            fontWeight: 600
-                        }}
-                    />
-                    <Bar dataKey="count" name="人數" radius={[7, 7, 3, 3]} isAnimationActive={false}>
-                        {data.map((entry, index) => {
-                            if (entry.isMyRange) {
-                                return <Cell key={`cell-${index}`} fill={COLORS[colorKey].hex} fillOpacity={0.95} />;
-                            }
-                            const opacity = maxCount > 0 ? 0.25 + ((entry.count || 0) / maxCount) * 0.45 : 0.25;
-                            return <Cell key={`cell-${index}`} fill={isDarkMode ? '#64748b' : '#94a3b8'} fillOpacity={opacity} />;
-                        })}
-                    </Bar>
-                </BarChart>
-            </ResponsiveContainer>
-        </div>
-    );
-};
-
-const ParentAbilityRadar = ({ data, maxValue, isDarkMode, recordCount = 0, phaseName = '' }) => {
-    if (!data || !data.length) return null;
-
-    const wrapperClass = `mt-3 mb-7 rounded-3xl border px-4 pt-4 pb-3 ${isDarkMode ? 'bg-[#0f1914]/75 border-emerald-200/18' : 'bg-white/92 border-slate-200/80'}`;
-    const subjectRows = data.map((item) => {
-        const delta = Number((item.student - item.classAvg).toFixed(1));
-        return {
-            ...item,
-            delta,
-            deltaLabel: delta > 0 ? `+${delta}` : `${delta}`
-        };
-    });
-
-    return (
-        <div className={wrapperClass}>
-            <div className="flex items-center justify-between mb-3 px-1">
-                <div>
-                    <h4 className={`text-sm font-black tracking-wide ${isDarkMode ? 'text-emerald-100' : 'text-slate-800'}`}>三科能力雷達圖</h4>
-                    <p className={`text-[11px] font-semibold mt-0.5 ${isDarkMode ? 'text-emerald-200/75' : 'text-slate-500'}`}>{phaseName || '目前階段'} | 樣本 {recordCount} 次</p>
-                </div>
-                <div className={`flex items-center gap-3 text-[10px] font-bold ${isDarkMode ? 'text-emerald-200/80' : 'text-slate-500'}`}>
-                    <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />個人</span>
-                    <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-400" />班平均</span>
-                </div>
-            </div>
-            <div className="h-64 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                    <RadarChart data={data} outerRadius="84%">
-                        <PolarGrid stroke={isDarkMode ? 'rgba(167,243,208,0.24)' : 'rgba(148,163,184,0.28)'} />
-                        <PolarAngleAxis dataKey="subject" tick={{ fontSize: 11, fontWeight: 800, fill: isDarkMode ? '#d1fae5' : '#334155' }} />
-                        <PolarRadiusAxis
-                            angle={25}
-                            domain={[0, maxValue]}
-                            tickCount={6}
-                            tick={{ fontSize: 10, fill: isDarkMode ? '#86efac' : '#64748b' }}
-                            axisLine={false}
-                        />
-                        <Tooltip
-                            contentStyle={{
-                                borderRadius: '14px',
-                                border: isDarkMode ? '1px solid rgba(110,231,183,0.24)' : '1px solid rgba(148,163,184,0.22)',
-                                backgroundColor: isDarkMode ? 'rgba(7,20,15,0.95)' : 'rgba(255,255,255,0.96)',
-                                color: isDarkMode ? '#ecfdf5' : '#0f172a',
-                                fontSize: '12px',
-                                fontWeight: 600
-                            }}
-                        />
-                        <Radar name="個人平均" dataKey="student" stroke="#22c55e" fill="#22c55e" fillOpacity={isDarkMode ? 0.36 : 0.22} strokeWidth={2.2} isAnimationActive={false} />
-                        <Radar name="班平均" dataKey="classAvg" stroke="#94a3b8" fill="#94a3b8" fillOpacity={isDarkMode ? 0.2 : 0.1} strokeWidth={2} isAnimationActive={false} />
-                    </RadarChart>
-                </ResponsiveContainer>
-            </div>
-            <div className={`mt-2 rounded-2xl border overflow-hidden ${isDarkMode ? 'border-white/10' : 'border-slate-200/70'}`}>
-                <div className={`grid grid-cols-[1fr_auto_auto_auto] text-[10px] font-bold px-3 py-2 ${isDarkMode ? 'bg-white/5 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>
-                    <span>科目</span>
-                    <span>個人</span>
-                    <span>班均</span>
-                    <span>差值</span>
-                </div>
-                <div className={isDarkMode ? 'bg-[#0b1510]' : 'bg-white'}>
-                    {subjectRows.map((row) => (
-                        <div key={row.subject} className={`grid grid-cols-[1fr_auto_auto_auto] items-center gap-3 px-3 py-2.5 text-xs border-t ${isDarkMode ? 'border-white/5' : 'border-slate-100'}`}>
-                            <span className={`font-bold ${isDarkMode ? 'text-slate-100' : 'text-slate-700'}`}>{row.subject}</span>
-                            <span className={`font-semibold ${isDarkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>{f1(row.student)}</span>
-                            <span className={`font-semibold ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>{f1(row.classAvg)}</span>
-                            <span className={`font-black ${row.delta >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{row.deltaLabel}</span>
-                        </div>
-                    ))}
-                </div>
-            </div>
-        </div>
-    );
-};
 
 const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, darkMode, handleBatchGradeChange, handleKeyDown, handlePaste }) => {
     const probVisual = getProbabilityVisual(probValue, darkMode);
 
     return (
         <tr className={`${darkMode ? 'hover:bg-slate-800/50' : 'hover:bg-white/50'} transition-colors`}>
-            <td className="w-9 px-1.5 py-2 text-center text-xs font-bold text-slate-500">{sIndex + 1}</td>
-            <td className="w-[5.4rem] px-1.5 py-2 text-center font-mono text-xs font-bold text-slate-500">{student.id}</td>
-            <td className={`w-[6.6rem] px-1.5 py-2 text-center font-bold text-xs ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
+            <td className="w-8 px-1.5 py-2 text-center text-xs font-bold text-slate-500">{sIndex + 1}</td>
+            <td className="w-[4.9rem] px-1.5 py-2 text-center font-mono text-xs font-bold text-slate-500">{student.id}</td>
+            <td className={`w-[6.1rem] px-1.5 py-2 text-center font-bold text-xs ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>
                 <div className="truncate">{student.name}</div>
             </td>
-            <td className="w-[4.3rem] px-1 py-1">
+            <td className="w-[3.9rem] px-1 py-1">
                 <select 
                     value={dateGrades.class || 'A班'} 
                     onChange={(e) => handleBatchGradeChange(student.id, 'class', e.target.value)}
@@ -529,11 +461,11 @@ const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, 
                 </select>
             </td>
             {['chi', 'eng', 'math'].map((sub) => (
-                <td key={sub} className="w-[4.2rem] px-1 py-1">
+                <td key={sub} className="w-[3.9rem] px-1 py-1">
                     <input 
                         id={`cell-${sIndex}-${sub}`} 
                         type="text" 
-                        className={`w-full text-center p-1.5 rounded-lg border border-transparent outline-none text-sm font-bold transition-all shadow-inner focus:ring-1 ${darkMode ? 'bg-slate-950/50 text-slate-300 focus:bg-slate-900 focus:border-blue-500/50 focus:ring-blue-500/20' : 'bg-slate-50 text-slate-600 focus:bg-white focus:border-blue-200 focus:ring-blue-200'}`} 
+                        className={`w-full text-center p-1.5 rounded-lg border border-transparent outline-none text-xs font-bold transition-all shadow-inner focus:ring-1 ${darkMode ? 'bg-slate-950/50 text-slate-300 focus:bg-slate-900 focus:border-blue-500/50 focus:ring-blue-500/20' : 'bg-slate-50 text-slate-600 focus:bg-white focus:border-blue-200 focus:ring-blue-200'}`} 
                         value={dateGrades[sub] || ''} 
                         onChange={(e) => handleBatchGradeChange(student.id, sub, e.target.value)} 
                         onKeyDown={(e) => handleKeyDown(e, sIndex, sub)} 
@@ -542,10 +474,10 @@ const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, 
                     />
                 </td>
             ))}
-            <td className="w-[4.4rem] px-1 py-1 text-center"><div className="text-sm font-bold text-blue-500">{dateGrades.total}</div></td>
-            <td className="w-[3.5rem] px-1 py-1 text-center"><div className={`text-xs font-bold ${darkMode ? 'text-indigo-300' : 'text-indigo-600'}`}>{prValue !== '-' ? prValue : ''}</div></td>
-            <td className="w-[5.8rem] px-1 py-1 text-center">
-                <div className="text-xs font-black inline-block px-1.5 py-0.5 rounded-full min-w-[50px] text-center" style={probVisual ? probVisual.badgeStyle : undefined}>
+            <td className="w-[4rem] px-1 py-1 text-center"><div className="text-xs font-bold text-blue-500">{dateGrades.total}</div></td>
+            <td className="w-[3.1rem] px-1 py-1 text-center"><div className={`text-xs font-bold ${darkMode ? 'text-indigo-300' : 'text-indigo-600'}`}>{prValue !== '-' ? prValue : ''}</div></td>
+            <td className="w-[5.2rem] px-1 py-1 text-center">
+                <div className="text-[11px] leading-none font-black inline-block px-1.5 py-1 rounded-full min-w-[52px] text-center" style={probVisual ? probVisual.badgeStyle : undefined}>
                     {probValue !== '-' ? `${probValue}%` : ''}
                 </div>
             </td>
@@ -642,8 +574,39 @@ export default function App() {
   // --- OPTIMIZATION: State for probabilities to debounce updates ---
   const [admissionProbabilities, setAdmissionProbabilities] = useState({});
 
-  const [xlsxLoaded, setXlsxLoaded] = useState(false);
+  const [_xlsxLoaded, setXlsxLoaded] = useState(false);
+  const xlsxLoadingPromiseRef = useRef(null);
   const darkMode = false;
+
+  const ensureXlsxReady = useCallback(async () => {
+      if (typeof window === 'undefined') return false;
+      if (window.XLSX) {
+          setXlsxLoaded(true);
+          return true;
+      }
+      if (xlsxLoadingPromiseRef.current) return xlsxLoadingPromiseRef.current;
+
+      xlsxLoadingPromiseRef.current = new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+          script.async = true;
+          script.onload = () => {
+              setXlsxLoaded(true);
+              resolve(true);
+          };
+          script.onerror = () => reject(new Error('xlsx-load-failed'));
+          document.body.appendChild(script);
+      });
+
+      try {
+          return await xlsxLoadingPromiseRef.current;
+      } catch (error) {
+          xlsxLoadingPromiseRef.current = null;
+          throw error;
+      } finally {
+          if (window.XLSX) xlsxLoadingPromiseRef.current = null;
+      }
+  }, []);
 
   // 預先建立依照考試日期排序好的日期清單，避免在 render 階段重複 sort
   const sortedAvailableDatesAsc = useMemo(
@@ -761,10 +724,11 @@ export default function App() {
   }, [allStudentsData, availableDates, getTestDateID, mode, teacherViewMode, studentGradeMapsByStudentId]);
 
   useEffect(() => {
-      if (mode === 'parent' && viewData) {
-          setActivePhase('mock'); 
-      }
-  }, [viewData, mode]);
+      if (mode !== 'parent' || !viewData?.chartData?.length) return;
+      const latest = viewData.chartData[viewData.chartData.length - 1];
+      const nextPhase = resolvePhaseByDate(latest.weekendID || latest.date, sortedAvailableDatesAsc);
+      setActivePhase(nextPhase);
+  }, [viewData, mode, sortedAvailableDatesAsc]);
 
   useEffect(() => {
       if (mode === 'parent') {
@@ -774,13 +738,11 @@ export default function App() {
   }, [mode]);
 
   useEffect(() => {
-    const script = document.createElement('script');
-    script.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
-    script.onload = () => setXlsxLoaded(true);
-    document.body.appendChild(script);
-    return () => { if (document.body.contains(script)) document.body.removeChild(script); }
-  }, []);
+      if (mode !== 'teacher') return;
+      ensureXlsxReady().catch(() => {});
+  }, [mode, ensureXlsxReady]);
 
+  // Intentionally initialize auth listener once at app bootstrap.
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -799,7 +761,7 @@ export default function App() {
         });
         return () => unsubscribe();
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
       if (!sortedAvailableDatesAsc.length) return;
@@ -1243,10 +1205,20 @@ export default function App() {
       setIsBatchDirty(true);
   }, [batchDate, teacherClassFilter, getTestDateID]); 
 
-  const handleExcelUpload = (e) => {
-    if (!xlsxLoaded) { setStatusMsg("載入中，請稍後"); return; }
+  const handleExcelUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    if (!window.XLSX) {
+        setStatusMsg('Excel 模組載入中，請稍後');
+        try {
+            await ensureXlsxReady();
+        } catch (error) {
+            console.error('XLSX load error:', error);
+            setStatusMsg('Excel 模組載入失敗');
+            setTimeout(() => setStatusMsg(''), 2000);
+            return;
+        }
+    }
 
     const reader = new FileReader();
     reader.onload = (evt) => {
@@ -1631,11 +1603,17 @@ export default function App() {
       }
   };
 
-  const handleExportBatchExcel = () => {
-      if (!window.XLSX || !xlsxLoaded) {
+  const handleExportBatchExcel = async () => {
+      if (!window.XLSX) {
           setStatusMsg('Excel 模組載入中，請稍後');
-          setTimeout(() => setStatusMsg(''), 2000);
-          return;
+          try {
+              await ensureXlsxReady();
+          } catch (error) {
+              console.error('XLSX load error:', error);
+              setStatusMsg('Excel 模組載入失敗');
+              setTimeout(() => setStatusMsg(''), 2000);
+              return;
+          }
       }
       if (!batchRowsForDisplay.length) {
           setStatusMsg('目前沒有可匯出的資料');
@@ -1802,13 +1780,9 @@ export default function App() {
 
   const parentPhaseData = useMemo(() => {
       if (!shouldBuildParentAnalytics) return [];
-      const currentPhaseConfig = PHASES.find((p) => p.id === activePhase) || PHASES[0];
-      const [start, end] = currentPhaseConfig.range;
-      const targetDateSet = new Set(sortedAvailableDatesAsc.slice(start, end));
-
       return viewData.chartData.filter((d) => {
-          const wid = d.weekendID || getTestDateID(d.date);
-          return targetDateSet.has(wid);
+          const dateKey = d.weekendID || getTestDateID(d.date);
+          return resolvePhaseByDate(dateKey, sortedAvailableDatesAsc) === activePhase;
       });
   }, [shouldBuildParentAnalytics, viewData, activePhase, sortedAvailableDatesAsc, getTestDateID]);
 
@@ -2307,12 +2281,15 @@ export default function App() {
                                 <select className={`border rounded-lg px-2 py-1.5 text-xs font-bold outline-none shadow-sm ${darkMode ? 'bg-[#020617]/50 border-white/10 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`} value={batchDate} onChange={(e) => setBatchDate(e.target.value)}>
                                     {sortedAvailableDatesDesc.map(d => <option key={d} value={d}>{weekendLabelByDate[d] || getWeekendDisplayLabel(d)}</option>)}
                                 </select>
+                                <span className={`text-[11px] font-bold px-2 py-1 rounded-full ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
+                                    共 {batchRowsForDisplay.length} 筆
+                                </span>
                             </div>
                             <div className="flex gap-2">
-                                <button onClick={() => setSortByPR(!sortByPR)} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByPR ? 'bg-indigo-600 text-white shadow-indigo-500/30' : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
+                                <button onClick={() => { setSortByPR((prev) => !prev); setSortByProb(false); }} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByPR ? 'bg-indigo-600 text-white shadow-indigo-500/30' : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
                                     <ArrowDownWideNarrow className="w-3.5 h-3.5" /> PR排序
                                 </button>
-                                <button onClick={() => setSortByProb(!sortByProb)} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByProb ? 'bg-blue-600 text-white shadow-blue-500/30' : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
+                                <button onClick={() => { setSortByProb((prev) => !prev); setSortByPR(false); }} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByProb ? 'bg-blue-600 text-white shadow-blue-500/30' : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
                                     <Percent className="w-3.5 h-3.5" /> 機率排序
                                 </button>
                                 <button onClick={handleExportBatchExcel} className={`px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1 border ${darkMode ? 'bg-slate-800 text-slate-300 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
@@ -2340,28 +2317,28 @@ export default function App() {
 
                         {/* Fix: Overflow handling for mobile */}
                         <div className={`overflow-x-auto rounded-xl border shadow-inner ${darkMode ? 'border-white/5 bg-[#020617]/30' : 'border-slate-200 bg-white'}`}>
-                            <table className="w-full text-sm text-left min-w-[740px] table-fixed">
+                            <table className="w-full text-sm text-left min-w-[660px] table-fixed">
                                 <colgroup>
-                                    <col className="w-9" />
-                                    <col className="w-[5.4rem]" />
-                                    <col className="w-[6.6rem]" />
-                                    <col className="w-[4.3rem]" />
-                                    <col className="w-[4.2rem]" />
-                                    <col className="w-[4.2rem]" />
-                                    <col className="w-[4.2rem]" />
-                                    <col className="w-[4.4rem]" />
-                                    <col className="w-[3.5rem]" />
-                                    <col className="w-[5.8rem]" />
+                                    <col className="w-8" />
+                                    <col className="w-[4.9rem]" />
+                                    <col className="w-[6.1rem]" />
+                                    <col className="w-[3.9rem]" />
+                                    <col className="w-[3.9rem]" />
+                                    <col className="w-[3.9rem]" />
+                                    <col className="w-[3.9rem]" />
+                                    <col className="w-[4rem]" />
+                                    <col className="w-[3.1rem]" />
+                                    <col className="w-[5.2rem]" />
                                 </colgroup>
                                 <thead className={`text-[10px] uppercase sticky top-0 z-10 ${darkMode ? 'text-slate-400 bg-slate-900' : 'text-slate-400 bg-slate-50'}`}>
                                     <tr>
                                         <th className="px-2 py-3 text-center font-bold">#</th>
                                         <th className="px-2 py-3 text-center font-bold">學號</th>
                                         <th className="px-2 py-3 text-center font-bold">姓名</th>
-                                        <th className="px-2 py-3 text-center text-slate-500">班級</th>
-                                        <th className="px-1 py-3 text-center text-rose-500">國文</th>
-                                        <th className="px-1 py-3 text-center text-amber-500">英文</th>
-                                        <th className="px-1 py-3 text-center text-cyan-500">數學</th>
+                                        <th className="px-2 py-3 text-center font-bold text-slate-500">班級</th>
+                                        <th className="px-1 py-3 text-center font-bold text-rose-500">國文</th>
+                                        <th className="px-1 py-3 text-center font-bold text-amber-500">英文</th>
+                                        <th className="px-1 py-3 text-center font-bold text-cyan-500">數學</th>
                                         <th className="px-1 py-3 text-center font-bold text-blue-500">總分</th>
                                         <th className="px-1 py-3 text-center font-bold text-indigo-500">PR</th>
                                         <th className="px-1 py-3 text-center font-bold text-slate-500">錄取機率</th>
@@ -2382,6 +2359,13 @@ export default function App() {
                                             handlePaste={handlePaste} 
                                         />
                                     ))}
+                                    {batchRowsForDisplay.length === 0 && (
+                                        <tr>
+                                            <td colSpan={10} className={`px-4 py-8 text-center text-xs font-bold ${darkMode ? 'text-slate-400' : 'text-slate-400'}`}>
+                                                目前此日期與班級沒有可顯示資料
+                                            </td>
+                                        </tr>
+                                    )}
                                 </tbody>
                             </table>
                         </div>
@@ -2562,24 +2546,31 @@ export default function App() {
                       })}
                   </div>
 
-                  {activeTab === 'total' && <SingleSubjectChart data={parentPhaseData} subjectKey="total" avgKey="avgTotal" colorKey="total" title="總分" domain={[0, 300]} isDarkMode={darkMode} />}
-                  {activeTab === 'chi' && <SingleSubjectChart data={parentPhaseData} subjectKey="chi" avgKey="avgChi" colorKey="chi" title="國文" domain={[0, 100]} isDarkMode={darkMode} />}
-                  {activeTab === 'eng' && <SingleSubjectChart data={parentPhaseData} subjectKey="eng" avgKey="avgEng" colorKey="eng" title="英文" domain={activePhase === 'mock' ? [0, 80] : [0, 100]} isDarkMode={darkMode} />}
-                  {activeTab === 'math' && <SingleSubjectChart data={parentPhaseData} subjectKey="math" avgKey="avgMath" colorKey="math" title="數學" domain={activePhase === 'mock' ? [0, 120] : [0, 100]} isDarkMode={darkMode} />}
-
-                  <ParentAbilityRadar data={parentRadarData} maxValue={parentRadarMax} isDarkMode={darkMode} recordCount={parentPhaseData.length} phaseName={activePhaseLabel} />
+                  {parentPhaseData.length > 0 ? (
+                    <Suspense fallback={<ChartFallback heightClass="h-72" />}>
+                      {activeTab === 'total' && <SingleSubjectChart data={parentPhaseData} subjectKey="total" avgKey="avgTotal" lineColor={COLORS.total.hex} title="總分" domain={[0, 300]} isDarkMode={darkMode} />}
+                      {activeTab === 'chi' && <SingleSubjectChart data={parentPhaseData} subjectKey="chi" avgKey="avgChi" lineColor={COLORS.chi.hex} title="國文" domain={[0, 100]} isDarkMode={darkMode} />}
+                      {activeTab === 'eng' && <SingleSubjectChart data={parentPhaseData} subjectKey="eng" avgKey="avgEng" lineColor={COLORS.eng.hex} title="英文" domain={activePhase === 'mock' ? [0, 80] : [0, 100]} isDarkMode={darkMode} />}
+                      {activeTab === 'math' && <SingleSubjectChart data={parentPhaseData} subjectKey="math" avgKey="avgMath" lineColor={COLORS.math.hex} title="數學" domain={activePhase === 'mock' ? [0, 120] : [0, 100]} isDarkMode={darkMode} />}
+                      <ParentAbilityRadar data={parentRadarData} maxValue={parentRadarMax} isDarkMode={darkMode} recordCount={parentPhaseData.length} phaseName={activePhaseLabel} />
+                    </Suspense>
+                  ) : (
+                    <div className={`rounded-2xl border px-4 py-8 text-center text-xs font-bold ${darkMode ? 'bg-white/5 border-white/10 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
+                      目前「{activePhaseLabel || '此階段'}」暫無資料，請切換其他階段查看
+                    </div>
+                  )}
                 </div>
                   
                 <div className={`p-6 border-t ${darkMode ? 'bg-[#101a15] border-emerald-200/10' : 'bg-white border-slate-50'}`}>
                     <h4 className={`font-bold mb-6 text-xs flex items-center justify-center gap-2 tracking-widest uppercase ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>詳細紀錄</h4>
                     <div className="space-y-4">
-                        {parentPhaseDataDesc.map((d) => {
+                        {parentPhaseDataDesc.map((d, rowIndex) => {
                              // 使用 weekendID（如果存在）或 date，確保日A班/日B班的週日日期也能正確計算排名
                              const dateForRank = d.weekendID || d.date;
                              const totalRank = calculateRank(dateForRank, 'total', d.total, d.class);
                              const globalPR = calculateGlobalPR(dateForRank, 'total', d.total);
                              return (
-                             <div key={d.date} className={`group p-5 rounded-3xl border transition-all duration-300 ${darkMode ? 'bg-white/5 border-white/5 hover:border-blue-500/20' : 'bg-white border-slate-100 hover:border-blue-200 hover:shadow-lg hover:shadow-blue-50/20'}`}>
+                             <div key={`${d.weekendID || d.date}-${rowIndex}`} className={`group p-5 rounded-3xl border transition-all duration-300 ${darkMode ? 'bg-white/5 border-white/5 hover:border-blue-500/20' : 'bg-white border-slate-100 hover:border-blue-200 hover:shadow-lg hover:shadow-blue-50/20'}`}>
                                 <div className="flex justify-between items-start mb-4">
                                     <div className="flex flex-col gap-2 items-start">
                                         <div className="flex items-center gap-2">
@@ -2618,6 +2609,11 @@ export default function App() {
                                 </div>
                              </div>
                         )})}
+                        {parentPhaseDataDesc.length === 0 && (
+                            <div className={`rounded-2xl border px-4 py-6 text-center text-xs font-bold ${darkMode ? 'bg-white/5 border-white/10 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
+                                這個階段目前沒有測驗紀錄
+                            </div>
+                        )}
                     </div>
                 </div>
               </div>
@@ -2743,7 +2739,13 @@ export default function App() {
                             </div>
                         </div>
                         <div className="mb-6">
-                            <DistributionChart data={statsModalData[statsActiveTab]} colorKey={statsActiveTab} isDarkMode={darkMode} />
+                            <Suspense fallback={<ChartFallback heightClass="h-60" />}>
+                                <DistributionChart
+                                  data={statsModalData[statsActiveTab]}
+                                  highlightColor={COLORS[statsActiveTab].hex}
+                                  isDarkMode={darkMode}
+                                />
+                            </Suspense>
                         </div>
                         <div className={`p-4 rounded-2xl flex justify-between items-center border ${darkMode ? 'bg-white/5 border-white/5' : 'bg-slate-50 border-slate-200'}`}>
                             <span className={`text-sm font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>我的分數</span>

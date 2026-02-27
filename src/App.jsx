@@ -25,6 +25,7 @@ const RAW_STUDENT_RECORDS = [];
 const ENCODED_PASSWORDS = ['QmVuMTEwNzA1', 'MjQ5MTIxMg=='];
 const SECURITY_CODE = String.fromCharCode(49, 49, 48, 55);
 const QUERY_COUNT_RESET_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000;
+const MAX_QUERY_EVENTS = 3000;
 
 const runtimeFirebaseConfig =
   typeof window !== 'undefined' ? window.__firebase_config : undefined;
@@ -311,7 +312,11 @@ const PROBABILITY_RULES = Object.freeze({
     MOCK_WEIGHT: 2.5,
     NORMAL_BASELINE: 55,
     MOCK_BASELINE: 47,
-    POSITIVE_SLOPE: 1.58,
+    POSITIVE_BASE_SLOPE: 1.36,
+    POSITIVE_SOFT_THRESHOLD: 18,
+    POSITIVE_SOFT_SLOPE: 0.9,
+    POSITIVE_HARD_THRESHOLD: 32,
+    POSITIVE_HARD_SLOPE: 0.42,
     NEGATIVE_GENTLE_SLOPE: 0.95,
     NEGATIVE_HARD_THRESHOLD: -18,
     NEGATIVE_HARD_SLOPE: 1.3,
@@ -361,9 +366,8 @@ const getProbabilityVisual = (probValue, isDarkMode) => {
 
     const prob = clamp(parsed, 1, 99);
     const progress = prob / 100;
-    const easedProgress = Math.pow(progress, 0.92);
     // 連續色譜：低機率鮮紅(0deg) -> 中段金黃 -> 高機率翠綠(120deg)
-    const hue = Math.round(easedProgress * 120);
+    const hue = Math.round(progress * 120);
     const hueStart = clamp(hue - 16, 0, 120);
     const hueMid = clamp(hue + 2, 0, 120);
     const hueEnd = clamp(hue + 18, 0, 120);
@@ -438,6 +442,30 @@ const buildPRLookupByScore = (scoresDesc) => {
     }
 
     return lookup;
+};
+
+const normalizeQueryEvent = (rawEvent) => {
+    const id = String(rawEvent?.id || '').toUpperCase().trim();
+    const at = String(rawEvent?.at || '');
+    if (!id || !at) return null;
+    const ts = new Date(at).getTime();
+    if (Number.isNaN(ts)) return null;
+    return { id, at };
+};
+
+const sanitizeQueryEvents = (rawEvents, lastResetAt = '') => {
+    const resetTs = new Date(lastResetAt || '').getTime();
+    const validResetTs = Number.isNaN(resetTs) ? null : resetTs;
+    const normalized = (Array.isArray(rawEvents) ? rawEvents : [])
+        .map(normalizeQueryEvent)
+        .filter(Boolean)
+        .filter((event) => {
+            if (validResetTs === null) return true;
+            return new Date(event.at).getTime() >= validResetTs;
+        })
+        .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+
+    return normalized.slice(-MAX_QUERY_EVENTS);
 };
 
 // --- Helper Logic for Probability ---
@@ -520,7 +548,18 @@ const calculateProbLogic = (
     // 達標即 50%：低於標準先溫和下降，只有明顯落後才加大線性下降。
     let modelProb = 50;
     if (avgDiff >= 0) {
-        modelProb = 50 + avgDiff * PROBABILITY_RULES.POSITIVE_SLOPE;
+        const softThreshold = PROBABILITY_RULES.POSITIVE_SOFT_THRESHOLD;
+        const hardThreshold = PROBABILITY_RULES.POSITIVE_HARD_THRESHOLD;
+        if (avgDiff <= softThreshold) {
+            modelProb = 50 + avgDiff * PROBABILITY_RULES.POSITIVE_BASE_SLOPE;
+        } else if (avgDiff <= hardThreshold) {
+            const softThresholdProb = 50 + softThreshold * PROBABILITY_RULES.POSITIVE_BASE_SLOPE;
+            modelProb = softThresholdProb + (avgDiff - softThreshold) * PROBABILITY_RULES.POSITIVE_SOFT_SLOPE;
+        } else {
+            const softThresholdProb = 50 + softThreshold * PROBABILITY_RULES.POSITIVE_BASE_SLOPE;
+            const hardThresholdProb = softThresholdProb + (hardThreshold - softThreshold) * PROBABILITY_RULES.POSITIVE_SOFT_SLOPE;
+            modelProb = hardThresholdProb + (avgDiff - hardThreshold) * PROBABILITY_RULES.POSITIVE_HARD_SLOPE;
+        }
     } else {
         const hardThreshold = PROBABILITY_RULES.NEGATIVE_HARD_THRESHOLD;
         if (avgDiff >= hardThreshold) {
@@ -675,6 +714,7 @@ export default function App() {
   const [sortByPR, setSortByPR] = useState(false);
   const [sortByProb, setSortByProb] = useState(false);
   const [queryStatsById, setQueryStatsById] = useState({});
+  const [queryEvents, setQueryEvents] = useState([]);
   const [queryStatsLastResetAt, setQueryStatsLastResetAt] = useState('');
   const [queryStatsLoading, setQueryStatsLoading] = useState(false);
     
@@ -1007,6 +1047,7 @@ export default function App() {
   const loadQueryStats = useCallback(async () => {
       if (!db) {
           setQueryStatsById({});
+          setQueryEvents([]);
           setQueryStatsLastResetAt('');
           return;
       }
@@ -1019,14 +1060,17 @@ export default function App() {
           const raw = docSnap.exists() ? docSnap.data() : {};
           let counts = (raw.counts && typeof raw.counts === 'object') ? raw.counts : {};
           let lastResetAt = raw.lastResetAt || nowIso;
+          let events = sanitizeQueryEvents(raw.events, lastResetAt);
 
           if (shouldResetQueryStats(lastResetAt)) {
               counts = {};
+              events = [];
               lastResetAt = nowIso;
-              await setDoc(queryStatsDocRef, { counts, lastResetAt, updatedAt: nowIso }, { merge: true });
+              await setDoc(queryStatsDocRef, { counts, events, lastResetAt, updatedAt: nowIso }, { merge: true });
           }
 
           setQueryStatsById(counts);
+          setQueryEvents(events);
           setQueryStatsLastResetAt(lastResetAt);
       } catch (e) {
           console.error('Load query stats error:', e);
@@ -1038,28 +1082,36 @@ export default function App() {
   const incrementQueryCount = useCallback(async (studentId) => {
       const normalizedId = String(studentId || '').toUpperCase().trim();
       if (!normalizedId) return;
+      const nowIso = new Date().toISOString();
 
       setQueryStatsById((prev) => ({ ...prev, [normalizedId]: (prev[normalizedId] || 0) + 1 }));
+      setQueryEvents((prev) => {
+          const next = [...prev, { id: normalizedId, at: nowIso }];
+          return next.slice(-MAX_QUERY_EVENTS);
+      });
 
       if (!db) return;
 
       try {
-          const nowIso = new Date().toISOString();
           const queryStatsDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'query_stats_v1');
           const docSnap = await getDoc(queryStatsDocRef);
           const raw = docSnap.exists() ? docSnap.data() : {};
           let counts = (raw.counts && typeof raw.counts === 'object') ? raw.counts : {};
           let lastResetAt = raw.lastResetAt || nowIso;
+          let events = sanitizeQueryEvents(raw.events, lastResetAt);
 
           if (shouldResetQueryStats(lastResetAt)) {
               counts = {};
+              events = [];
               lastResetAt = nowIso;
           }
 
           counts[normalizedId] = (Number(counts[normalizedId]) || 0) + 1;
-          await setDoc(queryStatsDocRef, { counts, lastResetAt, updatedAt: nowIso }, { merge: true });
+          events = sanitizeQueryEvents([...events, { id: normalizedId, at: nowIso }], lastResetAt);
+          await setDoc(queryStatsDocRef, { counts, events, lastResetAt, updatedAt: nowIso }, { merge: true });
 
           setQueryStatsById(counts);
+          setQueryEvents(events);
           setQueryStatsLastResetAt(lastResetAt);
       } catch (e) {
           console.error('Increment query count error:', e);
@@ -1072,10 +1124,11 @@ export default function App() {
       try {
           if (db) {
               const queryStatsDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'query_stats_v1');
-              await setDoc(queryStatsDocRef, { counts: {}, lastResetAt: nowIso, updatedAt: nowIso }, { merge: true });
+              await setDoc(queryStatsDocRef, { counts: {}, events: [], lastResetAt: nowIso, updatedAt: nowIso }, { merge: true });
           }
 
           setQueryStatsById({});
+          setQueryEvents([]);
           setQueryStatsLastResetAt(nowIso);
           setStatusMsg('查詢次數已重置');
           setTimeout(() => setStatusMsg(''), 2000);
@@ -1930,14 +1983,32 @@ export default function App() {
       ];
       window.XLSX.utils.book_append_sheet(workbook, heatmapSheet, '熱力圖數據');
 
+      const latestQueryLabelById = {};
+      queryStatsRows.forEach((item) => {
+          latestQueryLabelById[item.id] = item.latestAtLabel;
+      });
       const queryRows = batchRowsForDisplay.map((row) => ({
           '學號': row.student.id,
           '姓名': row.student.name || '',
-          '查詢次數': Number(queryStatsById[row.student.id] || 0)
+          '查詢次數': Number(queryStatsById[row.student.id] || 0),
+          '最後查詢': latestQueryLabelById[row.student.id] || '--'
       })).sort((a, b) => b['查詢次數'] - a['查詢次數']);
       const querySheet = window.XLSX.utils.json_to_sheet(queryRows);
-      querySheet['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 10 }];
+      querySheet['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 18 }];
       window.XLSX.utils.book_append_sheet(workbook, querySheet, '查詢次數');
+
+      const queryTimelineRows = queryEventTimeline.map((event, index) => ({
+          '序號': index + 1,
+          '日期': event.dateKey,
+          '時間': event.timeLabel,
+          '學號': event.id,
+          '姓名': event.name || ''
+      }));
+      const queryTimelineSheet = window.XLSX.utils.json_to_sheet(
+          queryTimelineRows.length ? queryTimelineRows : [{ 序號: '', 日期: '', 時間: '', 學號: '', 姓名: '' }]
+      );
+      queryTimelineSheet['!cols'] = [{ wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+      window.XLSX.utils.book_append_sheet(workbook, queryTimelineSheet, '查詢時間序');
 
       const safeClass = String(teacherClassFilter).replace(/[^\w\u4e00-\u9fa5-]/g, '');
       const safeDate = String(batchDate || '').replace('/', '-');
@@ -2574,20 +2645,89 @@ export default function App() {
       };
   }, [batchRowsForDisplay, batchRiskAlerts]);
 
-  const queryStatsRows = useMemo(() => {
-      const nameById = {};
+  const studentNameById = useMemo(() => {
+      const map = {};
       allStudentsData.forEach((student) => {
-          nameById[student.id] = student.name || '';
+          map[student.id] = student.name || '';
+      });
+      return map;
+  }, [allStudentsData]);
+
+  const queryEventTimeline = useMemo(() => {
+      return queryEvents
+          .map((event) => {
+              const ts = new Date(event.at).getTime();
+              if (Number.isNaN(ts)) return null;
+              const dateObj = new Date(ts);
+              return {
+                  id: event.id,
+                  name: studentNameById[event.id] || '',
+                  ts,
+                  dateKey: dateObj.toISOString().slice(0, 10),
+                  dateLabel: dateObj.toLocaleDateString('zh-TW', { month: '2-digit', day: '2-digit', weekday: 'short' }),
+                  timeLabel: dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+              };
+          })
+          .filter(Boolean)
+          .sort((a, b) => a.ts - b.ts);
+  }, [queryEvents, studentNameById]);
+
+  const queryEventsByDay = useMemo(() => {
+      const grouped = {};
+      queryEventTimeline.forEach((event) => {
+          if (!grouped[event.dateKey]) {
+              grouped[event.dateKey] = { dateKey: event.dateKey, dateLabel: event.dateLabel, items: [] };
+          }
+          grouped[event.dateKey].items.push(event);
+      });
+      return Object.values(grouped)
+          .sort((a, b) => b.dateKey.localeCompare(a.dateKey));
+  }, [queryEventTimeline]);
+
+  const queryHourlySummary = useMemo(() => {
+      const hourCounts = Array.from({ length: 24 }, (_, hour) => ({ hour, count: 0 }));
+      queryEventTimeline.forEach((event) => {
+          const hour = new Date(event.ts).getHours();
+          hourCounts[hour].count += 1;
+      });
+      const peak = hourCounts.reduce((top, current) => {
+          if (!top || current.count > top.count) return current;
+          return top;
+      }, null);
+      return {
+          totalQueries: queryEventTimeline.length,
+          uniqueStudentCount: Object.keys(queryStatsById).filter((id) => Number(queryStatsById[id]) > 0).length,
+          peakHourLabel: peak && peak.count > 0 ? `${String(peak.hour).padStart(2, '0')}:00-${String((peak.hour + 1) % 24).padStart(2, '0')}:00` : '--',
+          peakHourCount: peak?.count || 0,
+          latestDayCount: queryEventsByDay[0]?.items.length || 0
+      };
+  }, [queryEventTimeline, queryStatsById, queryEventsByDay]);
+
+  const queryStatsRows = useMemo(() => {
+      const latestTsById = {};
+      queryEventTimeline.forEach((event) => {
+          latestTsById[event.id] = event.ts;
       });
 
       return Object.entries(queryStatsById)
-          .map(([id, count]) => ({
-              id,
-              name: nameById[id] || '',
-              count: Number(count) || 0
-          }))
-          .sort((a, b) => b.count - a.count);
-  }, [queryStatsById, allStudentsData]);
+          .map(([id, count]) => {
+              const latestTs = latestTsById[id] || 0;
+              const latestAtLabel = latestTs
+                  ? new Date(latestTs).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+                  : '--';
+              return {
+                  id,
+                  name: studentNameById[id] || '',
+                  count: Number(count) || 0,
+                  latestTs,
+                  latestAtLabel
+              };
+          })
+          .sort((a, b) => {
+              if (b.count !== a.count) return b.count - a.count;
+              return b.latestTs - a.latestTs;
+          });
+  }, [queryStatsById, studentNameById, queryEventTimeline]);
 
   const queryStatsLastResetText = useMemo(() => {
       if (!queryStatsLastResetAt) return '尚未初始化';
@@ -2843,13 +2983,18 @@ export default function App() {
                                     共 {batchRowsForDisplay.length} 筆
                                 </span>
                             </div>
-                            <div className="flex gap-2 flex-wrap">
+                            <div className="flex gap-2 flex-wrap items-center">
                                 <button onClick={() => { setSortByPR((prev) => !prev); setSortByProb(false); }} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByPR ? 'bg-indigo-600 text-white shadow-indigo-500/30' : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
                                     <ArrowDownWideNarrow className="w-3.5 h-3.5" /> PR排序
                                 </button>
-                                <button onClick={() => { setSortByProb((prev) => !prev); setSortByPR(false); }} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByProb ? (darkMode ? 'text-white bg-[linear-gradient(122deg,#0b7a4b_0%,#0d9488_46%,#0ea5e9_100%)] shadow-[0_8px_20px_rgba(16,185,129,0.28)] ring-1 ring-emerald-200/30' : 'text-white bg-[linear-gradient(122deg,#059669_0%,#0891b2_46%,#2563eb_100%)] shadow-[0_9px_22px_rgba(14,165,233,0.3)]') : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
+                                <button onClick={() => { setSortByProb((prev) => !prev); setSortByPR(false); }} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByProb ? (darkMode ? 'bg-emerald-700 text-white shadow-emerald-900/45 ring-1 ring-emerald-200/30' : 'bg-emerald-600 text-white shadow-emerald-600/25') : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
                                     <Percent className="w-3.5 h-3.5" /> 機率排序
                                 </button>
+                                <div className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[10px] font-bold ${darkMode ? 'border-white/10 bg-slate-900/45 text-slate-300' : 'border-slate-200 bg-white text-slate-500'}`}>
+                                    <span>高</span>
+                                    <span className="w-16 h-2 rounded-full bg-gradient-to-r from-emerald-500 via-amber-400 to-rose-500" />
+                                    <span>低</span>
+                                </div>
                                 <button onClick={handleExportBatchExcel} className={`px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1 border ${darkMode ? 'bg-slate-800 text-slate-300 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
                                     <FileSpreadsheet className="w-3.5 h-3.5" /> 下載 Excel
                                 </button>
@@ -3070,7 +3215,7 @@ export default function App() {
                                 <div className="flex items-center justify-between mb-3">
                                     <div className="flex items-center gap-2">
                                         <Info className={`w-4 h-4 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`} />
-                                        <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>查詢次數監控</h4>
+                                        <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>查詢監控中心</h4>
                                     </div>
                                     <button
                                       onClick={() => executeWithSecurity(handleResetQueryStats, {
@@ -3089,23 +3234,73 @@ export default function App() {
                                 <div className={`text-[11px] font-semibold mb-2 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
                                     上次重置：{queryStatsLastResetText}
                                 </div>
-                                <div className={`rounded-xl border overflow-hidden ${darkMode ? 'border-white/10' : 'border-slate-200'}`}>
-                                    <div className={`grid grid-cols-[6rem_1fr_5rem] px-3 py-2 text-[10px] font-bold tracking-wide ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+                                    <div className={`rounded-xl border px-3 py-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                        <div className={`text-[10px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>總查詢數</div>
+                                        <div className={`text-lg font-black ${darkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>{queryHourlySummary.totalQueries}</div>
+                                    </div>
+                                    <div className={`rounded-xl border px-3 py-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                        <div className={`text-[10px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>學號數</div>
+                                        <div className={`text-lg font-black ${darkMode ? 'text-sky-200' : 'text-sky-700'}`}>{queryHourlySummary.uniqueStudentCount}</div>
+                                    </div>
+                                    <div className={`rounded-xl border px-3 py-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                        <div className={`text-[10px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>高峰時段</div>
+                                        <div className={`text-[12px] font-black ${darkMode ? 'text-violet-200' : 'text-violet-700'}`}>{queryHourlySummary.peakHourLabel}</div>
+                                        <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>共 {queryHourlySummary.peakHourCount} 次</div>
+                                    </div>
+                                    <div className={`rounded-xl border px-3 py-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                        <div className={`text-[10px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>最近一天</div>
+                                        <div className={`text-lg font-black ${darkMode ? 'text-amber-200' : 'text-amber-700'}`}>{queryHourlySummary.latestDayCount}</div>
+                                    </div>
+                                </div>
+
+                                <div className={`rounded-xl border overflow-hidden mb-3 ${darkMode ? 'border-white/10' : 'border-slate-200'}`}>
+                                    <div className={`grid grid-cols-[6rem_1fr_4rem_6.5rem] px-3 py-2 text-[10px] font-bold tracking-wide ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>
                                         <span className="text-center">學號</span>
                                         <span className="text-center">姓名</span>
                                         <span className="text-center">次數</span>
+                                        <span className="text-center">最後查詢</span>
                                     </div>
                                     <div className={`${darkMode ? 'bg-slate-900/50' : 'bg-white'}`}>
-                                        {(queryStatsRows.slice(0, 12)).map((row) => (
-                                            <div key={row.id} className={`grid grid-cols-[6rem_1fr_5rem] px-3 py-2 text-xs border-t items-center ${darkMode ? 'border-white/5 text-slate-200' : 'border-slate-100 text-slate-700'}`}>
+                                        {(queryStatsRows.slice(0, 14)).map((row) => (
+                                            <div key={row.id} className={`grid grid-cols-[6rem_1fr_4rem_6.5rem] px-3 py-2 text-xs border-t items-center ${darkMode ? 'border-white/5 text-slate-200' : 'border-slate-100 text-slate-700'}`}>
                                                 <span className="font-mono text-center">{row.id}</span>
                                                 <span className="truncate text-center">{row.name || '-'}</span>
                                                 <span className="font-black text-center text-emerald-600">{row.count}</span>
+                                                <span className={`text-[10px] font-semibold text-center ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>{row.latestAtLabel}</span>
                                             </div>
                                         ))}
                                         {!queryStatsRows.length && (
                                             <div className={`px-3 py-3 text-center text-xs ${darkMode ? 'text-slate-400' : 'text-slate-400'}`}>
                                                 目前尚無查詢紀錄
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className={`rounded-xl border overflow-hidden ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
+                                    <div className={`px-3 py-2 text-[10px] font-bold tracking-wide uppercase ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>每日查詢名單（依時間順序）</div>
+                                    <div className="max-h-[18rem] overflow-y-auto">
+                                        {queryEventsByDay.map((day) => (
+                                            <div key={day.dateKey} className={`border-t ${darkMode ? 'border-white/5' : 'border-slate-100'}`}>
+                                                <div className={`px-3 py-2 text-[11px] font-black flex items-center justify-between ${darkMode ? 'text-slate-200 bg-slate-900/55' : 'text-slate-700 bg-slate-50/80'}`}>
+                                                    <span>{day.dateLabel}</span>
+                                                    <span className={`${darkMode ? 'text-emerald-300' : 'text-emerald-700'}`}>{day.items.length} 次</span>
+                                                </div>
+                                                <div>
+                                                    {day.items.map((event, idx) => (
+                                                        <div key={`${event.id}-${event.ts}-${idx}`} className={`grid grid-cols-[5.4rem_6rem_1fr] gap-2 px-3 py-1.5 text-[11px] ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                                                            <span className="font-mono">{event.timeLabel}</span>
+                                                            <span className="font-mono">{event.id}</span>
+                                                            <span className="truncate">{event.name || '-'}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ))}
+                                        {!queryEventsByDay.length && (
+                                            <div className={`px-3 py-3 text-center text-xs ${darkMode ? 'text-slate-400' : 'text-slate-400'}`}>
+                                                目前尚無每日查詢資料
                                             </div>
                                         )}
                                     </div>
@@ -3276,7 +3471,7 @@ export default function App() {
                                             <span className="text-sm font-bold text-slate-400 font-mono">{d.date}</span>
                                             {d.class && <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold opacity-60 ${darkMode ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-600'}`}>{d.class}</span>}
                                         </div>
-                                        <button onClick={() => openStatsModal(dateForRank, { total: d.total, chi: d.chi, eng: d.eng, math: d.math }, d.class)} className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all hover:scale-105 active:scale-95 shadow-md dark:shadow-none ${darkMode ? 'bg-slate-700 text-white hover:bg-slate-600 border border-white/10' : 'bg-gradient-to-r from-slate-800 via-slate-700 to-sky-700 text-white hover:from-slate-700 hover:to-sky-600 shadow-slate-300/55 border border-white/20'}`}>
+                                        <button onClick={() => openStatsModal(dateForRank, { total: d.total, chi: d.chi, eng: d.eng, math: d.math }, d.class)} className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all hover:scale-105 active:scale-95 shadow-md ${darkMode ? 'bg-[#193227] text-emerald-100 hover:bg-[#214233] border border-emerald-200/20 shadow-black/25' : 'bg-[linear-gradient(122deg,#ecfdf5_0%,#e0f2fe_55%,#eef2ff_100%)] text-emerald-800 hover:bg-[linear-gradient(122deg,#d1fae5_0%,#dbeafe_55%,#e0e7ff_100%)] shadow-emerald-200/70 border border-emerald-200/70'}`}>
                                             <BarChart2 className="w-3.5 h-3.5" /> 
                                             查看落點分析
                                             <ChevronRight className="w-3 h-3 opacity-80" />

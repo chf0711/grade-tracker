@@ -20,7 +20,7 @@ export default function SingleSubjectChart({
   isDarkMode
 }) {
   return (
-    <div className={`mb-6 rounded-2xl border px-3 pt-3 pb-2 ${isDarkMode ? 'bg-slate-900/30 border-white/10' : 'bg-white/72 border-slate-200/80 shadow-[0_10px_24px_rgba(15,23,42,0.06)]'}`}>
+    <div className={`mb-6 rounded-2xl border px-3 pt-3 pb-2 ${isDarkMode ? 'bg-slate-900/30 border-white/10' : 'bg-white border-slate-200/90 shadow-[0_10px_24px_rgba(15,23,42,0.06)]'}`}>
       <div className="flex items-center justify-between px-1 mb-1">
         <h4 className={`text-xs font-black tracking-[0.12em] uppercase ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>{title} 趨勢</h4>
         <span className={`text-[10px] font-bold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>個人 vs 班平均</span>
@@ -47,12 +47,12 @@ export default function SingleSubjectChart({
             <Tooltip
               contentStyle={{
                 borderRadius: '16px',
-                border: '1px solid rgba(255,255,255,0.1)',
+                border: isDarkMode ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(148,163,184,0.25)',
                 boxShadow: isDarkMode ? '0 10px 40px -10px rgba(0,0,0,0.5)' : '0 18px 35px -8px rgba(15, 23, 42, 0.18)',
                 padding: '12px 16px',
                 fontSize: '13px',
                 fontWeight: '600',
-                backgroundColor: isDarkMode ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+                backgroundColor: isDarkMode ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.98)',
                 color: isDarkMode ? '#f8fafc' : '#1e293b'
               }}
             />

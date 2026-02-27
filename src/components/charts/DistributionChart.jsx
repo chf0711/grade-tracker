@@ -15,7 +15,7 @@ export default function DistributionChart({ data, highlightColor, isDarkMode }) 
   const maxCount = safeData.reduce((max, bucket) => Math.max(max, bucket.count || 0), 0);
 
   return (
-    <div className={`h-72 md:h-80 w-full rounded-2xl border px-2 py-3 ${isDarkMode ? 'bg-slate-900/30 border-white/5' : 'bg-gradient-to-b from-white to-slate-50/70 border-slate-200/70'}`}>
+    <div className={`h-72 md:h-80 w-full rounded-2xl border px-2 py-3 ${isDarkMode ? 'bg-slate-900/30 border-white/5' : 'bg-white border-slate-200/90'}`}>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={safeData} margin={{ top: 6, right: 6, bottom: 38, left: -18 }}>
           <CartesianGrid stroke={isDarkMode ? '#334155' : '#94a3b8'} strokeOpacity={0.18} vertical={false} strokeDasharray="3 3" />
@@ -34,7 +34,7 @@ export default function DistributionChart({ data, highlightColor, isDarkMode }) 
             cursor={{ fill: isDarkMode ? '#334155' : '#cbd5e1', opacity: 0.28 }}
             contentStyle={{
               borderRadius: '14px',
-              border: isDarkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(148,163,184,0.2)',
+              border: isDarkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(148,163,184,0.25)',
               backgroundColor: isDarkMode ? 'rgba(15,23,42,0.95)' : 'rgba(255,255,255,0.96)',
               color: isDarkMode ? '#f8fafc' : '#0f172a',
               fontSize: '12px',

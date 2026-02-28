@@ -67,13 +67,14 @@ try {
 // --- Helpers ---
 const customDateSort = (a, b) => {
     try {
-        if (!a || !b) return 0;
-        const cleanA = String(a).replace(/[^0-9/]/g, '');
-        const cleanB = String(b).replace(/[^0-9/]/g, '');
-        if (!cleanA.includes('/') || !cleanB.includes('/')) return 0;
-        const [m1, d1] = cleanA.split('/').map(Number);
-        const [m2, d2] = cleanB.split('/').map(Number);
-        if (isNaN(m1) || isNaN(d1) || isNaN(m2) || isNaN(d2)) return 0;
+        const normalizedA = normalizeDateToken(a);
+        const normalizedB = normalizeDateToken(b);
+        if (!normalizedA && !normalizedB) return 0;
+        if (!normalizedA) return 1;
+        if (!normalizedB) return -1;
+        const [m1, d1] = normalizedA.split('/').map(Number);
+        const [m2, d2] = normalizedB.split('/').map(Number);
+        if (Number.isNaN(m1) || Number.isNaN(d1) || Number.isNaN(m2) || Number.isNaN(d2)) return 0;
         const m1Adj = m1 < 4 ? m1 + 12 : m1;
         const m2Adj = m2 < 4 ? m2 + 12 : m2;
         if (m1Adj !== m2Adj) return m1Adj - m2Adj;
@@ -83,13 +84,39 @@ const customDateSort = (a, b) => {
 
 const normalizeDateToken = (dateStr) => {
     if (!dateStr) return '';
-    const clean = String(dateStr).replace(/[^0-9/]/g, '');
+    const clean = String(dateStr)
+        .trim()
+        .replace(/\./g, '/')
+        .replace(/-/g, '/')
+        .replace(/[^0-9/]/g, '')
+        .replace(/\/+/g, '/');
     if (!clean.includes('/')) return '';
-    const [mStr, dStr] = clean.split('/');
+    const parts = clean.split('/').filter(Boolean);
+    if (parts.length !== 2) return '';
+    const [mStr, dStr] = parts;
     const m = parseInt(mStr, 10);
     const d = parseInt(dStr, 10);
     if (Number.isNaN(m) || Number.isNaN(d)) return '';
+    if (m < 1 || m > 12 || d < 1 || d > 31) return '';
+    const y = m >= 4 ? 2025 : 2026;
+    const validatedDate = new Date(y, m - 1, d);
+    if (
+        validatedDate.getFullYear() !== y ||
+        validatedDate.getMonth() !== (m - 1) ||
+        validatedDate.getDate() !== d
+    ) {
+        return '';
+    }
     return `${String(m).padStart(2, '0')}/${String(d).padStart(2, '0')}`;
+};
+
+const sanitizeDateList = (rawDates) => {
+    const unique = new Set();
+    (Array.isArray(rawDates) ? rawDates : []).forEach((rawDate) => {
+        const normalized = normalizeDateToken(rawDate);
+        if (normalized) unique.add(normalized);
+    });
+    return Array.from(unique).sort(customDateSort);
 };
 
 const getAcademicSortValue = (dateStr) => {
@@ -149,9 +176,10 @@ const resolvePhaseByDate = (dateStr, allDates = null) => {
 
 // 將日期字串轉換為 Date 物件（處理跨年）
 const parseDateStr = (dateStr) => {
-    if (!dateStr || !dateStr.includes('/')) return null;
+    const normalized = normalizeDateToken(dateStr);
+    if (!normalized) return null;
     try {
-        const [mStr, dStr] = dateStr.split('/');
+        const [mStr, dStr] = normalized.split('/');
         const m = parseInt(mStr, 10);
         const d = parseInt(dStr, 10);
         const y = m >= 4 ? 2025 : 2026;
@@ -175,11 +203,11 @@ const isConsecutiveDate = (date1, date2) => {
 // 取得測驗日期 ID：如果日期與 availableDates 中某個日期連續，則返回較早的日期作為統一 ID
 // 如果沒有提供 availableDates，則使用舊的週末邏輯（向後兼容）
 const getWeekendID = (dateStr, availableDates = null) => {
-    if (!dateStr || !dateStr.includes('/')) return dateStr;
+    if (!dateStr || !String(dateStr).includes('/')) return '';
     
     try {
         const currentDate = parseDateStr(dateStr);
-        if (!currentDate) return dateStr;
+        if (!currentDate) return '';
         
         // 如果提供了 availableDates，檢查是否有連續日期
         if (availableDates && Array.isArray(availableDates)) {
@@ -213,8 +241,8 @@ const getWeekendID = (dateStr, availableDates = null) => {
             return formatDateStr(satDate);
         }
         
-        return dateStr;
-    } catch { return dateStr; }
+        return normalizeDateToken(dateStr);
+    } catch { return ''; }
 };
 
 const getSundayDate = (satDateStr) => {
@@ -1106,21 +1134,38 @@ export default function App() {
   }, [hasPendingBatchChanges]);
 
   const loadDates = async () => {
-      if (!db) return [...availableDates].sort(customDateSort);
-      try {
-          const docSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'));
-          if (docSnap.exists() && docSnap.data().list) {
-              const loadedDates = [...docSnap.data().list].sort(customDateSort);
-              setAvailableDates(loadedDates);
-              return loadedDates;
-          } else {
-             const initialDates = [...DEFAULT_EXAM_STARTS].sort(customDateSort);
-             setAvailableDates(initialDates);
-             return initialDates;
+      const fallbackDates = sanitizeDateList(DEFAULT_EXAM_STARTS);
+      if (!db) {
+          const cleanedLocalDates = sanitizeDateList(availableDates);
+          const nextDates = cleanedLocalDates.length ? cleanedLocalDates : fallbackDates;
+          if (nextDates.join('|') !== availableDates.join('|')) {
+              setAvailableDates(nextDates);
           }
+          return nextDates;
+      }
+      try {
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates');
+          const docSnap = await getDoc(docRef);
+          const rawList = docSnap.exists() && Array.isArray(docSnap.data().list)
+              ? docSnap.data().list
+              : DEFAULT_EXAM_STARTS;
+          const cleanedDates = sanitizeDateList(rawList);
+          const nextDates = cleanedDates.length ? cleanedDates : fallbackDates;
+
+          setAvailableDates(nextDates);
+
+          const rawFingerprint = (Array.isArray(rawList) ? rawList : []).map((date) => String(date || '')).join('|');
+          const cleanedFingerprint = nextDates.join('|');
+          if (cleanedFingerprint !== rawFingerprint) {
+              await setDoc(docRef, { list: nextDates }, { merge: true });
+          }
+          return nextDates;
       } catch(e) {
           console.error("Error loading dates:", e);
-          return [...availableDates].sort(customDateSort);
+          const cleanedFallback = sanitizeDateList(availableDates);
+          const nextDates = cleanedFallback.length ? cleanedFallback : fallbackDates;
+          setAvailableDates(nextDates);
+          return nextDates;
       }
   };
 
@@ -1300,12 +1345,18 @@ export default function App() {
   };
 
   const addDate = async () => {
-      if (!newDateInput || availableDates.includes(newDateInput)) return;
-      const newList = [...availableDates, newDateInput].sort(customDateSort);
+      const normalizedInput = normalizeDateToken(newDateInput);
+      if (!normalizedInput) {
+          setStatusMsg('日期錯誤，請輸入有效日期（例如 02/15）');
+          setTimeout(() => setStatusMsg(''), 2200);
+          return;
+      }
+      if (availableDates.includes(normalizedInput)) return;
+      const newList = sanitizeDateList([...availableDates, normalizedInput]);
       setAvailableDates(newList);
       setNewDateInput('');
       if (db) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: newList }, { merge: true });
-      setStatusMsg(`已新增: ${newDateInput}`); setTimeout(() => setStatusMsg(''), 2000);
+      setStatusMsg(`已新增: ${normalizedInput}`); setTimeout(() => setStatusMsg(''), 2000);
   };
 
   const localComputedAverages = useMemo(() => {
@@ -1556,18 +1607,48 @@ export default function App() {
       try {
           let studentsMap = {};
           RAW_STUDENT_RECORDS.forEach(s => { studentsMap[s.id] = { ...s, grades: normalizeGrades(s.grades) }; });
+          let cleanedInvalidDateCount = 0;
+          const cleanupPayloads = [];
           if (db) {
               const querySnapshot = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'students'));
               querySnapshot.forEach(doc => {
                   const data = doc.data();
-                  if (studentsMap[data.id]) { studentsMap[data.id] = { ...studentsMap[data.id], ...data, grades: { ...studentsMap[data.id].grades, ...data.grades } }; } 
-                  else { studentsMap[data.id] = data; }
+                  const normalizedResult = normalizeGrades(data.grades, { withMeta: true });
+                  const sanitizedData = { ...data, grades: normalizedResult.normalized };
+
+                  if (normalizedResult.removedInvalidDates > 0 && data.id) {
+                      cleanedInvalidDateCount += normalizedResult.removedInvalidDates;
+                      cleanupPayloads.push({
+                          id: data.id,
+                          payload: { ...sanitizedData, lastUpdated: new Date().toISOString() }
+                      });
+                  }
+
+                  if (studentsMap[data.id]) {
+                      studentsMap[data.id] = {
+                          ...studentsMap[data.id],
+                          ...sanitizedData,
+                          grades: { ...studentsMap[data.id].grades, ...sanitizedData.grades }
+                      };
+                  } else {
+                      studentsMap[data.id] = sanitizedData;
+                  }
               });
           }
           const sortedStudents = Object.values(studentsMap).sort((a,b) => a.id.localeCompare(b.id));
           setAllStudentsData(sortedStudents);
           setCachedClassData(sortedStudents);
           setIsBatchDirty(false);
+
+          if (db && cleanupPayloads.length > 0) {
+              await Promise.all(
+                  cleanupPayloads.map((item) =>
+                      setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${item.id}`), item.payload)
+                  )
+              );
+              setStatusMsg(`已自動刪除 ${cleanedInvalidDateCount} 筆不合理日期資料`);
+              setTimeout(() => setStatusMsg(''), 2400);
+          }
       } catch (e) { console.error("Load error:", e); }
       setLoading(false);
   };
@@ -1581,7 +1662,26 @@ export default function App() {
               const qSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'students'));
               if (cancelled) return;
               const preloaded = [];
-              qSnap.forEach((d) => preloaded.push(d.data()));
+              const cleanupPayloads = [];
+              qSnap.forEach((d) => {
+                  const rawData = d.data();
+                  const normalizedResult = normalizeGrades(rawData.grades, { withMeta: true });
+                  preloaded.push({ ...rawData, grades: normalizedResult.normalized });
+                  if (normalizedResult.removedInvalidDates > 0 && rawData.id) {
+                      cleanupPayloads.push({
+                          id: rawData.id,
+                          payload: { ...rawData, grades: normalizedResult.normalized, lastUpdated: new Date().toISOString() }
+                      });
+                  }
+              });
+              if (cleanupPayloads.length > 0) {
+                  void Promise.all(
+                      cleanupPayloads.map((item) =>
+                          setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${item.id}`), item.payload)
+                      )
+                  ).catch((err) => console.error('Preload cleanup invalid date error:', err));
+              }
+              if (cancelled) return;
               setCachedClassData(preloaded);
           } catch (e) {
               console.error('Preload class data error:', e);
@@ -1594,17 +1694,48 @@ export default function App() {
       };
   }, [mode, user, cachedClassData.length]);
 
-  const normalizeGrades = (grades) => {
-      if (!grades) return {};
+  const normalizeGrades = (grades, options = {}) => {
+      const withMeta = Boolean(options.withMeta);
+      if (!grades || typeof grades !== 'object') {
+          return withMeta ? { normalized: {}, removedInvalidDates: 0, changed: false } : {};
+      }
+
       const normalized = {};
+      let removedInvalidDates = 0;
+      let changed = false;
+
       Object.keys(grades).forEach(date => {
+          const normalizedDate = normalizeDateToken(date);
+          if (!normalizedDate) {
+              removedInvalidDates += 1;
+              changed = true;
+              return;
+          }
+
           const g = grades[date];
           let normalizedG;
-          if (Array.isArray(g)) { normalizedG = { math: g[0]||0, eng: g[1]||0, chi: g[2]||0, total: (g[0]||0)+(g[1]||0)+(g[2]||0), class: 'A班' }; } 
-          else { normalizedG = { ...g }; }
-          if (!normalizedG.class) normalizedG.class = 'A班';
-          normalized[date] = normalizedG;
+          if (Array.isArray(g)) {
+              normalizedG = { math: g[0]||0, eng: g[1]||0, chi: g[2]||0, total: (g[0]||0)+(g[1]||0)+(g[2]||0), class: 'A班' };
+              changed = true;
+          } else if (g && typeof g === 'object') {
+              normalizedG = { ...g };
+          } else {
+              normalizedG = { chi: '', eng: '', math: '', total: '', class: 'A班' };
+              changed = true;
+          }
+
+          if (!normalizedG.class) {
+              normalizedG.class = 'A班';
+              changed = true;
+          }
+          if (date !== normalizedDate) changed = true;
+          if (normalized[normalizedDate]) changed = true;
+          normalized[normalizedDate] = normalizedG;
       });
+
+      if (withMeta) {
+          return { normalized, removedInvalidDates, changed };
+      }
       return normalized;
   };
 
@@ -1619,7 +1750,14 @@ export default function App() {
       }
       if (data) {
         setCurrentStudentId(data.id); setStudentName(data.name);
-        let loadedGrades = data.grades || {};
+        const normalizedResult = normalizeGrades(data.grades, { withMeta: true });
+        let loadedGrades = { ...normalizedResult.normalized };
+        if (normalizedResult.removedInvalidDates > 0 && db) {
+            setDoc(
+                doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${data.id}`),
+                { ...data, grades: normalizedResult.normalized, lastUpdated: new Date().toISOString() }
+            ).catch((err) => console.error('Cleanup invalid student date error:', err));
+        }
         availableDates.forEach(d => { 
              const weekendID = getTestDateID(d);
              const existingGradeKey = Object.keys(loadedGrades).find(k => getTestDateID(k) === weekendID);
@@ -1627,7 +1765,12 @@ export default function App() {
                  loadedGrades[d] = { chi: '', eng: '', math: '', total: '', class: 'A班' }; 
              }
         }); 
-        setGrades(loadedGrades); setStatusMsg(`已載入：${data.name}`);
+        setGrades(loadedGrades);
+        setStatusMsg(
+            normalizedResult.removedInvalidDates > 0
+                ? `已載入：${data.name}（已刪除 ${normalizedResult.removedInvalidDates} 筆異常日期）`
+                : `已載入：${data.name}`
+        );
       } else {
         setCurrentStudentId(id); setStudentName('');
         const gradesObj = {}; availableDates.forEach(d => gradesObj[d] = { chi: '', eng: '', math: '', total: '', class: 'A班' });
@@ -1784,7 +1927,7 @@ export default function App() {
         const newDates = new Set(availableDates);
         let importCount = 0;
         let lastImportedDate = '';
-        let hasError = false; 
+        let skippedInvalidDateCount = 0;
 
         for (let i = headerRowIndex + 1; i < data.length; i++) {
           const row = data[i];
@@ -1823,7 +1966,11 @@ export default function App() {
           }
           // ------------------------
 
-          if (!dateStr || !dateStr.includes('/')) continue; 
+          const normalizedImportDate = normalizeDateToken(dateStr);
+          if (!normalizedImportDate) {
+              skippedInvalidDateCount += 1;
+              continue;
+          }
 
           const getVal = (idx) => {
             if (idx !== -1 && row[idx] !== undefined && row[idx] !== null) {
@@ -1853,7 +2000,7 @@ export default function App() {
           // ---------------------------
 
           // Excel 匯入時，使用新的連續日期邏輯，但需要考慮已存在的 availableDates
-          const weekendID = getWeekendID(dateStr, [...availableDates, ...Array.from(newDates)]);
+          const weekendID = getWeekendID(normalizedImportDate, [...availableDates, ...Array.from(newDates)]);
           if (!newDates.has(weekendID)) newDates.add(weekendID); 
           
           lastImportedDate = weekendID;
@@ -1866,7 +2013,7 @@ export default function App() {
               student.name = rawName;
           }
           
-          student.grades[dateStr] = {
+          student.grades[normalizedImportDate] = {
               chi: chi, 
               eng: eng, 
               math: math, 
@@ -1874,11 +2021,6 @@ export default function App() {
               class: className
           };
           importCount++;
-        }
-
-        if (hasError) {
-             setStatusMsg("匯入已取消");
-             return; 
         }
 
         const sortedDates = Array.from(newDates).sort(customDateSort);
@@ -1897,8 +2039,19 @@ export default function App() {
         const sortedStudents = Object.values(newStudentsMap).sort((a,b) => a.id.localeCompare(b.id));
         setAllStudentsData([...sortedStudents]); 
         setIsBatchDirty(true);
-        
-        setStatusMsg(`匯入 ${importCount} 筆資料 (最新日期: ${lastImportedDate})`);
+
+        if (importCount === 0) {
+            if (skippedInvalidDateCount > 0) {
+                setStatusMsg(`匯入失敗：已略過 ${skippedInvalidDateCount} 筆日期錯誤資料`);
+            } else {
+                setStatusMsg("匯入失敗: 格式錯誤");
+            }
+            setTimeout(() => setStatusMsg(''), 2200);
+            return;
+        }
+
+        const invalidDateSuffix = skippedInvalidDateCount > 0 ? `，略過 ${skippedInvalidDateCount} 筆日期錯誤` : '';
+        setStatusMsg(`匯入 ${importCount} 筆資料${invalidDateSuffix} (最新日期: ${lastImportedDate})`);
       } catch (error) { console.error(error); setStatusMsg("匯入失敗: 格式錯誤"); }
     };
     reader.readAsBinaryString(file);
@@ -2328,7 +2481,25 @@ export default function App() {
               else {
                   const qSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'students'));
                   fullClassData = [];
-                  qSnap.forEach(d => fullClassData.push(d.data()));
+                  const cleanupPayloads = [];
+                  qSnap.forEach(d => {
+                      const rawData = d.data();
+                      const normalizedResult = normalizeGrades(rawData.grades, { withMeta: true });
+                      fullClassData.push({ ...rawData, grades: normalizedResult.normalized });
+                      if (normalizedResult.removedInvalidDates > 0 && rawData.id) {
+                          cleanupPayloads.push({
+                              id: rawData.id,
+                              payload: { ...rawData, grades: normalizedResult.normalized, lastUpdated: new Date().toISOString() }
+                          });
+                      }
+                  });
+                  if (cleanupPayloads.length > 0) {
+                      void Promise.all(
+                          cleanupPayloads.map((item) =>
+                              setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${item.id}`), item.payload)
+                          )
+                      ).catch((err) => console.error('Parent search cleanup invalid date error:', err));
+                  }
                   setCachedClassData(fullClassData);
               }
           }

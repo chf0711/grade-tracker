@@ -507,6 +507,15 @@ const buildPRLookupByScore = (scoresDesc) => {
     return lookup;
 };
 
+const resolveScoreAtTargetPR = (scoresDesc, targetPR = 48) => {
+    if (!Array.isArray(scoresDesc) || scoresDesc.length === 0) return null;
+    const boundedPR = clamp(Number(targetPR) || 0, 1, 99);
+    const rankFloat = scoresDesc.length * (1 - (boundedPR / 100));
+    const rank = clamp(Math.round(rankFloat), 1, scoresDesc.length);
+    const score = scoresDesc[rank - 1];
+    return Number.isFinite(score) ? score : null;
+};
+
 const normalizeQueryEvent = (rawEvent) => {
     const id = String(rawEvent?.id || '').toUpperCase().trim();
     const at = String(rawEvent?.at || '');
@@ -2736,33 +2745,74 @@ export default function App() {
       });
   }, [shouldBuildParentAnalytics, viewData, activePhase, sortedAvailableDatesAsc, getTestDateID]);
 
+  const allSubjectScoresByWeekend = useMemo(() => {
+      const buckets = {};
+      if (!cachedClassData.length) return buckets;
+
+      cachedClassData.forEach((student) => {
+          Object.entries(student.grades || {}).forEach(([date, grade]) => {
+              const weekendID = getTestDateID(date);
+              if (!weekendID) return;
+              if (!buckets[weekendID]) {
+                  buckets[weekendID] = { chi: [], eng: [], math: [] };
+              }
+
+              ['chi', 'eng', 'math'].forEach((subject) => {
+                  const score = toNumberOrNull(grade?.[subject]);
+                  if (score !== null) buckets[weekendID][subject].push(score);
+              });
+          });
+      });
+
+      Object.values(buckets).forEach((bySubject) => {
+          ['chi', 'eng', 'math'].forEach((subject) => {
+              bySubject[subject].sort((a, b) => b - a);
+          });
+      });
+
+      return buckets;
+  }, [cachedClassData, getTestDateID]);
+
   const parentRadarData = useMemo(() => {
       if (!parentPhaseData.length) return [];
+      const TARGET_PR = 48;
+      const fallbackAvgKeyBySubject = {
+          chi: 'avgAllChi',
+          eng: 'avgAllEng',
+          math: 'avgAllMath'
+      };
 
-      const summarize = (label, scoreKey, avgKey) => {
+      const summarize = (label, scoreKey) => {
           const selfValues = parentPhaseData
               .map((item) => parseFloat(item[scoreKey]))
               .filter((v) => !isNaN(v));
-          const avgValues = parentPhaseData
-              .map((item) => parseFloat(item[avgKey]))
-              .filter((v) => !isNaN(v));
+          const benchmarkValues = parentPhaseData
+              .map((item) => {
+                  const weekendID = item.weekendID || getTestDateID(item.date);
+                  const scoreList = allSubjectScoresByWeekend[weekendID]?.[scoreKey] || [];
+                  const prScore = resolveScoreAtTargetPR(scoreList, TARGET_PR);
+                  if (prScore !== null) return prScore;
+                  const fallbackAvg = toNumberOrNull(item[fallbackAvgKeyBySubject[scoreKey]]);
+                  return fallbackAvg;
+              })
+              .filter((v) => v !== null);
 
           const selfMean = selfValues.length ? selfValues.reduce((sum, v) => sum + v, 0) / selfValues.length : 0;
-          const classMean = avgValues.length ? avgValues.reduce((sum, v) => sum + v, 0) / avgValues.length : 0;
+          const benchmarkMean = benchmarkValues.length ? benchmarkValues.reduce((sum, v) => sum + v, 0) / benchmarkValues.length : 0;
 
           return {
               subject: label,
               student: Number(selfMean.toFixed(1)),
-              classAvg: Number(classMean.toFixed(1))
+              classAvg: Number(benchmarkMean.toFixed(1))
           };
       };
 
       return [
-          summarize('國文', 'chi', 'avgAllChi'),
-          summarize('英文', 'eng', 'avgAllEng'),
-          summarize('數學', 'math', 'avgAllMath')
+          summarize('國文', 'chi'),
+          summarize('英文', 'eng'),
+          summarize('數學', 'math')
       ];
-  }, [parentPhaseData]);
+  }, [parentPhaseData, allSubjectScoresByWeekend, getTestDateID]);
 
   const parentRadarMax = useMemo(() => {
       const values = parentRadarData
@@ -2931,6 +2981,161 @@ export default function App() {
       const pr = lookup.get(myVal);
       return pr !== undefined ? pr : '-';
   };
+
+  const parentTrendStrength = useMemo(() => {
+      if (!parentPhaseData.length) return null;
+
+      const metricLabelMap = {
+          total: '總分',
+          chi: '國文',
+          eng: '英文',
+          math: '數學'
+      };
+      const metricKey = activeTab;
+      const metricLabel = metricLabelMap[metricKey] || '總分';
+      const values = parentPhaseData
+          .map((item) => toNumberOrNull(item?.[metricKey]))
+          .filter((value) => value !== null);
+
+      if (values.length < 2) {
+          return {
+              metricKey,
+              metricLabel,
+              pointCount: values.length,
+              slope: 0,
+              slopeDirection: '資料不足',
+              volatility: 0,
+              volatilityLabel: '資料不足',
+              recentValuesText: '--'
+          };
+      }
+
+      const recentValues = values.slice(-3);
+      const slopeRaw = (recentValues[recentValues.length - 1] - recentValues[0]) / (recentValues.length - 1);
+      const slope = Number(slopeRaw.toFixed(1));
+
+      const deltas = [];
+      for (let i = 1; i < recentValues.length; i += 1) {
+          deltas.push(recentValues[i] - recentValues[i - 1]);
+      }
+      const deltaMean = deltas.length
+          ? deltas.reduce((sum, value) => sum + value, 0) / deltas.length
+          : 0;
+      const volatilityRaw = deltas.length
+          ? Math.sqrt(deltas.reduce((sum, value) => sum + ((value - deltaMean) ** 2), 0) / deltas.length)
+          : 0;
+      const volatility = Number(volatilityRaw.toFixed(2));
+
+      const scoreScale = metricKey === 'total'
+          ? 300
+          : metricKey === 'eng' && activePhase === 'mock'
+              ? 80
+              : metricKey === 'math' && activePhase === 'mock'
+                  ? 120
+                  : 100;
+      const volatilityRatio = scoreScale > 0 ? (volatilityRaw / scoreScale) : 0;
+      const volatilityLabel = volatilityRatio <= 0.03 ? '穩定' : '不穩';
+
+      const slopeThreshold = metricKey === 'total' ? 3 : 1.2;
+      const slopeDirection = slopeRaw > slopeThreshold
+          ? '上升'
+          : slopeRaw < -slopeThreshold
+              ? '下降'
+              : '持平';
+
+      return {
+          metricKey,
+          metricLabel,
+          pointCount: values.length,
+          slope,
+          slopeDirection,
+          volatility,
+          volatilityLabel,
+          recentValuesText: recentValues.map((value) => Number(value).toFixed(1)).join(' → ')
+      };
+  }, [parentPhaseData, activeTab, activePhase]);
+
+  const parentRiskSignal = useMemo(() => {
+      if (!parentPhaseData.length) {
+          return {
+              level: 'yellow',
+              label: '黃燈',
+              reasons: ['目前階段資料不足'],
+              prDelta: null,
+              recentPrText: '--'
+          };
+      }
+
+      const prSeries = parentPhaseData
+          .map((item) => {
+              const weekendID = item.weekendID || getTestDateID(item.date);
+              const totalScore = toNumberOrNull(item.total);
+              if (!weekendID || totalScore === null) return null;
+              const lookup = globalPRLookupByWeekendSubject[weekendID]?.total;
+              if (!lookup) return null;
+              const pr = lookup.get(totalScore);
+              return pr !== undefined ? pr : null;
+          })
+          .filter((value) => value !== null);
+
+      const recentPr = prSeries.slice(-3);
+      const prDelta = recentPr.length >= 2 ? (recentPr[recentPr.length - 1] - recentPr[recentPr.length - 2]) : null;
+      const twoConsecutiveDrop = recentPr.length >= 3
+          && recentPr[0] > recentPr[1]
+          && recentPr[1] > recentPr[2];
+      const singleDrop = prDelta !== null && prDelta < 0;
+      const trendDown = parentTrendStrength?.slopeDirection === '下降';
+      const trendUnstable = parentTrendStrength?.volatilityLabel === '不穩';
+
+      let level = 'green';
+      const reasons = [];
+
+      if (twoConsecutiveDrop) {
+          level = 'red';
+          reasons.push('本部PR連續2次下降');
+      } else if (prDelta !== null && prDelta <= -8) {
+          level = 'red';
+          reasons.push(`本部PR單次下降 ${Math.abs(prDelta)} 點`);
+      } else if (singleDrop || trendDown || trendUnstable) {
+          level = 'yellow';
+          if (singleDrop) reasons.push(`本部PR較上次下降 ${Math.abs(prDelta)} 點`);
+          if (trendDown) reasons.push('近3次斜率偏下');
+          if (trendUnstable) reasons.push('波動度偏高');
+      } else {
+          reasons.push('近期趨勢與PR維持穩定');
+      }
+
+      const label = level === 'green' ? '綠燈' : level === 'yellow' ? '黃燈' : '紅燈';
+      return {
+          level,
+          label,
+          reasons,
+          prDelta,
+          recentPrText: recentPr.length ? recentPr.join(' → ') : '--'
+      };
+  }, [parentPhaseData, getTestDateID, globalPRLookupByWeekendSubject, parentTrendStrength]);
+
+  const parentRiskVisual = useMemo(() => {
+      if (parentRiskSignal.level === 'red') {
+          return {
+              dotClass: darkMode ? 'bg-red-400 shadow-[0_0_0_6px_rgba(248,113,113,0.2)]' : 'bg-red-500 shadow-[0_0_0_6px_rgba(248,113,113,0.18)]',
+              textClass: darkMode ? 'text-red-200' : 'text-red-700',
+              cardClass: darkMode ? 'border-red-300/35 bg-red-500/10' : 'border-red-200 bg-red-50/85'
+          };
+      }
+      if (parentRiskSignal.level === 'yellow') {
+          return {
+              dotClass: darkMode ? 'bg-amber-300 shadow-[0_0_0_6px_rgba(252,211,77,0.2)]' : 'bg-amber-500 shadow-[0_0_0_6px_rgba(245,158,11,0.18)]',
+              textClass: darkMode ? 'text-amber-100' : 'text-amber-700',
+              cardClass: darkMode ? 'border-amber-300/35 bg-amber-500/10' : 'border-amber-200 bg-amber-50/85'
+          };
+      }
+      return {
+          dotClass: darkMode ? 'bg-emerald-300 shadow-[0_0_0_6px_rgba(52,211,153,0.2)]' : 'bg-emerald-500 shadow-[0_0_0_6px_rgba(16,185,129,0.18)]',
+          textClass: darkMode ? 'text-emerald-100' : 'text-emerald-700',
+          cardClass: darkMode ? 'border-emerald-300/35 bg-emerald-500/10' : 'border-emerald-200 bg-emerald-50/85'
+      };
+  }, [parentRiskSignal.level, darkMode]);
 
   // 計算某次測驗的成績分布，用於家長端的「落點分析」長條圖
   const calculateDistribution = (date, subject, myScore, allDates, myClass) => {
@@ -4672,6 +4877,61 @@ export default function App() {
                   <div className={`mb-6 rounded-2xl border px-4 py-3 ${darkMode ? 'bg-emerald-500/10 border-emerald-300/25 text-emerald-100' : 'bg-emerald-50/85 border-emerald-200 text-emerald-900'}`}>
                       <div className={`text-[10px] font-black uppercase tracking-widest mb-1.5 ${darkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>老師的話</div>
                       <p className={`text-sm leading-relaxed font-medium whitespace-pre-line ${darkMode ? 'text-emerald-50' : 'text-slate-700'}`}>{teacherMessageForParent}</p>
+                  </div>
+                  )}
+
+                  {parentPhaseData.length > 0 && parentTrendStrength && (
+                  <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className={`rounded-2xl border px-4 py-3 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50/80 border-slate-200'}`}>
+                          <div className={`text-[10px] font-black uppercase tracking-widest ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
+                              趨勢強度（{parentTrendStrength.metricLabel}）
+                          </div>
+                          <div className="mt-2 flex items-end justify-between gap-2">
+                              <div className={`text-[11px] font-bold ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>近3次斜率</div>
+                              <div className={`text-xl font-black ${
+                                  parentTrendStrength.slopeDirection === '上升'
+                                      ? 'text-emerald-600'
+                                      : parentTrendStrength.slopeDirection === '下降'
+                                          ? 'text-rose-500'
+                                          : 'text-slate-500'
+                              }`}>
+                                  {parentTrendStrength.slope > 0 ? '+' : ''}{parentTrendStrength.slope}
+                                  <span className="text-xs font-bold ml-1">/次</span>
+                              </div>
+                          </div>
+                          <div className={`mt-1 text-[11px] font-semibold ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                              方向：{parentTrendStrength.slopeDirection}
+                          </div>
+                          <div className={`mt-1 text-[11px] font-semibold ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                              波動度：{parentTrendStrength.volatility}（{parentTrendStrength.volatilityLabel}）
+                          </div>
+                          <div className={`mt-1 text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                              近3次：{parentTrendStrength.recentValuesText}
+                          </div>
+                      </div>
+
+                      <div className={`rounded-2xl border px-4 py-3 ${parentRiskVisual.cardClass}`}>
+                          <div className={`text-[10px] font-black uppercase tracking-widest ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
+                              風險燈號
+                          </div>
+                          <div className="mt-2 flex items-center gap-3">
+                              <span className={`w-3 h-3 rounded-full ${parentRiskVisual.dotClass}`} />
+                              <span className={`text-base font-black ${parentRiskVisual.textClass}`}>{parentRiskSignal.label}</span>
+                          </div>
+                          <div className={`mt-2 text-[10px] font-bold ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                              近期PR：{parentRiskSignal.recentPrText}
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-1.5">
+                              {parentRiskSignal.reasons.map((reason) => (
+                                  <span
+                                    key={reason}
+                                    className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold ${darkMode ? 'border-white/20 text-slate-200 bg-white/10' : 'border-white text-slate-700 bg-white/70'}`}
+                                  >
+                                      {reason}
+                                  </span>
+                              ))}
+                          </div>
+                      </div>
                   </div>
                   )}
 

@@ -32,7 +32,6 @@ const SECURITY_CODE = String.fromCharCode(49, 49, 48, 55);
 const QUERY_COUNT_RESET_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000;
 const MAX_QUERY_EVENTS = 3000;
 const TEACHER_MESSAGE_DOC_ID = 'teacher_parent_message_v1';
-const STUDENTS_CACHE_TTL_MS = 60 * 1000;
 
 const runtimeFirebaseConfig =
   typeof window !== 'undefined' ? window.__firebase_config : undefined;
@@ -254,8 +253,8 @@ const PHASES = [
 const BATCH_INSIGHT_TABS = [
     { id: 'grades', label: '成績總表' },
     { id: 'risk', label: '風險預警' },
-    { id: 'heatmap', label: '熱力圖' },
-    { id: 'messages', label: '鼓勵語' },
+    { id: 'heatmap', label: '成績熱點圖' },
+    { id: 'messages', label: '老師的話' },
     { id: 'query', label: '查詢監控' }
 ];
 
@@ -767,7 +766,6 @@ export default function App() {
 
   const [_xlsxLoaded, setXlsxLoaded] = useState(false);
   const xlsxLoadingPromiseRef = useRef(null);
-  const studentsCacheRef = useRef({ loadedAt: 0 });
   const darkMode = false;
   const isLimitedTeacherRole = teacherAuthRole === TEACHER_ROLE.LIMITED;
   const canEditStudentGrades = !isLimitedTeacherRole;
@@ -1425,11 +1423,11 @@ export default function App() {
           setTeacherGlobalMessageDraft(normalizedGlobal);
           setTeacherStudentMessages(normalizedByStudent);
           setTeacherStudentMessageDrafts(normalizedByStudent);
-          setStatusMsg(normalizedGlobal ? '已儲存全班鼓勵語' : '已清空全班鼓勵語');
+          setStatusMsg(normalizedGlobal ? '已儲存全班老師的話' : '已清空全班老師的話');
           setTimeout(() => setStatusMsg(''), 2000);
       } catch (e) {
           console.error('Save global teacher message error:', e);
-          setStatusMsg('全班鼓勵語儲存失敗');
+          setStatusMsg('全班老師的話儲存失敗');
           setTimeout(() => setStatusMsg(''), 2000);
       } finally {
           setTeacherMessageSaving(false);
@@ -1460,11 +1458,11 @@ export default function App() {
               else delete next[normalizedId];
               return next;
           });
-          setStatusMsg(draftMessage ? `已儲存 ${normalizedId} 的個別鼓勵語` : `已清空 ${normalizedId} 的個別鼓勵語`);
+          setStatusMsg(draftMessage ? `已儲存 ${normalizedId} 的個別老師的話` : `已清空 ${normalizedId} 的個別老師的話`);
           setTimeout(() => setStatusMsg(''), 2000);
       } catch (e) {
           console.error('Save student teacher message error:', e);
-          setStatusMsg('個別鼓勵語儲存失敗');
+          setStatusMsg('個別老師的話儲存失敗');
           setTimeout(() => setStatusMsg(''), 2000);
       } finally {
           setTeacherStudentMessageSavingId('');
@@ -2222,7 +2220,7 @@ export default function App() {
           { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 8 }, { wch: 12 },
           { wch: 8 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 10 }
       ];
-      window.XLSX.utils.book_append_sheet(workbook, heatmapSheet, '熱力圖數據');
+      window.XLSX.utils.book_append_sheet(workbook, heatmapSheet, '成績熱點圖數據');
 
       const latestQueryLabelById = {};
       queryStatsRows.forEach((item) => {
@@ -3173,22 +3171,22 @@ export default function App() {
         )}
 
         {mode === 'teacher' && (
-          <div className="space-y-7">
-            <div className={`p-6 rounded-[2rem] border backdrop-blur-2xl relative overflow-hidden ${darkMode ? 'bg-[#0f172a]/70 border-white/10 shadow-xl shadow-black/20 ring-1 ring-white/5' : 'bg-white border-white shadow-[0_24px_52px_rgba(15,23,42,0.1)]'}`}>
+          <div className="space-y-5 sm:space-y-7">
+            <div className={`p-4 sm:p-6 rounded-[2rem] border backdrop-blur-2xl relative overflow-hidden ${darkMode ? 'bg-[#0f172a]/70 border-white/10 shadow-xl shadow-black/20 ring-1 ring-white/5' : 'bg-white border-white shadow-[0_24px_52px_rgba(15,23,42,0.1)]'}`}>
                 <div className={`absolute inset-x-0 top-0 h-1 ${darkMode ? 'bg-emerald-300/35' : 'bg-gradient-to-r from-sky-500 via-emerald-500 to-indigo-500'}`} />
                 {isLimitedTeacherRole && (
                     <div className={`mb-4 mt-1 inline-flex items-center gap-2 text-[10px] font-black tracking-widest uppercase px-3 py-1.5 rounded-full border ${darkMode ? 'bg-amber-500/10 border-amber-300/25 text-amber-200' : 'bg-amber-50 border-amber-200 text-amber-700'}`}>
                         2491212 權限：唯讀成績
                     </div>
                 )}
-                <div className="flex justify-between items-center mb-4 pt-1">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4 pt-1">
                     <div className={`flex items-center gap-2 font-black tracking-wide ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}><Calendar className="w-4 h-4 text-blue-500"/>管理日期</div>
-                    <div className="flex gap-2">
-                         <input type="text" placeholder="MM/DD" className={`w-20 p-2 rounded-lg text-xs text-center font-bold outline-none transition-colors tracking-widest border shadow-sm ${darkMode ? 'bg-[#020617]/50 border-white/10 text-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20' : 'bg-white border-slate-200 text-slate-700 focus:border-blue-400'}`} value={newDateInput} onChange={e=>setNewDateInput(e.target.value)} />
-                         <button onClick={addDate} className={`px-3 rounded-lg transition-colors shadow-sm ${darkMode ? 'bg-slate-800 text-white hover:bg-slate-700 border border-white/5' : 'bg-slate-800 text-white hover:bg-slate-700'}`}><Plus className="w-4 h-4"/></button>
+                    <div className="flex w-full sm:w-auto gap-2">
+                         <input type="text" placeholder="MM/DD" className={`w-full sm:w-20 p-2 rounded-lg text-xs text-center font-bold outline-none transition-colors tracking-widest border shadow-sm ${darkMode ? 'bg-[#020617]/50 border-white/10 text-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20' : 'bg-white border-slate-200 text-slate-700 focus:border-blue-400'}`} value={newDateInput} onChange={e=>setNewDateInput(e.target.value)} />
+                         <button onClick={addDate} className={`px-3 rounded-lg transition-colors shadow-sm shrink-0 ${darkMode ? 'bg-slate-800 text-white hover:bg-slate-700 border border-white/5' : 'bg-slate-800 text-white hover:bg-slate-700'}`}><Plus className="w-4 h-4"/></button>
                     </div>
                 </div>
-                <div className={`flex flex-wrap gap-2 max-h-24 overflow-y-auto p-2 rounded-xl border mb-6 no-scrollbar shadow-inner ${darkMode ? 'bg-[#020617]/30 border-white/5' : 'bg-white border-slate-200'}`}>
+                <div className={`flex flex-wrap gap-2 max-h-32 sm:max-h-24 overflow-y-auto p-2 rounded-xl border mb-6 no-scrollbar shadow-inner ${darkMode ? 'bg-[#020617]/30 border-white/5' : 'bg-white border-slate-200'}`}>
                     {sortedAvailableDatesDesc.map(d => (
                         <div key={d} className={`flex items-center px-2.5 py-1 rounded-lg text-[10px] font-bold border shadow-sm ${darkMode ? 'bg-slate-800 text-slate-300 border-white/5' : 'bg-white text-slate-600 border-slate-200/60'}`}>
                             {(weekendLabelByDate[d] || getWeekendDisplayLabel(d))}
@@ -3226,7 +3224,7 @@ export default function App() {
 
                 {teacherViewMode === 'single' && (
                     <div className="flex flex-col gap-4">
-                        <div className="flex gap-2">
+                        <div className="flex flex-col sm:flex-row gap-2">
                             <div className="relative flex-1">
                                 <input id="loadIdInput" type="text" placeholder="輸入學號..." className={`w-full p-3 pl-9 rounded-xl border text-sm font-bold outline-none uppercase tracking-widest placeholder:tracking-normal text-center shadow-inner transition-all ${darkMode ? 'bg-[#020617]/50 border-white/5 text-slate-200 focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20' : 'bg-white border-slate-200 text-slate-700 focus:border-blue-300 focus:ring-2 focus:ring-blue-100'}`} />
                                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
@@ -3237,24 +3235,24 @@ export default function App() {
                                 const studentId = loadInput?.value?.trim().toUpperCase();
                                 if (studentId) loadStudentForTeacher(studentId);
                               }}
-                              className={`px-4 rounded-xl text-xs font-bold whitespace-nowrap transition-colors shadow-sm border ${darkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-white/5' : 'bg-white hover:bg-slate-50 text-slate-600 border-slate-200'}`}
+                              className={`px-4 py-3 sm:py-0 rounded-xl text-xs font-bold whitespace-nowrap transition-colors shadow-sm border ${darkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-white/5' : 'bg-white hover:bg-slate-50 text-slate-600 border-slate-200'}`}
                             >
                               載入
                             </button>
                         </div>
-                        <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
-                            <button onClick={() => setShowAddStudentModal(true)} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all whitespace-nowrap"><UserPlus className="w-4 h-4"/> 新增學生</button>
+                        <div className="grid grid-cols-1 sm:flex gap-2 sm:overflow-x-auto no-scrollbar pb-1">
+                            <button onClick={() => setShowAddStudentModal(true)} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center justify-center sm:justify-start gap-1.5 shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all whitespace-nowrap w-full sm:w-auto"><UserPlus className="w-4 h-4"/> 新增學生</button>
                             {canEditStudentGrades ? (
-                                <label className="cursor-pointer bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all whitespace-nowrap">
+                                <label className="cursor-pointer bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center justify-center sm:justify-start gap-1.5 shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all whitespace-nowrap w-full sm:w-auto">
                                     <FileSpreadsheet className="w-4 h-4" /> 匯入 Excel
                                     <input type="file" accept=".xlsx, .xls" className="hidden" onChange={handleExcelUpload} />
                                 </label>
                             ) : (
-                                <button type="button" disabled className="bg-slate-300 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap cursor-not-allowed">
+                                <button type="button" disabled className="bg-slate-300 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center justify-center sm:justify-start gap-1.5 whitespace-nowrap cursor-not-allowed w-full sm:w-auto">
                                     <FileSpreadsheet className="w-4 h-4" /> 匯入 Excel（唯讀）
                                 </button>
                             )}
-                            <button onClick={() => setShowAvgModal(true)} className={`px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors border ${darkMode ? 'text-indigo-300 bg-indigo-500/10 border-indigo-500/20 hover:bg-indigo-500/20' : 'text-indigo-700 bg-white border-indigo-100 hover:bg-indigo-50 shadow-sm'}`}><Edit3 className="w-4 h-4"/> 平均設定</button>
+                            <button onClick={() => setShowAvgModal(true)} className={`px-4 py-3 rounded-xl text-xs font-bold flex items-center justify-center sm:justify-start gap-1.5 whitespace-nowrap transition-colors border w-full sm:w-auto ${darkMode ? 'text-indigo-300 bg-indigo-500/10 border-indigo-500/20 hover:bg-indigo-500/20' : 'text-indigo-700 bg-white border-indigo-100 hover:bg-indigo-50 shadow-sm'}`}><Edit3 className="w-4 h-4"/> 平均設定</button>
                         </div>
                     </div>
                 )}
@@ -3262,7 +3260,7 @@ export default function App() {
                 {teacherViewMode === 'batch' && (
                     <div className="pt-2 space-y-4">
                         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-                            <div className="flex items-center gap-2 flex-wrap">
+                            <div className="flex items-center gap-2 flex-wrap w-full xl:w-auto">
                                 <span className="text-xs font-bold text-slate-500">日期</span>
                                 <select className={`border rounded-lg px-2 py-1.5 text-xs font-bold outline-none shadow-sm ${darkMode ? 'bg-[#020617]/50 border-white/10 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`} value={batchDate} onChange={(e) => setBatchDate(e.target.value)}>
                                     {sortedAvailableDatesDesc.map(d => <option key={d} value={d}>{weekendLabelByDate[d] || getWeekendDisplayLabel(d)}</option>)}
@@ -3271,28 +3269,28 @@ export default function App() {
                                     共 {batchRowsForDisplay.length} 筆
                                 </span>
                             </div>
-                            <div className="flex gap-2 flex-wrap items-center">
-                                <button onClick={() => { setSortByPR((prev) => !prev); setSortByProb(false); }} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByPR ? 'bg-indigo-600 text-white shadow-indigo-500/30' : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
+                            <div className="grid grid-cols-2 sm:flex gap-2 items-stretch sm:items-center">
+                                <button onClick={() => { setSortByPR((prev) => !prev); setSortByProb(false); }} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-all shadow-sm w-full sm:w-auto ${sortByPR ? 'bg-indigo-600 text-white shadow-indigo-500/30' : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
                                     <ArrowDownWideNarrow className="w-3.5 h-3.5" /> PR排序
                                 </button>
-                                <button onClick={() => { setSortByProb((prev) => !prev); setSortByPR(false); }} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByProb ? (darkMode ? 'bg-emerald-700 text-white shadow-emerald-900/45 ring-1 ring-emerald-200/30' : 'bg-emerald-600 text-white shadow-emerald-600/25') : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
+                                <button onClick={() => { setSortByProb((prev) => !prev); setSortByPR(false); }} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-all shadow-sm w-full sm:w-auto ${sortByProb ? (darkMode ? 'bg-emerald-700 text-white shadow-emerald-900/45 ring-1 ring-emerald-200/30' : 'bg-emerald-600 text-white shadow-emerald-600/25') : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
                                     <Percent className="w-3.5 h-3.5" /> 機率排序
                                 </button>
-                                <div className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[10px] font-bold ${darkMode ? 'border-white/10 bg-slate-900/45 text-slate-300' : 'border-slate-200 bg-white text-slate-500'}`}>
+                                <div className={`inline-flex items-center justify-center col-span-2 sm:col-auto gap-1.5 px-2 py-1 rounded-lg border text-[10px] font-bold ${darkMode ? 'border-white/10 bg-slate-900/45 text-slate-300' : 'border-slate-200 bg-white text-slate-500'}`}>
                                     <span>高</span>
                                     <span className="w-16 h-2 rounded-full bg-gradient-to-r from-emerald-500 via-amber-400 to-rose-500" />
                                     <span>低</span>
                                 </div>
-                                <button onClick={handleExportBatchExcel} className={`px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1 border ${darkMode ? 'bg-slate-800 text-slate-300 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
+                                <button onClick={handleExportBatchExcel} className={`px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all flex items-center justify-center gap-1 border w-full sm:w-auto ${darkMode ? 'bg-slate-800 text-slate-300 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
                                     <FileSpreadsheet className="w-3.5 h-3.5" /> 下載 Excel
                                 </button>
-                                <button onClick={handleExportWeeklyReportExcel} className={`px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1 border ${darkMode ? 'bg-emerald-900/40 text-emerald-200 border-emerald-400/30 hover:bg-emerald-800/50' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'}`}>
+                                <button onClick={handleExportWeeklyReportExcel} className={`px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all flex items-center justify-center gap-1 border w-full sm:w-auto ${darkMode ? 'bg-emerald-900/40 text-emerald-200 border-emerald-400/30 hover:bg-emerald-800/50' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'}`}>
                                     <FileSpreadsheet className="w-3.5 h-3.5" /> 下載週報
                                 </button>
                                 <button
                                   onClick={handleSaveBatchGrades}
                                   disabled={!canEditStudentGrades}
-                                  className={`text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-md transition-all active:scale-[0.98] flex items-center gap-1 ${
+                                  className={`text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-md transition-all active:scale-[0.98] flex items-center justify-center gap-1 w-full sm:w-auto col-span-2 sm:col-auto ${
                                     !canEditStudentGrades
                                       ? 'bg-slate-400 cursor-not-allowed shadow-none'
                                       : isBatchDirty
@@ -3305,9 +3303,9 @@ export default function App() {
                             </div>
                         </div>
 
-                        <div className={`flex p-1 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
+                        <div className={`grid grid-cols-3 sm:flex p-1 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
                             {CLASS_DEFS.map(c => (
-                                <button key={c.id} onClick={() => setTeacherClassFilter(c.id)} className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${teacherClassFilter === c.id ? (darkMode ? 'bg-slate-800 text-white shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-700 shadow-sm border border-slate-200/50') : 'text-slate-500 hover:text-slate-400'}`}>{c.label}</button>
+                                <button key={c.id} onClick={() => setTeacherClassFilter(c.id)} className={`w-full sm:flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${teacherClassFilter === c.id ? (darkMode ? 'bg-slate-800 text-white shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-700 shadow-sm border border-slate-200/50') : 'text-slate-500 hover:text-slate-400'}`}>{c.label}</button>
                             ))}
                         </div>
 
@@ -3330,12 +3328,12 @@ export default function App() {
                             </div>
                         </div>
 
-                        <div className={`flex p-1 rounded-xl border overflow-x-auto shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
+                        <div className={`grid grid-cols-2 sm:flex p-1 rounded-xl border overflow-x-auto shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
                             {BATCH_INSIGHT_TABS.map((tab) => (
                                 <button
                                   key={tab.id}
                                   onClick={() => setBatchInsightTab(tab.id)}
-                                  className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${batchInsightTab === tab.id ? (darkMode ? 'bg-slate-800 text-emerald-100 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-700 shadow-sm border border-slate-200/50') : 'text-slate-500 hover:text-slate-400'}`}
+                                  className={`w-full sm:flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${batchInsightTab === tab.id ? (darkMode ? 'bg-slate-800 text-emerald-100 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-700 shadow-sm border border-slate-200/50') : 'text-slate-500 hover:text-slate-400'}`}
                                 >
                                   {tab.label}
                                 </button>
@@ -3449,7 +3447,7 @@ export default function App() {
                         {batchInsightTab === 'heatmap' && (
                             <div className={`rounded-2xl border p-4 ${darkMode ? 'bg-slate-900/40 border-white/10' : 'bg-white border-slate-200'}`}>
                                 <div className="flex items-center justify-between mb-3">
-                                    <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>班級熱力圖</h4>
+                                    <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>班級成績熱點圖</h4>
                                     <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>紅色低分 / 綠色高分</span>
                                 </div>
                                 <div className={`overflow-x-auto rounded-xl border ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
@@ -3492,7 +3490,7 @@ export default function App() {
                                             {batchHeatmapRows.length === 0 && (
                                                 <tr>
                                                     <td colSpan={8} className={`px-3 py-6 text-center text-xs font-bold ${darkMode ? 'text-slate-400' : 'text-slate-400'}`}>
-                                                        目前沒有可顯示的熱力圖資料
+                                                        目前沒有可顯示的成績熱點圖資料
                                                     </td>
                                                 </tr>
                                             )}
@@ -3506,7 +3504,7 @@ export default function App() {
                             <div className={`rounded-2xl border p-4 space-y-4 ${darkMode ? 'bg-slate-900/40 border-white/10' : 'bg-white border-slate-200'}`}>
                                 <div className={`rounded-xl border p-3 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
                                     <div className="flex items-center justify-between gap-2 mb-2">
-                                        <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>全班鼓勵語</h4>
+                                        <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>全班老師的話</h4>
                                         <span className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                                             {teacherMessageLoading ? '讀取中...' : (teacherGlobalMessage ? '已設定' : '未設定')}
                                         </span>
@@ -3535,7 +3533,7 @@ export default function App() {
 
                                 <div className={`rounded-xl border p-3 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
                                     <div className="flex items-center justify-between gap-2 mb-2">
-                                        <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>個別鼓勵語（優先顯示）</h4>
+                                        <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>個別老師的話（優先顯示）</h4>
                                         <span className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                                             目前名單 {batchRowsForDisplay.length} 人
                                         </span>
@@ -3547,8 +3545,8 @@ export default function App() {
                                             const isSaving = teacherStudentMessageSavingId === studentId;
                                             const currentDraft = teacherStudentMessageDrafts[studentId] ?? teacherStudentMessages[studentId] ?? '';
                                             return (
-                                                <div key={studentId} className={`grid grid-cols-[6.8rem_1fr_auto] gap-2 items-center rounded-lg border px-2 py-2 ${darkMode ? 'bg-slate-950/50 border-white/10' : 'bg-white border-slate-200'}`}>
-                                                    <div className="min-w-0">
+                                                <div key={studentId} className={`grid grid-cols-1 gap-2 sm:grid-cols-[6.8rem_1fr_auto] sm:items-center rounded-lg border px-2 py-2 ${darkMode ? 'bg-slate-950/50 border-white/10' : 'bg-white border-slate-200'}`}>
+                                                    <div className="min-w-0 sm:min-w-0">
                                                         <div className={`text-[11px] font-mono font-black truncate ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}>{studentId}</div>
                                                         <div className={`text-[10px] font-bold truncate ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>{row.student.name || '-'}</div>
                                                     </div>
@@ -3566,7 +3564,7 @@ export default function App() {
                                                     <button
                                                       onClick={() => handleSaveStudentTeacherMessage(studentId)}
                                                       disabled={isSaving || teacherMessageLoading || !user}
-                                                      className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-white bg-sky-600 hover:bg-sky-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                                      className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-white bg-sky-600 hover:bg-sky-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors w-full sm:w-auto"
                                                     >
                                                       {isSaving ? '儲存中' : '儲存'}
                                                     </button>
@@ -3575,7 +3573,7 @@ export default function App() {
                                         })}
                                         {!batchRowsForDisplay.length && (
                                             <div className={`rounded-lg border px-3 py-4 text-center text-xs font-bold ${darkMode ? 'border-white/10 bg-slate-950/40 text-slate-400' : 'border-slate-200 bg-white text-slate-500'}`}>
-                                                目前這個日期與班級沒有學生資料，請切換日期或班級後再設定個別鼓勵語
+                                                目前這個日期與班級沒有學生資料，請切換日期或班級後再設定個別老師的話
                                             </div>
                                         )}
                                     </div>
@@ -3627,8 +3625,8 @@ export default function App() {
                                     </div>
                                 </div>
 
-                                <div className={`rounded-xl border overflow-hidden mb-3 ${darkMode ? 'border-white/10' : 'border-slate-200'}`}>
-                                    <div className={`grid grid-cols-[6rem_1fr_4rem_6.5rem] px-3 py-2 text-[10px] font-bold tracking-wide ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>
+                                <div className={`rounded-xl border overflow-x-auto mb-3 ${darkMode ? 'border-white/10' : 'border-slate-200'}`}>
+                                    <div className={`min-w-[22rem] grid grid-cols-[6rem_1fr_4rem_6.5rem] px-3 py-2 text-[10px] font-bold tracking-wide ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>
                                         <span className="text-center">學號</span>
                                         <span className="text-center">姓名</span>
                                         <span className="text-center">次數</span>
@@ -3636,7 +3634,7 @@ export default function App() {
                                     </div>
                                     <div className={`${darkMode ? 'bg-slate-900/50' : 'bg-white'}`}>
                                         {(queryStatsRows.slice(0, 14)).map((row) => (
-                                            <div key={row.id} className={`grid grid-cols-[6rem_1fr_4rem_6.5rem] px-3 py-2 text-xs border-t items-center ${darkMode ? 'border-white/5 text-slate-200' : 'border-slate-100 text-slate-700'}`}>
+                                            <div key={row.id} className={`min-w-[22rem] grid grid-cols-[6rem_1fr_4rem_6.5rem] px-3 py-2 text-xs border-t items-center ${darkMode ? 'border-white/5 text-slate-200' : 'border-slate-100 text-slate-700'}`}>
                                                 <span className="font-mono text-center">{row.id}</span>
                                                 <span className="truncate text-center">{row.name || '-'}</span>
                                                 <span className="font-black text-center text-emerald-600">{row.count}</span>
@@ -3689,24 +3687,24 @@ export default function App() {
             {/* ... Single View ... */}
             {teacherViewMode === 'single' && currentStudentId && !loading && (
               <div className={`rounded-[2rem] shadow-2xl border overflow-hidden backdrop-blur-md ${darkMode ? 'bg-[#0f172a]/70 border-white/10 ring-1 ring-white/5' : 'bg-white border-white shadow-[0_20px_52px_rgba(15,23,42,0.12)]'}`}>
-                <div className={`p-6 border-b flex justify-between items-center ${darkMode ? 'border-white/5 bg-[#0f172a]/50' : 'border-slate-200/60 bg-white'}`}>
-                  <div className="flex-1 mr-4">
+                <div className={`p-4 sm:p-6 border-b flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center ${darkMode ? 'border-white/5 bg-[#0f172a]/50' : 'border-slate-200/60 bg-white'}`}>
+                  <div className="w-full sm:flex-1 sm:mr-4">
                       <input type="text" value={studentName} onChange={(e) => setStudentName(e.target.value)} className={`text-2xl font-bold bg-transparent border-none outline-none w-full transition-all tracking-tight ${darkMode ? 'text-white placeholder:text-slate-700' : 'text-slate-800 placeholder:text-slate-200'}`} placeholder="學生姓名"/>
                       <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border mt-1 inline-block opacity-60 ${darkMode ? 'border-slate-600 text-slate-400' : 'border-slate-200 text-slate-400'}`}>{currentStudentId}</span>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 w-full sm:w-auto justify-end">
                     <button onClick={handleDeleteStudent} className="bg-red-500/10 text-red-500 p-2.5 rounded-xl hover:bg-red-500/20 transition-colors active:scale-95"><Trash2 className="w-5 h-5"/></button>
                     <button
                       onClick={handleSaveGrades}
                       disabled={!canEditStudentGrades}
-                      className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 ${canEditStudentGrades ? 'bg-blue-600 text-white hover:bg-blue-500 shadow-lg shadow-blue-500/30 active:scale-95' : 'bg-slate-300 text-white cursor-not-allowed'}`}
+                      className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${canEditStudentGrades ? 'bg-blue-600 text-white hover:bg-blue-500 shadow-lg shadow-blue-500/30 active:scale-95' : 'bg-slate-300 text-white cursor-not-allowed'}`}
                     >
                       <Save className="w-4 h-4"/> {canEditStudentGrades ? '儲存' : '唯讀鎖定'}
                     </button>
                   </div>
                 </div>
-                <div className="max-h-[60vh] overflow-y-auto">
-                    <table className={`w-full text-sm text-left ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                <div className="max-h-[60vh] overflow-auto">
+                    <table className={`w-full min-w-[34rem] text-sm text-left ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>
                         <thead className={`text-[10px] uppercase sticky top-0 z-10 backdrop-blur-md ${darkMode ? 'text-slate-500 bg-[#020617]/90' : 'text-slate-400 bg-white/90'}`}>
                             <tr>
                                 <th className="px-4 py-3 font-bold">日期</th>

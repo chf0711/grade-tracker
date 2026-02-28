@@ -49,11 +49,11 @@ export default function ParentAbilityRadar({
       <div className="flex items-center justify-between mb-3 px-1">
         <div>
           <h4 className={`text-sm font-black tracking-wide ${isDarkMode ? 'text-emerald-100' : 'text-slate-800'}`}>三科能力雷達圖</h4>
-          <p className={`text-[11px] font-semibold mt-0.5 ${isDarkMode ? 'text-emerald-200/75' : 'text-slate-500'}`}>{phaseName || '目前階段'} | 樣本 {recordCount} 次 | 對照 PR48</p>
+          <p className={`text-[11px] font-semibold mt-0.5 ${isDarkMode ? 'text-emerald-200/75' : 'text-slate-500'}`}>{phaseName || '目前階段'} | 樣本 {recordCount} 次 | 對照全體中位數</p>
         </div>
         <div className={`flex items-center gap-3 text-[10px] font-bold ${isDarkMode ? 'text-emerald-200/80' : 'text-slate-500'}`}>
           <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />個人</span>
-          <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-400" />PR48基準</span>
+          <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-400" />全體中位數</span>
         </div>
       </div>
       <div className="h-72 lg:h-[24rem] w-full">
@@ -79,7 +79,7 @@ export default function ParentAbilityRadar({
               }}
             />
             <Radar name="個人平均" dataKey="student" stroke="#22c55e" fill="#22c55e" fillOpacity={isDarkMode ? 0.36 : 0.22} strokeWidth={2.2} isAnimationActive={false} />
-            <Radar name="PR48基準" dataKey="classAvg" stroke="#94a3b8" fill="#94a3b8" fillOpacity={isDarkMode ? 0.2 : 0.1} strokeWidth={2} isAnimationActive={false} />
+            <Radar name="全體中位數" dataKey="classAvg" stroke="#94a3b8" fill="#94a3b8" fillOpacity={isDarkMode ? 0.2 : 0.1} strokeWidth={2} isAnimationActive={false} />
           </RadarChart>
         </ResponsiveContainer>
       </div>
@@ -101,7 +101,7 @@ export default function ParentAbilityRadar({
         <div className={`grid grid-cols-[1fr_auto_auto_auto_auto] text-[10px] font-bold px-3 py-2 ${isDarkMode ? 'bg-white/5 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>
           <span>科目</span>
           <span>個人</span>
-          <span>PR48均</span>
+          <span>中位數</span>
           <span>差值</span>
           <span>判讀</span>
         </div>

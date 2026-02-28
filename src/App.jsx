@@ -32,6 +32,11 @@ const SECURITY_CODE = String.fromCharCode(49, 49, 48, 55);
 const QUERY_COUNT_RESET_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000;
 const MAX_QUERY_EVENTS = 3000;
 const TEACHER_MESSAGE_DOC_ID = 'teacher_parent_message_v1';
+const SETTINGS_CACHE_TTL_MS = 10 * 60 * 1000;
+const LOCAL_CACHE_KEYS = Object.freeze({
+    dates: 'grade_tracker_cache_dates_v1',
+    classAverages: 'grade_tracker_cache_class_averages_v18'
+});
 
 const runtimeFirebaseConfig =
   typeof window !== 'undefined' ? window.__firebase_config : undefined;
@@ -63,6 +68,29 @@ try {
   }
   if (app) { auth = getAuth(app); db = getFirestore(app); }
 } catch (e) { console.error("Firebase init error:", e); }
+
+const readLocalCache = (key, ttlMs = SETTINGS_CACHE_TTL_MS) => {
+    if (typeof window === 'undefined' || !key) return null;
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        const ts = Number(parsed?.ts) || 0;
+        if (!ts || Date.now() - ts > ttlMs) return null;
+        return parsed?.data ?? null;
+    } catch {
+        return null;
+    }
+};
+
+const writeLocalCache = (key, data) => {
+    if (typeof window === 'undefined' || !key) return;
+    try {
+        localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data }));
+    } catch {
+        return;
+    }
+};
 
 // --- Helpers ---
 const customDateSort = (a, b) => {
@@ -810,6 +838,7 @@ export default function App() {
   const [showAddStudentModal, setShowAddStudentModal] = useState(false);
   const [newStudentIdInput, setNewStudentIdInput] = useState('');
   const [showAvgModal, setShowAvgModal] = useState(false);
+  const [isClassAveragesDirty, setIsClassAveragesDirty] = useState(false);
   
   const [showSecurityModal, setShowSecurityModal] = useState(false);
   const [securityInput, setSecurityInput] = useState('');
@@ -831,6 +860,10 @@ export default function App() {
   const [queryEvents, setQueryEvents] = useState([]);
   const [queryStatsLastResetAt, setQueryStatsLastResetAt] = useState('');
   const [queryStatsLoading, setQueryStatsLoading] = useState(false);
+  const [queryMonitorKeyword, setQueryMonitorKeyword] = useState('');
+  const [queryMonitorDateFilter, setQueryMonitorDateFilter] = useState('all');
+  const [queryMonitorScope, setQueryMonitorScope] = useState('all');
+  const [queryMonitorSort, setQueryMonitorSort] = useState('count_desc');
   const [teacherGlobalMessage, setTeacherGlobalMessage] = useState('');
   const [teacherGlobalMessageDraft, setTeacherGlobalMessageDraft] = useState('');
   const [teacherStudentMessages, setTeacherStudentMessages] = useState({});
@@ -1135,12 +1168,20 @@ export default function App() {
 
   const loadDates = async () => {
       const fallbackDates = sanitizeDateList(DEFAULT_EXAM_STARTS);
+      const cachedDates = sanitizeDateList(readLocalCache(LOCAL_CACHE_KEYS.dates) || []);
+      if (cachedDates.length) {
+          if (cachedDates.join('|') !== availableDates.join('|')) {
+              setAvailableDates(cachedDates);
+          }
+          return cachedDates;
+      }
       if (!db) {
           const cleanedLocalDates = sanitizeDateList(availableDates);
           const nextDates = cleanedLocalDates.length ? cleanedLocalDates : fallbackDates;
           if (nextDates.join('|') !== availableDates.join('|')) {
               setAvailableDates(nextDates);
           }
+          writeLocalCache(LOCAL_CACHE_KEYS.dates, nextDates);
           return nextDates;
       }
       try {
@@ -1153,6 +1194,7 @@ export default function App() {
           const nextDates = cleanedDates.length ? cleanedDates : fallbackDates;
 
           setAvailableDates(nextDates);
+          writeLocalCache(LOCAL_CACHE_KEYS.dates, nextDates);
 
           const rawFingerprint = (Array.isArray(rawList) ? rawList : []).map((date) => String(date || '')).join('|');
           const cleanedFingerprint = nextDates.join('|');
@@ -1165,6 +1207,7 @@ export default function App() {
           const cleanedFallback = sanitizeDateList(availableDates);
           const nextDates = cleanedFallback.length ? cleanedFallback : fallbackDates;
           setAvailableDates(nextDates);
+          writeLocalCache(LOCAL_CACHE_KEYS.dates, nextDates);
           return nextDates;
       }
   };
@@ -1354,6 +1397,7 @@ export default function App() {
       if (availableDates.includes(normalizedInput)) return;
       const newList = sanitizeDateList([...availableDates, normalizedInput]);
       setAvailableDates(newList);
+      writeLocalCache(LOCAL_CACHE_KEYS.dates, newList);
       setNewDateInput('');
       if (db) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: newList }, { merge: true });
       setStatusMsg(`已新增: ${normalizedInput}`); setTimeout(() => setStatusMsg(''), 2000);
@@ -1435,21 +1479,37 @@ export default function App() {
   }, [availableDates, allStudentsData, getTestDateID]);
 
   const loadClassAverages = async () => {
-      if (!db) { setClassAverages(localComputedAverages); return; }
+      const cachedAverages = readLocalCache(LOCAL_CACHE_KEYS.classAverages);
+      if (cachedAverages && typeof cachedAverages === 'object') {
+          setClassAverages({ ...localComputedAverages, ...cachedAverages });
+          return;
+      }
+      if (!db) {
+          setClassAverages(localComputedAverages);
+          writeLocalCache(LOCAL_CACHE_KEYS.classAverages, localComputedAverages);
+          return;
+      }
       try {
           const docSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'class_averages_v18'));
           let dbAverages = {};
           if (docSnap.exists()) dbAverages = docSnap.data().averages || {};
-          setClassAverages({ ...localComputedAverages, ...dbAverages });
+          const mergedAverages = { ...localComputedAverages, ...dbAverages };
+          setClassAverages(mergedAverages);
+          writeLocalCache(LOCAL_CACHE_KEYS.classAverages, mergedAverages);
       } catch (e) {
           console.error('Load class averages error:', e);
           setClassAverages(localComputedAverages);
+          writeLocalCache(LOCAL_CACHE_KEYS.classAverages, localComputedAverages);
       }
   };
 
   useEffect(() => {
       if (allStudentsData.length > 0) {
-          setClassAverages(prev => ({ ...prev, ...localComputedAverages }));
+          setClassAverages(prev => {
+              const next = { ...prev, ...localComputedAverages };
+              writeLocalCache(LOCAL_CACHE_KEYS.classAverages, next);
+              return next;
+          });
       }
   }, [localComputedAverages, allStudentsData.length]);
 
@@ -1468,17 +1528,46 @@ export default function App() {
           }
           return { ...prev, [date]: { ...dateData, [classId]: updatedClassData } };
       });
+      setIsClassAveragesDirty(true);
   };
 
-  const saveManualClassAverages = async () => {
-      if (!db) return;
+  const persistClassAverages = useCallback(async (nextAverages, options = {}) => {
+      const { closeModal = false, showToast = false, toastMessage = '設定已儲存' } = options;
+      writeLocalCache(LOCAL_CACHE_KEYS.classAverages, nextAverages);
+      if (!db) {
+          if (closeModal) setShowAvgModal(false);
+          return true;
+      }
       try {
-          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'class_averages_v18'), { averages: classAverages }, { merge: true });
-          setStatusMsg("設定已儲存"); setTimeout(() => setStatusMsg(''), 2000); setShowAvgModal(false);
+          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'class_averages_v18'), { averages: nextAverages }, { merge: true });
+          if (showToast) {
+              setStatusMsg(toastMessage);
+              setTimeout(() => setStatusMsg(''), 2000);
+          }
+          if (closeModal) setShowAvgModal(false);
+          return true;
       } catch (e) {
           console.error('Save class averages error:', e);
-          setStatusMsg("儲存失敗");
+          if (showToast) {
+              setStatusMsg('儲存失敗');
+              setTimeout(() => setStatusMsg(''), 2000);
+          }
+          return false;
       }
+  }, []);
+
+  useEffect(() => {
+      if (!isClassAveragesDirty) return undefined;
+      const timer = setTimeout(async () => {
+          const ok = await persistClassAverages(classAverages);
+          if (ok) setIsClassAveragesDirty(false);
+      }, 900);
+      return () => clearTimeout(timer);
+  }, [isClassAveragesDirty, classAverages, persistClassAverages]);
+
+  const saveManualClassAverages = async () => {
+      const ok = await persistClassAverages(classAverages, { closeModal: true, showToast: true, toastMessage: '設定已儲存' });
+      if (ok) setIsClassAveragesDirty(false);
   };
 
   const persistTeacherMessages = useCallback(async (nextGlobalMessage, nextByStudentMessages) => {
@@ -1571,6 +1660,7 @@ export default function App() {
       if (!deleteTarget) return;
       const newList = availableDates.filter(d => d !== deleteTarget);
       setAvailableDates(newList);
+      writeLocalCache(LOCAL_CACHE_KEYS.dates, newList);
       if (db) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: newList }, { merge: true });
       setStatusMsg(`已刪除: ${deleteTarget}`); setTimeout(() => setStatusMsg(''), 2000); setDeleteTarget(null);
   };
@@ -2025,6 +2115,7 @@ export default function App() {
 
         const sortedDates = Array.from(newDates).sort(customDateSort);
         setAvailableDates(sortedDates);
+        writeLocalCache(LOCAL_CACHE_KEYS.dates, sortedDates);
         
         // ** IMMEDIATE DISPLAY FIX **
         // Automatically switch batch view to the imported date
@@ -2037,7 +2128,8 @@ export default function App() {
         if (db) setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: sortedDates }, { merge: true });
 
         const sortedStudents = Object.values(newStudentsMap).sort((a,b) => a.id.localeCompare(b.id));
-        setAllStudentsData([...sortedStudents]); 
+        setAllStudentsData([...sortedStudents]);
+        setCachedClassData([...sortedStudents]);
         setIsBatchDirty(true);
 
         if (importCount === 0) {
@@ -2205,7 +2297,11 @@ export default function App() {
                   updated = true;
               }
           });
-          if (updated) { setStatusMsg(`已貼上 ${rows.length} 筆資料`); setTimeout(() => setStatusMsg(''), 2000); }
+          if (updated) {
+              setIsClassAveragesDirty(true);
+              setStatusMsg(`已貼上 ${rows.length} 筆資料`);
+              setTimeout(() => setStatusMsg(''), 2000);
+          }
           return newAvgs;
       });
   };
@@ -2216,6 +2312,7 @@ export default function App() {
     try {
         if (db) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${studentToDelete.id}`));
         setAllStudentsData(prev => prev.filter(s => s.id !== studentToDelete.id));
+        setCachedClassData(prev => prev.filter(s => s.id !== studentToDelete.id));
         setCurrentStudentId(null); setStudentName(''); setGrades({});
         setStatusMsg(`已刪除`); setTimeout(() => setStatusMsg(''), 2000); setStudentToDelete(null);
     } catch (e) {
@@ -2234,10 +2331,16 @@ export default function App() {
     setStatusMsg('儲存中...');
     try {
       if (db) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${currentStudentId}`), { id: currentStudentId, name: studentName, grades: grades, lastUpdated: new Date().toISOString() }, { merge: true });
+      const savedStudent = { id: currentStudentId, name: studentName, grades };
       setAllStudentsData(prev => {
           const exists = prev.find(s => s.id === currentStudentId);
           if(exists) return prev.map(s => s.id === currentStudentId ? { ...s, name: studentName, grades } : s);
-          return [...prev, { id: currentStudentId, name: studentName, grades }].sort((a,b) => a.id.localeCompare(b.id));
+          return [...prev, savedStudent].sort((a,b) => a.id.localeCompare(b.id));
+      });
+      setCachedClassData(prev => {
+          const exists = prev.find(s => s.id === currentStudentId);
+          if (exists) return prev.map(s => s.id === currentStudentId ? { ...s, name: studentName, grades } : s);
+          return [...prev, savedStudent].sort((a, b) => a.id.localeCompare(b.id));
       });
       setStatusMsg('儲存成功'); setTimeout(() => setStatusMsg(''), 2000);
     } catch (e) {
@@ -2256,6 +2359,7 @@ export default function App() {
           if (db) {
               const batchPromises = allStudentsData.map(student => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${student.id}`), { id: student.id, name: student.name, grades: student.grades, lastUpdated: new Date().toISOString() }, { merge: true }));
               await Promise.all(batchPromises);
+              setCachedClassData(allStudentsData);
               setIsBatchDirty(false);
               setStatusMsg("全班儲存成功"); setTimeout(() => setStatusMsg(''), 2000);
           }
@@ -2471,38 +2575,55 @@ export default function App() {
       });
       let data = null;
       let fullClassData = [];
-      if (db) {
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${searchId.toUpperCase()}`);
+      const normalizedSearchId = searchId.toUpperCase().trim();
+
+      if (cachedClassData.length > 0) {
+          fullClassData = cachedClassData;
+          data = cachedClassData.find((student) => String(student.id || '').toUpperCase() === normalizedSearchId) || null;
+      } else if (allStudentsData.length > 0) {
+          fullClassData = allStudentsData;
+          data = allStudentsData.find((student) => String(student.id || '').toUpperCase() === normalizedSearchId) || null;
+      }
+
+      if (db && !data) {
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${normalizedSearchId}`);
           const docSnap = await getDoc(docRef);
           if (docSnap.exists()) {
-              data = docSnap.data();
-              if (cachedClassData.length > 0) fullClassData = cachedClassData;
-              else if (allStudentsData.length > 0) fullClassData = allStudentsData;
-              else {
-                  const qSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'students'));
-                  fullClassData = [];
-                  const cleanupPayloads = [];
-                  qSnap.forEach(d => {
-                      const rawData = d.data();
-                      const normalizedResult = normalizeGrades(rawData.grades, { withMeta: true });
-                      fullClassData.push({ ...rawData, grades: normalizedResult.normalized });
-                      if (normalizedResult.removedInvalidDates > 0 && rawData.id) {
-                          cleanupPayloads.push({
-                              id: rawData.id,
-                              payload: { ...rawData, grades: normalizedResult.normalized, lastUpdated: new Date().toISOString() }
-                          });
-                      }
-                  });
-                  if (cleanupPayloads.length > 0) {
-                      void Promise.all(
-                          cleanupPayloads.map((item) =>
-                              setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${item.id}`), item.payload)
-                          )
-                      ).catch((err) => console.error('Parent search cleanup invalid date error:', err));
-                  }
-                  setCachedClassData(fullClassData);
+              const rawData = docSnap.data();
+              const normalizedResult = normalizeGrades(rawData.grades, { withMeta: true });
+              data = { ...rawData, grades: normalizedResult.normalized };
+              if (normalizedResult.removedInvalidDates > 0 && rawData.id) {
+                  void setDoc(
+                      doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${rawData.id}`),
+                      { ...rawData, grades: normalizedResult.normalized, lastUpdated: new Date().toISOString() }
+                  ).catch((err) => console.error('Parent search cleanup invalid date error:', err));
               }
           }
+      }
+
+      if (db && data && fullClassData.length === 0) {
+          const qSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'students'));
+          fullClassData = [];
+          const cleanupPayloads = [];
+          qSnap.forEach(d => {
+              const rawData = d.data();
+              const normalizedResult = normalizeGrades(rawData.grades, { withMeta: true });
+              fullClassData.push({ ...rawData, grades: normalizedResult.normalized });
+              if (normalizedResult.removedInvalidDates > 0 && rawData.id) {
+                  cleanupPayloads.push({
+                      id: rawData.id,
+                      payload: { ...rawData, grades: normalizedResult.normalized, lastUpdated: new Date().toISOString() }
+                  });
+              }
+          });
+          if (cleanupPayloads.length > 0) {
+              void Promise.all(
+                  cleanupPayloads.map((item) =>
+                      setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${item.id}`), item.payload)
+                  )
+              ).catch((err) => console.error('Parent search cleanup invalid date error:', err));
+          }
+          setCachedClassData(fullClassData);
       }
       if (data) {
         const allChartData = [];
@@ -2526,6 +2647,9 @@ export default function App() {
             const avgData = (classAverages[weekendID] && classAverages[weekendID][weekClass]) 
                           ? classAverages[weekendID][weekClass] 
                           : {};
+            const avgAllData = (classAverages[weekendID] && classAverages[weekendID].all)
+                          ? classAverages[weekendID].all
+                          : {};
             
             // 決定顯示日期：日A班/日B班顯示週日，其他顯示週六
             let displayDate = weekendID;
@@ -2544,6 +2668,10 @@ export default function App() {
                 avgChi: parseFloat(avgData.chi)||null, 
                 avgEng: parseFloat(avgData.eng)||null, 
                 avgMath: parseFloat(avgData.math)||null,
+                avgAllTotal: parseFloat(avgAllData.total)||null,
+                avgAllChi: parseFloat(avgAllData.chi)||null,
+                avgAllEng: parseFloat(avgAllData.eng)||null,
+                avgAllMath: parseFloat(avgAllData.math)||null,
                 class: weekClass
             });
           });
@@ -2630,9 +2758,9 @@ export default function App() {
       };
 
       return [
-          summarize('國文', 'chi', 'avgChi'),
-          summarize('英文', 'eng', 'avgEng'),
-          summarize('數學', 'math', 'avgMath')
+          summarize('國文', 'chi', 'avgAllChi'),
+          summarize('英文', 'eng', 'avgAllEng'),
+          summarize('數學', 'math', 'avgAllMath')
       ];
   }, [parentPhaseData]);
 
@@ -3147,25 +3275,6 @@ export default function App() {
           .sort((a, b) => b.dateKey.localeCompare(a.dateKey));
   }, [queryEventTimeline]);
 
-  const queryHourlySummary = useMemo(() => {
-      const hourCounts = Array.from({ length: 24 }, (_, hour) => ({ hour, count: 0 }));
-      queryEventTimeline.forEach((event) => {
-          const hour = new Date(event.ts).getHours();
-          hourCounts[hour].count += 1;
-      });
-      const peak = hourCounts.reduce((top, current) => {
-          if (!top || current.count > top.count) return current;
-          return top;
-      }, null);
-      return {
-          totalQueries: queryEventTimeline.length,
-          uniqueStudentCount: Object.keys(queryStatsById).filter((id) => Number(queryStatsById[id]) > 0).length,
-          peakHourLabel: peak && peak.count > 0 ? `${String(peak.hour).padStart(2, '0')}:00-${String((peak.hour + 1) % 24).padStart(2, '0')}:00` : '--',
-          peakHourCount: peak?.count || 0,
-          latestDayCount: queryEventsByDay[0]?.items.length || 0
-      };
-  }, [queryEventTimeline, queryStatsById, queryEventsByDay]);
-
   const queryStatsRows = useMemo(() => {
       const latestTsById = {};
       queryEventTimeline.forEach((event) => {
@@ -3192,13 +3301,320 @@ export default function App() {
           });
   }, [queryStatsById, studentNameById, queryEventTimeline]);
 
+  const latestQueryTsById = useMemo(() => {
+      const map = {};
+      queryEventTimeline.forEach((event) => {
+          map[event.id] = event.ts;
+      });
+      return map;
+  }, [queryEventTimeline]);
+
+  const queryClassCoverageRows = useMemo(() => {
+      const rows = batchRowsForDisplay.map((row) => {
+          const id = String(row.student.id || '').toUpperCase();
+          const count = Number(queryStatsById[id] || 0);
+          const latestTs = Number(latestQueryTsById[id]) || 0;
+          const latestAtLabel = latestTs
+              ? new Date(latestTs).toLocaleString([], {
+                  month: '2-digit',
+                  day: '2-digit',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  hour12: false
+              })
+              : '--';
+
+          return {
+              id,
+              name: row.student.name || '',
+              count,
+              latestTs,
+              latestAtLabel
+          };
+      });
+
+      return rows.sort((a, b) => {
+          if (b.count !== a.count) return b.count - a.count;
+          return b.latestTs - a.latestTs;
+      });
+  }, [batchRowsForDisplay, queryStatsById, latestQueryTsById]);
+
+  const queryClassStudentIdSet = useMemo(() => {
+      const idSet = new Set();
+      queryClassCoverageRows.forEach((row) => {
+          const id = String(row.id || '').toUpperCase();
+          if (id) idSet.add(id);
+      });
+      return idSet;
+  }, [queryClassCoverageRows]);
+
+  const queryMonitorBaseRows = useMemo(() => {
+      return queryMonitorScope === 'class' ? queryClassCoverageRows : queryStatsRows;
+  }, [queryMonitorScope, queryClassCoverageRows, queryStatsRows]);
+
+  const queryStatsRowsFiltered = useMemo(() => {
+      const keyword = queryMonitorKeyword.trim();
+      const hasKeyword = keyword.length > 0;
+      const upperKeyword = keyword.toUpperCase();
+      const lowerKeyword = keyword.toLowerCase();
+
+      const rows = queryMonitorBaseRows.filter((row) => {
+          if (!hasKeyword) return true;
+          const idText = String(row.id || '').toUpperCase();
+          const nameText = String(row.name || '').toLowerCase();
+          return idText.includes(upperKeyword) || nameText.includes(lowerKeyword);
+      });
+
+      if (queryMonitorSort === 'latest_desc') {
+          rows.sort((a, b) => {
+              if (b.latestTs !== a.latestTs) return b.latestTs - a.latestTs;
+              return b.count - a.count;
+          });
+          return rows;
+      }
+
+      if (queryMonitorSort === 'id_asc') {
+          rows.sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
+          return rows;
+      }
+
+      rows.sort((a, b) => {
+          if (b.count !== a.count) return b.count - a.count;
+          return b.latestTs - a.latestTs;
+      });
+      return rows;
+  }, [queryMonitorBaseRows, queryMonitorKeyword, queryMonitorSort]);
+
+  const queryEventsByDayFiltered = useMemo(() => {
+      const keyword = queryMonitorKeyword.trim();
+      const hasKeyword = keyword.length > 0;
+      const upperKeyword = keyword.toUpperCase();
+      const lowerKeyword = keyword.toLowerCase();
+      const shouldLimitToClass = queryMonitorScope === 'class';
+
+      return queryEventsByDay
+          .filter((day) => queryMonitorDateFilter === 'all' || day.dateKey === queryMonitorDateFilter)
+          .map((day) => {
+              let items = day.items;
+              if (shouldLimitToClass) {
+                  items = items.filter((event) => queryClassStudentIdSet.has(String(event.id || '').toUpperCase()));
+              }
+              if (hasKeyword) {
+                  items = items.filter((event) => {
+                      const idText = String(event.id || '').toUpperCase();
+                      const nameText = String(event.name || '').toLowerCase();
+                      return idText.includes(upperKeyword) || nameText.includes(lowerKeyword);
+                  });
+              }
+              return { ...day, items };
+          })
+          .filter((day) => day.items.length > 0);
+  }, [queryEventsByDay, queryMonitorDateFilter, queryMonitorKeyword, queryMonitorScope, queryClassStudentIdSet]);
+
+  const queryFilteredEventList = useMemo(
+      () => queryEventsByDayFiltered.flatMap((day) => day.items),
+      [queryEventsByDayFiltered]
+  );
+
+  const queryFilteredSummary = useMemo(() => {
+      const hourCounts = Array.from({ length: 24 }, (_, hour) => ({ hour, count: 0 }));
+      queryFilteredEventList.forEach((event) => {
+          const hour = new Date(event.ts).getHours();
+          hourCounts[hour].count += 1;
+      });
+
+      const peak = hourCounts.reduce((top, current) => {
+          if (!top || current.count > top.count) return current;
+          return top;
+      }, null);
+
+      const uniqueStudentCount = queryStatsRowsFiltered.filter((row) => Number(row.count) > 0).length;
+
+      return {
+          totalQueries: queryFilteredEventList.length,
+          uniqueStudentCount,
+          peakHourLabel: peak && peak.count > 0 ? `${String(peak.hour).padStart(2, '0')}:00-${String((peak.hour + 1) % 24).padStart(2, '0')}:00` : '--',
+          peakHourCount: peak?.count || 0,
+          latestDayCount: queryEventsByDayFiltered[0]?.items.length || 0
+      };
+  }, [queryFilteredEventList, queryStatsRowsFiltered, queryEventsByDayFiltered]);
+
+  const queryRecentWindowSummary = useMemo(() => {
+      const now = Date.now();
+      const oneDayAgo = now - (24 * 60 * 60 * 1000);
+      const threeDaysAgo = now - (3 * 24 * 60 * 60 * 1000);
+      const sevenDaysAgo = now - (7 * 24 * 60 * 60 * 1000);
+      let last24h = 0;
+      let last3d = 0;
+      let last7d = 0;
+
+      queryFilteredEventList.forEach((event) => {
+          if (event.ts >= sevenDaysAgo) {
+              last7d += 1;
+              if (event.ts >= threeDaysAgo) {
+                  last3d += 1;
+                  if (event.ts >= oneDayAgo) {
+                      last24h += 1;
+                  }
+              }
+          }
+      });
+
+      return { last24h, last3d, last7d };
+  }, [queryFilteredEventList]);
+
+  const queryBiHourBuckets = useMemo(() => {
+      const buckets = Array.from({ length: 12 }, (_, index) => ({
+          key: index,
+          startHour: index * 2,
+          endHour: (index * 2) + 2,
+          count: 0
+      }));
+
+      queryFilteredEventList.forEach((event) => {
+          const hour = new Date(event.ts).getHours();
+          const bucketIndex = Math.floor(hour / 2);
+          buckets[bucketIndex].count += 1;
+      });
+
+      const maxCount = buckets.reduce((max, item) => Math.max(max, item.count), 0);
+      const safeMax = maxCount > 0 ? maxCount : 1;
+      return buckets.map((bucket) => ({
+          ...bucket,
+          label: `${String(bucket.startHour).padStart(2, '0')}-${String(bucket.endHour % 24).padStart(2, '0')}`,
+          ratio: bucket.count / safeMax
+      }));
+  }, [queryFilteredEventList]);
+
+  const queryDailyTrend = useMemo(() => {
+      const trendDays = [...queryEventsByDayFiltered].slice(0, 14).reverse();
+      const maxCount = trendDays.reduce((max, day) => Math.max(max, day.items.length), 0);
+      const safeMax = maxCount > 0 ? maxCount : 1;
+      return trendDays.map((day) => ({
+          dateKey: day.dateKey,
+          label: day.dateLabel,
+          count: day.items.length,
+          ratio: day.items.length / safeMax
+      }));
+  }, [queryEventsByDayFiltered]);
+
+  const queryDayCountByIdMap = useMemo(() => {
+      const map = {};
+      queryEventsByDayFiltered.forEach((day) => {
+          const dayCount = {};
+          day.items.forEach((event) => {
+              const id = String(event.id || '').toUpperCase();
+              if (!id) return;
+              dayCount[id] = (dayCount[id] || 0) + 1;
+          });
+          Object.entries(dayCount).forEach(([id, count]) => {
+              if (!map[id]) map[id] = [];
+              map[id].push(count);
+          });
+      });
+      return map;
+  }, [queryEventsByDayFiltered]);
+
+  const queryRecent48hCountById = useMemo(() => {
+      const cutoff = Date.now() - (48 * 60 * 60 * 1000);
+      const map = {};
+      queryFilteredEventList.forEach((event) => {
+          if (event.ts < cutoff) return;
+          const id = String(event.id || '').toUpperCase();
+          if (!id) return;
+          map[id] = (map[id] || 0) + 1;
+      });
+      return map;
+  }, [queryFilteredEventList]);
+
+  const queryMonitorAlertRows = useMemo(() => {
+      const now = Date.now();
+      return queryStatsRowsFiltered
+          .map((row) => {
+              const latestTs = Number(row.latestTs) || 0;
+              const daysSinceLast = latestTs ? Math.floor((now - latestTs) / (24 * 60 * 60 * 1000)) : null;
+              const dayCounts = queryDayCountByIdMap[row.id] || [];
+              const maxDayCount = dayCounts.length ? Math.max(...dayCounts) : 0;
+              const recent48hCount = Number(queryRecent48hCountById[row.id] || 0);
+              const tags = [];
+              let alertScore = 0;
+
+              if (Number(row.count) === 0) {
+                  alertScore += 100;
+                  tags.push('尚未查詢');
+              }
+
+              if (daysSinceLast !== null) {
+                  if (daysSinceLast >= 14) {
+                      alertScore += 34;
+                      tags.push(`${daysSinceLast} 天未查`);
+                  } else if (daysSinceLast >= 7) {
+                      alertScore += 20;
+                      tags.push(`${daysSinceLast} 天未查`);
+                  }
+              }
+
+              if (maxDayCount >= 6) {
+                  alertScore += 24;
+                  tags.push(`單日 ${maxDayCount} 次`);
+              } else if (maxDayCount >= 4) {
+                  alertScore += 12;
+                  tags.push(`單日 ${maxDayCount} 次`);
+              }
+
+              if (recent48hCount >= 5) {
+                  alertScore += 16;
+                  tags.push(`48h ${recent48hCount} 次`);
+              } else if (recent48hCount >= 3) {
+                  alertScore += 8;
+                  tags.push(`48h ${recent48hCount} 次`);
+              }
+
+              if (alertScore <= 0) return null;
+
+              return {
+                  ...row,
+                  alertScore,
+                  daysSinceLast,
+                  maxDayCount,
+                  recent48hCount,
+                  tags: tags.slice(0, 3)
+              };
+          })
+          .filter(Boolean)
+          .sort((a, b) => {
+              if (b.alertScore !== a.alertScore) return b.alertScore - a.alertScore;
+              if (b.count !== a.count) return b.count - a.count;
+              return b.latestTs - a.latestTs;
+          })
+          .slice(0, 12);
+  }, [queryStatsRowsFiltered, queryDayCountByIdMap, queryRecent48hCountById]);
+
+  const queryClassCoverageSummary = useMemo(() => {
+      const total = queryClassCoverageRows.length;
+      const queried = queryClassCoverageRows.filter((row) => row.count > 0).length;
+      const unqueried = Math.max(total - queried, 0);
+      const coverageRate = total > 0 ? Math.round((queried / total) * 100) : 0;
+      return { total, queried, unqueried, coverageRate };
+  }, [queryClassCoverageRows]);
+
+  const queryClassUnqueriedPreview = useMemo(
+      () => queryClassCoverageRows.filter((row) => row.count === 0).slice(0, 12),
+      [queryClassCoverageRows]
+  );
+
+  useEffect(() => {
+      if (queryMonitorDateFilter === 'all') return;
+      const exists = queryEventsByDay.some((day) => day.dateKey === queryMonitorDateFilter);
+      if (!exists) setQueryMonitorDateFilter('all');
+  }, [queryMonitorDateFilter, queryEventsByDay]);
+
   const queryStatsLastResetText = useMemo(() => {
       if (!queryStatsLastResetAt) return '尚未初始化';
       const date = new Date(queryStatsLastResetAt);
       if (Number.isNaN(date.getTime())) return '尚未初始化';
       return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   }, [queryStatsLastResetAt]);
-
 
   const openStatsModal = (date, grades, className) => {
       setStatsModalData({
@@ -3793,77 +4209,320 @@ export default function App() {
                         )}
 
                         {batchInsightTab === 'query' && (
-                            <div className={`rounded-2xl border p-4 ${darkMode ? 'bg-slate-900/40 border-white/10' : 'bg-white border-slate-200'}`}>
-                                <div className="flex items-center justify-between mb-3">
+                            <div className={`rounded-2xl border p-4 space-y-3 ${darkMode ? 'bg-slate-900/40 border-white/10' : 'bg-white border-slate-200'}`}>
+                                <div className="flex flex-wrap items-center justify-between gap-2">
                                     <div className="flex items-center gap-2">
                                         <Info className={`w-4 h-4 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`} />
                                         <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>查詢監控中心</h4>
                                     </div>
-                                    <button
-                                      onClick={() => executeWithSecurity(handleResetQueryStats, {
-                                          title: '重置查詢次數'
-                                      })}
-                                      disabled={queryStatsLoading}
-                                      className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors ${
-                                        queryStatsLoading
-                                          ? 'bg-slate-300 text-white cursor-not-allowed'
-                                          : 'bg-red-500 text-white hover:bg-red-400'
-                                      }`}
-                                    >
-                                      手動重置
-                                    </button>
-                                </div>
-                                <div className={`text-[11px] font-semibold mb-2 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
-                                    上次重置：{queryStatsLastResetText}
-                                </div>
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
-                                    <div className={`rounded-xl border px-3 py-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
-                                        <div className={`text-[10px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>總查詢數</div>
-                                        <div className={`text-lg font-black ${darkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>{queryHourlySummary.totalQueries}</div>
-                                    </div>
-                                    <div className={`rounded-xl border px-3 py-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
-                                        <div className={`text-[10px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>學號數</div>
-                                        <div className={`text-lg font-black ${darkMode ? 'text-sky-200' : 'text-sky-700'}`}>{queryHourlySummary.uniqueStudentCount}</div>
-                                    </div>
-                                    <div className={`rounded-xl border px-3 py-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
-                                        <div className={`text-[10px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>高峰時段</div>
-                                        <div className={`text-[12px] font-black ${darkMode ? 'text-violet-200' : 'text-violet-700'}`}>{queryHourlySummary.peakHourLabel}</div>
-                                        <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>共 {queryHourlySummary.peakHourCount} 次</div>
-                                    </div>
-                                    <div className={`rounded-xl border px-3 py-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
-                                        <div className={`text-[10px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>最近一天</div>
-                                        <div className={`text-lg font-black ${darkMode ? 'text-amber-200' : 'text-amber-700'}`}>{queryHourlySummary.latestDayCount}</div>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                          onClick={loadQueryStats}
+                                          disabled={queryStatsLoading}
+                                          className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors ${
+                                            queryStatsLoading
+                                              ? 'bg-slate-300 text-white cursor-not-allowed'
+                                              : 'bg-slate-700 text-white hover:bg-slate-600'
+                                          }`}
+                                        >
+                                          重新整理
+                                        </button>
+                                        <button
+                                          onClick={() => executeWithSecurity(handleResetQueryStats, {
+                                              title: '重置查詢次數'
+                                          })}
+                                          disabled={queryStatsLoading}
+                                          className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors ${
+                                            queryStatsLoading
+                                              ? 'bg-slate-300 text-white cursor-not-allowed'
+                                              : 'bg-red-500 text-white hover:bg-red-400'
+                                          }`}
+                                        >
+                                          手動重置
+                                        </button>
                                     </div>
                                 </div>
 
-                                <div className={`rounded-xl border overflow-hidden mb-3 ${darkMode ? 'border-white/10' : 'border-slate-200'}`}>
-                                    <div className={`grid grid-cols-[6rem_1fr_4rem_6.5rem] px-3 py-2 text-[10px] font-bold tracking-wide ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>
-                                        <span className="text-center">學號</span>
-                                        <span className="text-center">姓名</span>
-                                        <span className="text-center">次數</span>
-                                        <span className="text-center">最後查詢</span>
+                                <div className="grid grid-cols-1 md:grid-cols-[1fr_9.4rem_auto] gap-2">
+                                    <div className={`flex items-center gap-2 rounded-xl border px-3 py-2 ${darkMode ? 'border-white/10 bg-slate-900/50' : 'border-slate-200 bg-white'}`}>
+                                        <Search className={`w-3.5 h-3.5 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`} />
+                                        <input
+                                          type="text"
+                                          value={queryMonitorKeyword}
+                                          onChange={(e) => setQueryMonitorKeyword(e.target.value)}
+                                          placeholder="搜尋學號或姓名"
+                                          className={`w-full bg-transparent outline-none text-xs font-bold ${darkMode ? 'text-slate-100 placeholder:text-slate-500' : 'text-slate-700 placeholder:text-slate-400'}`}
+                                        />
                                     </div>
-                                    <div className={`${darkMode ? 'bg-slate-900/50' : 'bg-white'}`}>
-                                        {(queryStatsRows.slice(0, 14)).map((row) => (
-                                            <div key={row.id} className={`grid grid-cols-[6rem_1fr_4rem_6.5rem] px-3 py-2 text-xs border-t items-center ${darkMode ? 'border-white/5 text-slate-200' : 'border-slate-100 text-slate-700'}`}>
-                                                <span className="font-mono text-center">{row.id}</span>
-                                                <span className="truncate text-center">{row.name || '-'}</span>
-                                                <span className="font-black text-center text-emerald-600">{row.count}</span>
-                                                <span className={`text-[10px] font-semibold text-center ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>{row.latestAtLabel}</span>
+                                    <select
+                                      value={queryMonitorDateFilter}
+                                      onChange={(e) => setQueryMonitorDateFilter(e.target.value)}
+                                      className={`rounded-xl border px-2.5 py-2 text-xs font-bold outline-none ${darkMode ? 'border-white/10 bg-slate-900/50 text-slate-200' : 'border-slate-200 bg-white text-slate-700'}`}
+                                    >
+                                        <option value="all">全部日期</option>
+                                        {queryEventsByDay.map((day) => (
+                                            <option key={day.dateKey} value={day.dateKey}>{day.dateLabel}</option>
+                                        ))}
+                                    </select>
+                                    <button
+                                      onClick={() => {
+                                          setQueryMonitorKeyword('');
+                                          setQueryMonitorDateFilter('all');
+                                      }}
+                                      className={`rounded-xl border px-3 py-2 text-[11px] font-bold transition-colors ${darkMode ? 'border-white/10 bg-slate-900/50 text-slate-200 hover:bg-slate-800' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+                                    >
+                                      清除條件
+                                    </button>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-[13rem_12rem] gap-2">
+                                    <div className={`rounded-xl border p-1 flex ${darkMode ? 'border-white/10 bg-slate-900/50' : 'border-slate-200 bg-white'}`}>
+                                        <button
+                                          onClick={() => setQueryMonitorScope('all')}
+                                          className={`flex-1 rounded-lg px-2 py-1.5 text-[11px] font-black transition-colors ${queryMonitorScope === 'all' ? 'bg-emerald-600 text-white' : (darkMode ? 'text-slate-300 hover:bg-slate-800' : 'text-slate-600 hover:bg-slate-50')}`}
+                                        >
+                                          全部學生
+                                        </button>
+                                        <button
+                                          onClick={() => setQueryMonitorScope('class')}
+                                          className={`flex-1 rounded-lg px-2 py-1.5 text-[11px] font-black transition-colors ${queryMonitorScope === 'class' ? 'bg-emerald-600 text-white' : (darkMode ? 'text-slate-300 hover:bg-slate-800' : 'text-slate-600 hover:bg-slate-50')}`}
+                                        >
+                                          目前班級
+                                        </button>
+                                    </div>
+                                    <select
+                                      value={queryMonitorSort}
+                                      onChange={(e) => setQueryMonitorSort(e.target.value)}
+                                      className={`rounded-xl border px-2.5 py-2 text-xs font-bold outline-none ${darkMode ? 'border-white/10 bg-slate-900/50 text-slate-200' : 'border-slate-200 bg-white text-slate-700'}`}
+                                    >
+                                        <option value="count_desc">依查詢次數</option>
+                                        <option value="latest_desc">依最近查詢</option>
+                                        <option value="id_asc">依學號排序</option>
+                                    </select>
+                                </div>
+
+                                <div className={`flex flex-wrap items-center justify-between gap-2 text-[11px] font-semibold ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
+                                    <span>上次重置：{queryStatsLastResetText}</span>
+                                    <span>
+                                        監控範圍：{queryMonitorScope === 'class' ? `目前班級（${teacherClassFilter}）` : '全部學生'} / 排行 {queryStatsRowsFiltered.length} 人 / 事件 {queryFilteredEventList.length} 筆
+                                    </span>
+                                </div>
+
+                                <div className="grid grid-cols-2 lg:grid-cols-6 gap-2">
+                                    <div className={`rounded-xl border px-3 py-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                        <div className={`text-[10px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>篩選後查詢</div>
+                                        <div className={`text-lg font-black ${darkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>{queryFilteredSummary.totalQueries}</div>
+                                    </div>
+                                    <div className={`rounded-xl border px-3 py-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                        <div className={`text-[10px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>有查詢學號數</div>
+                                        <div className={`text-lg font-black ${darkMode ? 'text-sky-200' : 'text-sky-700'}`}>{queryFilteredSummary.uniqueStudentCount}</div>
+                                    </div>
+                                    <div className={`rounded-xl border px-3 py-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                        <div className={`text-[10px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>近24小時</div>
+                                        <div className={`text-lg font-black ${darkMode ? 'text-indigo-200' : 'text-indigo-700'}`}>{queryRecentWindowSummary.last24h}</div>
+                                    </div>
+                                    <div className={`rounded-xl border px-3 py-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                        <div className={`text-[10px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>近3天</div>
+                                        <div className={`text-lg font-black ${darkMode ? 'text-cyan-200' : 'text-cyan-700'}`}>{queryRecentWindowSummary.last3d}</div>
+                                    </div>
+                                    <div className={`rounded-xl border px-3 py-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                        <div className={`text-[10px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>近7天</div>
+                                        <div className={`text-lg font-black ${darkMode ? 'text-amber-200' : 'text-amber-700'}`}>{queryRecentWindowSummary.last7d}</div>
+                                    </div>
+                                    <div className={`rounded-xl border px-3 py-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                        <div className={`text-[10px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>高峰時段</div>
+                                        <div className={`text-[12px] font-black ${darkMode ? 'text-violet-200' : 'text-violet-700'}`}>{queryFilteredSummary.peakHourLabel}</div>
+                                        <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>共 {queryFilteredSummary.peakHourCount} 次</div>
+                                    </div>
+                                </div>
+
+                                <div className={`rounded-xl border p-3 ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
+                                    <div className="flex items-center justify-between mb-2">
+                                        <div className={`text-[10px] font-black tracking-widest uppercase ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>監控提醒</div>
+                                        <div className={`text-[10px] font-black ${darkMode ? 'text-amber-200' : 'text-amber-700'}`}>{queryMonitorAlertRows.length} 筆</div>
+                                    </div>
+                                    <div className="space-y-1.5 max-h-[11.5rem] overflow-y-auto pr-1">
+                                        {queryMonitorAlertRows.map((row) => (
+                                            <div
+                                              key={`alert-${row.id}`}
+                                              onClick={() => setQueryMonitorKeyword(row.id)}
+                                              className={`rounded-lg border px-2.5 py-2 cursor-pointer transition-colors ${darkMode ? 'border-white/10 bg-slate-900/55 hover:bg-slate-800' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}`}
+                                              title="點擊可快速篩選此學號"
+                                            >
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <div className={`text-[11px] font-black ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>
+                                                        <span className="font-mono">{row.id}</span>
+                                                        <span className="ml-1.5">{row.name || '-'}</span>
+                                                    </div>
+                                                    <div className={`text-[10px] font-black ${darkMode ? 'text-rose-200' : 'text-rose-700'}`}>
+                                                        {row.alertScore}
+                                                    </div>
+                                                </div>
+                                                <div className="mt-1 flex flex-wrap gap-1">
+                                                    {row.tags.map((tag) => (
+                                                        <span key={`${row.id}-${tag}`} className={`inline-flex text-[10px] font-bold rounded-full px-2 py-0.5 ${darkMode ? 'bg-rose-400/20 text-rose-100 border border-rose-300/25' : 'bg-rose-100 text-rose-700 border border-rose-200'}`}>
+                                                            {tag}
+                                                        </span>
+                                                    ))}
+                                                </div>
                                             </div>
                                         ))}
-                                        {!queryStatsRows.length && (
-                                            <div className={`px-3 py-3 text-center text-xs ${darkMode ? 'text-slate-400' : 'text-slate-400'}`}>
-                                                目前尚無查詢紀錄
+                                        {!queryMonitorAlertRows.length && (
+                                            <div className={`rounded-lg border px-3 py-3 text-center text-xs font-bold ${darkMode ? 'border-white/10 bg-slate-900/55 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                                                目前沒有明顯異常行為
                                             </div>
                                         )}
                                     </div>
                                 </div>
 
+                                <div className="grid grid-cols-1 lg:grid-cols-[1.25fr_0.95fr] gap-3">
+                                    <div className={`rounded-xl border overflow-hidden ${darkMode ? 'border-white/10' : 'border-slate-200'}`}>
+                                        <div className={`grid grid-cols-[6rem_1fr_4rem_6.5rem_4.6rem] px-3 py-2 text-[10px] font-bold tracking-wide ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>
+                                            <span className="text-center">學號</span>
+                                            <span className="text-center">姓名</span>
+                                            <span className="text-center">次數</span>
+                                            <span className="text-center">最後查詢</span>
+                                            <span className="text-center">狀態</span>
+                                        </div>
+                                        <div className={`${darkMode ? 'bg-slate-900/50' : 'bg-white'}`}>
+                                            {(queryStatsRowsFiltered.slice(0, 24)).map((row) => {
+                                                const nowTs = Date.now();
+                                                const latestTs = Number(row.latestTs) || 0;
+                                                const daysSinceLast = latestTs ? Math.floor((nowTs - latestTs) / (24 * 60 * 60 * 1000)) : null;
+                                                let statusText = '正常';
+                                                let statusClass = darkMode
+                                                    ? 'bg-emerald-400/20 text-emerald-100 border-emerald-300/30'
+                                                    : 'bg-emerald-100 text-emerald-700 border-emerald-200';
+
+                                                if (Number(row.count) === 0) {
+                                                    statusText = '未查詢';
+                                                    statusClass = darkMode
+                                                        ? 'bg-rose-400/20 text-rose-100 border-rose-300/30'
+                                                        : 'bg-rose-100 text-rose-700 border-rose-200';
+                                                } else if (daysSinceLast !== null && daysSinceLast >= 14) {
+                                                    statusText = '久未查';
+                                                    statusClass = darkMode
+                                                        ? 'bg-amber-400/20 text-amber-100 border-amber-300/30'
+                                                        : 'bg-amber-100 text-amber-700 border-amber-200';
+                                                } else if (daysSinceLast !== null && daysSinceLast >= 7) {
+                                                    statusText = '待追蹤';
+                                                    statusClass = darkMode
+                                                        ? 'bg-orange-400/20 text-orange-100 border-orange-300/30'
+                                                        : 'bg-orange-100 text-orange-700 border-orange-200';
+                                                } else if (Number(row.count) >= 8) {
+                                                    statusText = '高頻';
+                                                    statusClass = darkMode
+                                                        ? 'bg-sky-400/20 text-sky-100 border-sky-300/30'
+                                                        : 'bg-sky-100 text-sky-700 border-sky-200';
+                                                }
+
+                                                return (
+                                                    <div
+                                                      key={row.id}
+                                                      onClick={() => setQueryMonitorKeyword(row.id)}
+                                                      className={`grid grid-cols-[6rem_1fr_4rem_6.5rem_4.6rem] px-3 py-2 text-xs border-t items-center cursor-pointer transition-colors ${darkMode ? 'border-white/5 text-slate-200 hover:bg-slate-800/50' : 'border-slate-100 text-slate-700 hover:bg-slate-50/70'}`}
+                                                      title="點擊可快速篩選此學號"
+                                                    >
+                                                        <span className="font-mono text-center">{row.id}</span>
+                                                        <span className="truncate text-center">{row.name || '-'}</span>
+                                                        <span className="font-black text-center text-emerald-600">{row.count}</span>
+                                                        <span className={`text-[10px] font-semibold text-center ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>{row.latestAtLabel}</span>
+                                                        <span className={`mx-auto inline-flex rounded-full border px-2 py-0.5 text-[10px] font-black ${statusClass}`}>{statusText}</span>
+                                                    </div>
+                                                );
+                                            })}
+                                            {!queryStatsRowsFiltered.length && (
+                                                <div className={`px-3 py-3 text-center text-xs ${darkMode ? 'text-slate-400' : 'text-slate-400'}`}>
+                                                    目前沒有符合條件的查詢排行資料
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-3">
+                                        <div className={`rounded-xl border p-3 ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
+                                            <div className="flex items-center justify-between mb-2">
+                                                <div className={`text-[10px] font-black tracking-widest uppercase ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>本班查詢覆蓋</div>
+                                                <div className={`text-sm font-black ${darkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>{queryClassCoverageSummary.coverageRate}%</div>
+                                            </div>
+                                            <div className={`w-full h-2 rounded-full overflow-hidden ${darkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>
+                                                <div
+                                                  className="h-full rounded-full bg-[linear-gradient(90deg,#22c55e_0%,#16a34a_50%,#15803d_100%)]"
+                                                  style={{ width: `${queryClassCoverageSummary.coverageRate}%` }}
+                                                />
+                                            </div>
+                                            <div className={`mt-2 text-[11px] font-semibold ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                                                已查詢 {queryClassCoverageSummary.queried} / 總人數 {queryClassCoverageSummary.total}，未查詢 {queryClassCoverageSummary.unqueried}
+                                            </div>
+                                            {queryClassUnqueriedPreview.length > 0 && (
+                                                <div className="mt-2 space-y-1">
+                                                    {queryClassUnqueriedPreview.map((row) => (
+                                                        <div key={row.id} className={`grid grid-cols-[5.8rem_1fr] gap-2 text-[11px] rounded-lg px-2 py-1 border ${darkMode ? 'border-white/10 bg-slate-900/55 text-slate-300' : 'border-slate-200 bg-slate-50 text-slate-600'}`}>
+                                                            <span className="font-mono">{row.id}</span>
+                                                            <span className="truncate">{row.name || '-'}</span>
+                                                        </div>
+                                                    ))}
+                                                    {queryClassCoverageSummary.unqueried > queryClassUnqueriedPreview.length && (
+                                                        <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                            尚有 {queryClassCoverageSummary.unqueried - queryClassUnqueriedPreview.length} 位未顯示
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                            {queryClassCoverageSummary.total === 0 && (
+                                                <div className={`mt-2 text-[11px] font-semibold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                    目前班級名單尚未載入，請先確認日期與班級
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div className={`rounded-xl border p-3 ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
+                                            <div className={`text-[10px] font-black tracking-widest uppercase mb-2 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>兩小時查詢熱區</div>
+                                            <div className="grid grid-cols-2 gap-1.5">
+                                                {queryBiHourBuckets.map((bucket) => (
+                                                    <div key={bucket.key} className={`rounded-lg border px-2 py-1.5 ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-slate-50'}`}>
+                                                        <div className={`text-[10px] font-bold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>{bucket.label}</div>
+                                                        <div className={`h-1.5 rounded-full overflow-hidden ${darkMode ? 'bg-slate-800' : 'bg-slate-200'}`}>
+                                                            <div
+                                                              className="h-full rounded-full bg-[linear-gradient(90deg,#22c55e_0%,#0ea5e9_55%,#6366f1_100%)]"
+                                                              style={{ width: `${bucket.count > 0 ? Math.max(8, Math.round(bucket.ratio * 100)) : 0}%` }}
+                                                            />
+                                                        </div>
+                                                        <div className={`text-[10px] font-black mt-1 ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}>{bucket.count}</div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        <div className={`rounded-xl border p-3 ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
+                                            <div className={`text-[10px] font-black tracking-widest uppercase mb-2 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>14日查詢趨勢</div>
+                                            <div className="space-y-1.5 max-h-[12rem] overflow-y-auto pr-1">
+                                                {queryDailyTrend.map((day) => (
+                                                    <div key={day.dateKey} className="grid grid-cols-[3.9rem_1fr_2rem] items-center gap-2">
+                                                        <span className={`text-[10px] font-bold ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>{day.label.slice(0, 5)}</span>
+                                                        <div className={`h-1.5 rounded-full overflow-hidden ${darkMode ? 'bg-slate-800' : 'bg-slate-200'}`}>
+                                                            <div
+                                                              className="h-full rounded-full bg-[linear-gradient(90deg,#10b981_0%,#22c55e_35%,#0ea5e9_100%)]"
+                                                              style={{ width: `${day.count > 0 ? Math.max(8, Math.round(day.ratio * 100)) : 0}%` }}
+                                                            />
+                                                        </div>
+                                                        <span className={`text-[10px] font-black text-right ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>{day.count}</span>
+                                                    </div>
+                                                ))}
+                                                {!queryDailyTrend.length && (
+                                                    <div className={`text-[11px] text-center font-semibold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                        目前沒有趨勢資料
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <div className={`rounded-xl border overflow-hidden ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
                                     <div className={`px-3 py-2 text-[10px] font-bold tracking-wide uppercase ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>每日查詢名單（依時間順序）</div>
-                                    <div className="max-h-[18rem] overflow-y-auto">
-                                        {queryEventsByDay.map((day) => (
+                                    <div className="max-h-[20rem] overflow-y-auto">
+                                        {queryEventsByDayFiltered.map((day) => (
                                             <div key={day.dateKey} className={`border-t ${darkMode ? 'border-white/5' : 'border-slate-100'}`}>
                                                 <div className={`px-3 py-2 text-[11px] font-black flex items-center justify-between ${darkMode ? 'text-slate-200 bg-slate-900/55' : 'text-slate-700 bg-slate-50/80'}`}>
                                                     <span>{day.dateLabel}</span>
@@ -3880,9 +4539,9 @@ export default function App() {
                                                 </div>
                                             </div>
                                         ))}
-                                        {!queryEventsByDay.length && (
+                                        {!queryEventsByDayFiltered.length && (
                                             <div className={`px-3 py-3 text-center text-xs ${darkMode ? 'text-slate-400' : 'text-slate-400'}`}>
-                                                目前尚無每日查詢資料
+                                                目前沒有符合條件的每日查詢資料
                                             </div>
                                         )}
                                     </div>

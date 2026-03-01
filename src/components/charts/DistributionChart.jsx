@@ -15,13 +15,13 @@ export default function DistributionChart({ data, highlightColor, isDarkMode }) 
   const maxCount = safeData.reduce((max, bucket) => Math.max(max, bucket.count || 0), 0);
 
   return (
-    <div className={`h-72 md:h-80 w-full rounded-2xl border px-2 py-3 ${isDarkMode ? 'bg-slate-900/30 border-white/5' : 'bg-white border-slate-200/90'}`}>
+    <div className={`h-64 sm:h-72 md:h-80 w-full rounded-2xl border px-2 py-3 ${isDarkMode ? 'bg-slate-900/30 border-white/5' : 'bg-white border-slate-200/90 shadow-[0_10px_24px_rgba(15,23,42,0.06)]'}`}>
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={safeData} margin={{ top: 6, right: 6, bottom: 38, left: -18 }}>
+        <BarChart data={safeData} margin={{ top: 6, right: 6, bottom: 34, left: -18 }}>
           <CartesianGrid stroke={isDarkMode ? '#334155' : '#94a3b8'} strokeOpacity={0.18} vertical={false} strokeDasharray="3 3" />
           <XAxis
             dataKey="range"
-            tick={{ fontSize: 10, fill: isDarkMode ? '#94a3b8' : '#475569', fontWeight: 700 }}
+            tick={{ fontSize: 9, fill: isDarkMode ? '#94a3b8' : '#475569', fontWeight: 700 }}
             tickLine={false}
             axisLine={false}
             interval={0}

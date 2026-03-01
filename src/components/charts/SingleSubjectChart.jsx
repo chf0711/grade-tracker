@@ -28,11 +28,11 @@ export default function SingleSubjectChart({
 
   return (
     <div className={`mb-6 rounded-2xl border px-3 pt-3 pb-2 ${isDarkMode ? 'bg-slate-900/30 border-white/10' : 'bg-white border-slate-200/90 shadow-[0_10px_24px_rgba(15,23,42,0.06)]'}`}>
-      <div className="flex items-center justify-between px-1 mb-1">
-        <h4 className={`text-xs font-black tracking-[0.12em] uppercase ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>{title} 趨勢</h4>
-        <span className={`text-[10px] font-bold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>個人 vs 班平均</span>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 px-1 mb-1">
+        <h4 className={`text-xs font-black tracking-[0.12em] uppercase ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>{title} 走勢</h4>
+        <span className={`text-[10px] font-bold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>個人成績 vs 班平均</span>
       </div>
-      <div className="h-56 md:h-64 w-full -ml-1">
+      <div className="h-52 sm:h-56 md:h-64 w-full -ml-1">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 20, right: 20, bottom: 0, left: 0 }}>
             <CartesianGrid stroke={isDarkMode ? '#334155' : '#94a3b8'} strokeOpacity={0.2} vertical={false} strokeDasharray="3 3" />

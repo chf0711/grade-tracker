@@ -100,7 +100,7 @@ export default function ParentAbilityRadar({
           <span>科目</span>
           <span>個人</span>
           <span>中位數</span>
-          <span>與成績中位數差值</span>
+          <span>個人與成績中位數差值</span>
         </div>
         <div className={isDarkMode ? 'bg-[#0b1510]' : 'bg-white'}>
           {subjectRows.map((row) => (

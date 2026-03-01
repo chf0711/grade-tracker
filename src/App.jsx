@@ -956,14 +956,6 @@ export default function App() {
       return labels;
   }, [sortedAvailableDatesDesc]);
 
-  const dateOrderByWeekendId = useMemo(() => {
-      const orderMap = new Map();
-      sortedAvailableDatesAsc.forEach((date, index) => {
-          orderMap.set(getTestDateID(date), index);
-      });
-      return orderMap;
-  }, [sortedAvailableDatesAsc, getTestDateID]);
-
   const orderedWeekendIds = useMemo(() => {
       const ids = [];
       const seen = new Set();
@@ -1000,15 +992,6 @@ export default function App() {
           setTeacherAuthRole(storedRole === TEACHER_ROLE.LIMITED ? TEACHER_ROLE.LIMITED : TEACHER_ROLE.FULL);
       }
   }, []);
-
-  const hasPriorHistory = useMemo(() => {
-      if (!viewData || !viewData.chartData) return true;
-      return viewData.chartData.some(d => {
-          const weekendID = getTestDateID(d.weekendID || d.date);
-          const idx = dateOrderByWeekendId.get(weekendID);
-          return idx >= 0 && idx < 36;
-      });
-  }, [viewData, getTestDateID, dateOrderByWeekendId]);
 
   // --- OPTIMIZATION: Debounced Calculation Effect ---
   useEffect(() => {
@@ -3781,28 +3764,65 @@ export default function App() {
                         2491212 權限：唯讀成績
                     </div>
                 )}
-                <div className="flex justify-between items-center mb-4 pt-1">
-                    <div className={`flex items-center gap-2 font-black tracking-wide ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}><Calendar className="w-4 h-4 text-blue-500"/>管理日期</div>
-                    <div className="flex gap-2">
-                         <input type="text" placeholder="MM/DD" className={`w-20 p-2 rounded-lg text-xs text-center font-bold outline-none transition-colors tracking-widest border shadow-sm ${darkMode ? 'bg-[#020617]/50 border-white/10 text-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20' : 'bg-white border-slate-200 text-slate-700 focus:border-blue-400'}`} value={newDateInput} onChange={e=>setNewDateInput(e.target.value)} />
-                         <button onClick={addDate} className={`px-3 rounded-lg transition-colors shadow-sm ${darkMode ? 'bg-slate-800 text-white hover:bg-slate-700 border border-white/5' : 'bg-slate-800 text-white hover:bg-slate-700'}`}><Plus className="w-4 h-4"/></button>
-                    </div>
-                </div>
-                <div className={`flex flex-wrap gap-2 max-h-24 overflow-y-auto p-2 rounded-xl border mb-6 no-scrollbar shadow-inner ${darkMode ? 'bg-[#020617]/30 border-white/5' : 'bg-white border-slate-200'}`}>
-                    {sortedAvailableDatesDesc.map(d => (
-                        <div key={d} className={`flex items-center px-2.5 py-1 rounded-lg text-[10px] font-bold border shadow-sm ${darkMode ? 'bg-slate-800 text-slate-300 border-white/5' : 'bg-white text-slate-600 border-slate-200/60'}`}>
-                            {(weekendLabelByDate[d] || getWeekendDisplayLabel(d))}
-                            {canDeleteDates ? (
-                                <button onClick={() => handleDeleteDate(d)} className="ml-1.5 text-slate-400 hover:text-red-500" title="危險操作：刪除日期">
-                                    <X className="w-3 h-3"/>
-                                </button>
-                            ) : (
-                                <span className="ml-1.5 text-slate-300" title="2491212 權限不可刪除日期">
-                                    <Lock className="w-3 h-3"/>
-                                </span>
-                            )}
+                <div className={`mb-6 rounded-2xl border p-3.5 sm:p-4 backdrop-blur-md ${darkMode ? 'bg-[#020617]/35 border-white/10' : 'bg-white/80 border-white/85 ring-1 ring-white/55 shadow-[0_12px_30px_rgba(15,23,42,0.08)]'}`}>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                            <div className={`flex items-center gap-2 font-black tracking-wide ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>
+                                <Calendar className="w-4 h-4 text-blue-500" />
+                                管理日期
+                            </div>
+                            <p className={`mt-1 text-[11px] font-semibold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                目前共 {sortedAvailableDatesDesc.length} 個考次
+                            </p>
                         </div>
-                    ))}
+                        <div className="flex gap-2 items-center">
+                            <input type="text" placeholder="MM/DD" className={`w-24 p-2.5 rounded-xl text-xs text-center font-bold outline-none transition-colors tracking-widest border shadow-sm ${darkMode ? 'bg-[#020617]/50 border-white/10 text-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20' : 'bg-white border-slate-200 text-slate-700 focus:border-blue-400'}`} value={newDateInput} onChange={e=>setNewDateInput(e.target.value)} />
+                            <button onClick={addDate} className={`px-3.5 py-2.5 rounded-xl transition-colors shadow-sm border ${darkMode ? 'bg-slate-800 text-white hover:bg-slate-700 border-white/10' : 'bg-slate-800 text-white hover:bg-slate-700 border-slate-800'}`}>
+                                <Plus className="w-4 h-4"/>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className={`mt-3.5 rounded-2xl border p-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-white/85 border-slate-200/80'}`}>
+                        <div className="overflow-x-auto pb-1">
+                            <div className="inline-flex gap-2.5 min-w-full">
+                                {sortedAvailableDatesDesc.map((d, idx) => {
+                                    const phaseId = resolvePhaseByDate(d, sortedAvailableDatesAsc);
+                                    const phaseLabel = phaseId === 'p1' ? '第一階段' : phaseId === 'mock' ? '模考班' : '第二階段';
+                                    const phaseTagClass = phaseId === 'p1'
+                                        ? (darkMode ? 'bg-cyan-500/15 text-cyan-200 border-cyan-300/25' : 'bg-cyan-50 text-cyan-700 border-cyan-200')
+                                        : phaseId === 'mock'
+                                            ? (darkMode ? 'bg-violet-500/15 text-violet-200 border-violet-300/25' : 'bg-violet-50 text-violet-700 border-violet-200')
+                                            : (darkMode ? 'bg-emerald-500/15 text-emerald-200 border-emerald-300/25' : 'bg-emerald-50 text-emerald-700 border-emerald-200');
+
+                                    return (
+                                        <div key={d} className={`min-w-[126px] rounded-2xl border px-3 py-2.5 transition-all ${darkMode ? 'bg-slate-800/88 border-white/10' : 'bg-white border-slate-200/80 shadow-[0_8px_18px_rgba(15,23,42,0.06)]'}`}>
+                                            <div className="flex items-start justify-between gap-2">
+                                                <span className={`text-[9px] font-black px-2 py-0.5 rounded-full border tracking-wide ${phaseTagClass}`}>{phaseLabel}</span>
+                                                {idx === 0 && (
+                                                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${darkMode ? 'bg-blue-500/20 text-blue-200' : 'bg-blue-100 text-blue-700'}`}>最新</span>
+                                                )}
+                                            </div>
+                                            <div className={`mt-2 text-xs font-black tracking-wide ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>
+                                                {weekendLabelByDate[d] || getWeekendDisplayLabel(d)}
+                                            </div>
+                                            <div className="mt-2 flex justify-end">
+                                                {canDeleteDates ? (
+                                                    <button onClick={() => handleDeleteDate(d)} className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg transition-colors ${darkMode ? 'text-rose-300 hover:text-rose-200 bg-rose-500/10' : 'text-rose-600 hover:text-rose-700 bg-rose-50'}`} title="危險操作：刪除日期">
+                                                        <X className="w-3 h-3"/> 刪除
+                                                    </button>
+                                                ) : (
+                                                    <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg ${darkMode ? 'text-slate-400 bg-slate-700/70' : 'text-slate-500 bg-slate-100'}`} title="2491212 權限不可刪除日期">
+                                                        <Lock className="w-3 h-3"/> 鎖定
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <div className={`flex p-1 rounded-xl mb-6 shadow-inner border ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-100/90 border-slate-200/70'}`}>
@@ -4642,13 +4662,11 @@ export default function App() {
                   </div>
                   )}
 
-                  {hasPriorHistory && (
                   <div className={`flex p-1 mb-6 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#08120d]/70 border-emerald-200/10' : 'bg-slate-50 border-slate-100'}`}>
                       {PHASES.map(phase => (
                           <button key={phase.id} onClick={() => setActivePhase(phase.id)} className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${activePhase === phase.id ? (darkMode ? 'bg-[#1f2a24] text-emerald-100 shadow-md border border-emerald-200/20 ring-1 ring-emerald-200/10' : 'bg-white text-slate-800 shadow-sm border border-slate-100') : 'text-slate-500 hover:text-slate-400'}`}>{phase.name}</button>
                       ))}
                   </div>
-                  )}
 
                   <div className={`flex p-1 rounded-2xl mb-8 justify-center shadow-inner ${darkMode ? 'bg-[#08120d]/70' : 'bg-slate-100'}`}>
                       {['總分', '國文', '英文', '數學'].map(tab => {

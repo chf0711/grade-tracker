@@ -1,4 +1,4 @@
-import React, { Suspense, useState, useEffect, useMemo, useRef, useCallback, startTransition } from 'react';
+import React, { Suspense, useState, useEffect, useMemo, useRef, useCallback, useDeferredValue, startTransition } from 'react';
 import { Search, Save, Plus, Check, BarChart3, X, Lock, LayoutDashboard, GraduationCap, Calendar, Clipboard, LogOut, AlertTriangle, UserPlus, Sparkles, Edit3, Trash2, Trophy, Target, FileSpreadsheet, ChevronRight, ArrowLeft, PieChart, Users, BarChart2, ShieldCheck, ArrowDownWideNarrow, Percent, Info } from 'lucide-react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
@@ -787,6 +787,26 @@ const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, 
             </td>
         </tr>
     );
+}, (prevProps, nextProps) => {
+    if (prevProps.sIndex !== nextProps.sIndex) return false;
+    if (prevProps.darkMode !== nextProps.darkMode) return false;
+    if (prevProps.canEdit !== nextProps.canEdit) return false;
+    if (prevProps.prValue !== nextProps.prValue) return false;
+    if (prevProps.probValue !== nextProps.probValue) return false;
+    if (prevProps.handleBatchGradeChange !== nextProps.handleBatchGradeChange) return false;
+    if (prevProps.handleKeyDown !== nextProps.handleKeyDown) return false;
+    if (prevProps.handlePaste !== nextProps.handlePaste) return false;
+    if (prevProps.student.id !== nextProps.student.id || prevProps.student.name !== nextProps.student.name) return false;
+
+    const prevGrade = prevProps.dateGrades || EMPTY_GRADE;
+    const nextGrade = nextProps.dateGrades || EMPTY_GRADE;
+    return (
+        prevGrade.class === nextGrade.class
+        && prevGrade.chi === nextGrade.chi
+        && prevGrade.eng === nextGrade.eng
+        && prevGrade.math === nextGrade.math
+        && prevGrade.total === nextGrade.total
+    );
 });
 
 const ExamCountdown = ({ isDarkMode }) => {
@@ -880,6 +900,7 @@ export default function App() {
   const [teacherMessageLoading, setTeacherMessageLoading] = useState(false);
   const [teacherMessageSaving, setTeacherMessageSaving] = useState(false);
   const [teacherStudentMessageSavingId, setTeacherStudentMessageSavingId] = useState('');
+  const deferredQueryMonitorKeyword = useDeferredValue(queryMonitorKeyword);
     
   const [loading, setLoading] = useState(false);
   const [searchId, setSearchId] = useState('');
@@ -955,6 +976,29 @@ export default function App() {
       });
       return labels;
   }, [sortedAvailableDatesDesc]);
+
+  const selectedBatchWeekendID = useMemo(
+      () => (batchDate ? getTestDateID(batchDate) : ''),
+      [batchDate, getTestDateID]
+  );
+
+  const teacherDateCards = useMemo(() => {
+      return sortedAvailableDatesDesc.map((date, idx) => {
+          const phaseId = resolvePhaseByDate(date, sortedAvailableDatesAsc);
+          const phaseLabel = phaseId === 'p1' ? '第一階段' : phaseId === 'mock' ? '模考班' : '第二階段';
+          const weekendID = getTestDateID(date);
+          return {
+              date,
+              label: weekendLabelByDate[date] || getWeekendDisplayLabel(date),
+              phaseId,
+              phaseLabel,
+              isLatest: idx === 0,
+              isSelected: teacherViewMode === 'batch' && Boolean(selectedBatchWeekendID) && weekendID === selectedBatchWeekendID
+          };
+      });
+  }, [sortedAvailableDatesDesc, sortedAvailableDatesAsc, weekendLabelByDate, teacherViewMode, selectedBatchWeekendID, getTestDateID]);
+
+  const latestAvailableDate = sortedAvailableDatesDesc[0] || '';
 
   const orderedWeekendIds = useMemo(() => {
       const ids = [];
@@ -3138,6 +3182,9 @@ export default function App() {
       };
   }, [batchRowsForDisplay, batchRiskAlerts]);
 
+  const shouldBuildQueryInsights =
+      mode === 'teacher' && teacherViewMode === 'batch' && batchInsightTab === 'query';
+
   const studentNameById = useMemo(() => {
       const map = {};
       allStudentsData.forEach((student) => {
@@ -3147,6 +3194,7 @@ export default function App() {
   }, [allStudentsData]);
 
   const queryEventTimeline = useMemo(() => {
+      if (!shouldBuildQueryInsights) return [];
       return queryEvents
           .map((event) => {
               const ts = Number.isFinite(event?.ts) ? event.ts : new Date(event?.at).getTime();
@@ -3163,9 +3211,10 @@ export default function App() {
           })
           .filter(Boolean)
           .sort((a, b) => a.ts - b.ts);
-  }, [queryEvents, studentNameById]);
+  }, [queryEvents, studentNameById, shouldBuildQueryInsights]);
 
   const queryEventsByDay = useMemo(() => {
+      if (!shouldBuildQueryInsights) return [];
       const grouped = {};
       queryEventTimeline.forEach((event) => {
           if (!grouped[event.dateKey]) {
@@ -3175,9 +3224,10 @@ export default function App() {
       });
       return Object.values(grouped)
           .sort((a, b) => b.dateKey.localeCompare(a.dateKey));
-  }, [queryEventTimeline]);
+  }, [queryEventTimeline, shouldBuildQueryInsights]);
 
   const queryStatsRows = useMemo(() => {
+      if (!shouldBuildQueryInsights) return [];
       const latestTsById = {};
       queryEventTimeline.forEach((event) => {
           latestTsById[event.id] = event.ts;
@@ -3201,17 +3251,19 @@ export default function App() {
               if (b.count !== a.count) return b.count - a.count;
               return b.latestTs - a.latestTs;
           });
-  }, [queryStatsById, studentNameById, queryEventTimeline]);
+  }, [queryStatsById, studentNameById, queryEventTimeline, shouldBuildQueryInsights]);
 
   const latestQueryTsById = useMemo(() => {
+      if (!shouldBuildQueryInsights) return {};
       const map = {};
       queryEventTimeline.forEach((event) => {
           map[event.id] = event.ts;
       });
       return map;
-  }, [queryEventTimeline]);
+  }, [queryEventTimeline, shouldBuildQueryInsights]);
 
   const queryClassCoverageRows = useMemo(() => {
+      if (!shouldBuildQueryInsights) return [];
       const rows = batchRowsForDisplay.map((row) => {
           const id = String(row.student.id || '').toUpperCase();
           const count = Number(queryStatsById[id] || 0);
@@ -3239,23 +3291,26 @@ export default function App() {
           if (b.count !== a.count) return b.count - a.count;
           return b.latestTs - a.latestTs;
       });
-  }, [batchRowsForDisplay, queryStatsById, latestQueryTsById]);
+  }, [batchRowsForDisplay, queryStatsById, latestQueryTsById, shouldBuildQueryInsights]);
 
   const queryClassStudentIdSet = useMemo(() => {
+      if (!shouldBuildQueryInsights) return new Set();
       const idSet = new Set();
       queryClassCoverageRows.forEach((row) => {
           const id = String(row.id || '').toUpperCase();
           if (id) idSet.add(id);
       });
       return idSet;
-  }, [queryClassCoverageRows]);
+  }, [queryClassCoverageRows, shouldBuildQueryInsights]);
 
   const queryMonitorBaseRows = useMemo(() => {
+      if (!shouldBuildQueryInsights) return [];
       return queryMonitorScope === 'class' ? queryClassCoverageRows : queryStatsRows;
-  }, [queryMonitorScope, queryClassCoverageRows, queryStatsRows]);
+  }, [queryMonitorScope, queryClassCoverageRows, queryStatsRows, shouldBuildQueryInsights]);
 
   const queryStatsRowsFiltered = useMemo(() => {
-      const keyword = queryMonitorKeyword.trim();
+      if (!shouldBuildQueryInsights) return [];
+      const keyword = deferredQueryMonitorKeyword.trim();
       const hasKeyword = keyword.length > 0;
       const upperKeyword = keyword.toUpperCase();
       const lowerKeyword = keyword.toLowerCase();
@@ -3285,10 +3340,11 @@ export default function App() {
           return b.latestTs - a.latestTs;
       });
       return rows;
-  }, [queryMonitorBaseRows, queryMonitorKeyword, queryMonitorSort]);
+  }, [queryMonitorBaseRows, deferredQueryMonitorKeyword, queryMonitorSort, shouldBuildQueryInsights]);
 
   const queryEventsByDayFiltered = useMemo(() => {
-      const keyword = queryMonitorKeyword.trim();
+      if (!shouldBuildQueryInsights) return [];
+      const keyword = deferredQueryMonitorKeyword.trim();
       const hasKeyword = keyword.length > 0;
       const upperKeyword = keyword.toUpperCase();
       const lowerKeyword = keyword.toLowerCase();
@@ -3311,14 +3367,23 @@ export default function App() {
               return { ...day, items };
           })
           .filter((day) => day.items.length > 0);
-  }, [queryEventsByDay, queryMonitorDateFilter, queryMonitorKeyword, queryMonitorScope, queryClassStudentIdSet]);
+  }, [queryEventsByDay, queryMonitorDateFilter, deferredQueryMonitorKeyword, queryMonitorScope, queryClassStudentIdSet, shouldBuildQueryInsights]);
 
   const queryFilteredEventList = useMemo(
-      () => queryEventsByDayFiltered.flatMap((day) => day.items),
-      [queryEventsByDayFiltered]
+      () => (shouldBuildQueryInsights ? queryEventsByDayFiltered.flatMap((day) => day.items) : []),
+      [queryEventsByDayFiltered, shouldBuildQueryInsights]
   );
 
   const queryFilteredSummary = useMemo(() => {
+      if (!shouldBuildQueryInsights) {
+          return {
+              totalQueries: 0,
+              uniqueStudentCount: 0,
+              peakHourLabel: '--',
+              peakHourCount: 0,
+              latestDayCount: 0
+          };
+      }
       const hourCounts = Array.from({ length: 24 }, (_, hour) => ({ hour, count: 0 }));
       queryFilteredEventList.forEach((event) => {
           const hour = new Date(event.ts).getHours();
@@ -3339,9 +3404,10 @@ export default function App() {
           peakHourCount: peak?.count || 0,
           latestDayCount: queryEventsByDayFiltered[0]?.items.length || 0
       };
-  }, [queryFilteredEventList, queryStatsRowsFiltered, queryEventsByDayFiltered]);
+  }, [queryFilteredEventList, queryStatsRowsFiltered, queryEventsByDayFiltered, shouldBuildQueryInsights]);
 
   const queryRecentWindowSummary = useMemo(() => {
+      if (!shouldBuildQueryInsights) return { last24h: 0, last3d: 0, last7d: 0 };
       const now = Date.now();
       const oneDayAgo = now - (24 * 60 * 60 * 1000);
       const threeDaysAgo = now - (3 * 24 * 60 * 60 * 1000);
@@ -3363,9 +3429,19 @@ export default function App() {
       });
 
       return { last24h, last3d, last7d };
-  }, [queryFilteredEventList]);
+  }, [queryFilteredEventList, shouldBuildQueryInsights]);
 
   const queryBiHourBuckets = useMemo(() => {
+      if (!shouldBuildQueryInsights) {
+          return Array.from({ length: 12 }, (_, index) => ({
+              key: index,
+              startHour: index * 2,
+              endHour: (index * 2) + 2,
+              count: 0,
+              label: `${String(index * 2).padStart(2, '0')}-${String(((index * 2) + 2) % 24).padStart(2, '0')}`,
+              ratio: 0
+          }));
+      }
       const buckets = Array.from({ length: 12 }, (_, index) => ({
           key: index,
           startHour: index * 2,
@@ -3386,9 +3462,10 @@ export default function App() {
           label: `${String(bucket.startHour).padStart(2, '0')}-${String(bucket.endHour % 24).padStart(2, '0')}`,
           ratio: bucket.count / safeMax
       }));
-  }, [queryFilteredEventList]);
+  }, [queryFilteredEventList, shouldBuildQueryInsights]);
 
   const queryDailyTrend = useMemo(() => {
+      if (!shouldBuildQueryInsights) return [];
       const trendDays = [...queryEventsByDayFiltered].slice(0, 14).reverse();
       const maxCount = trendDays.reduce((max, day) => Math.max(max, day.items.length), 0);
       const safeMax = maxCount > 0 ? maxCount : 1;
@@ -3398,9 +3475,10 @@ export default function App() {
           count: day.items.length,
           ratio: day.items.length / safeMax
       }));
-  }, [queryEventsByDayFiltered]);
+  }, [queryEventsByDayFiltered, shouldBuildQueryInsights]);
 
   const queryDayCountByIdMap = useMemo(() => {
+      if (!shouldBuildQueryInsights) return {};
       const map = {};
       queryEventsByDayFiltered.forEach((day) => {
           const dayCount = {};
@@ -3415,9 +3493,10 @@ export default function App() {
           });
       });
       return map;
-  }, [queryEventsByDayFiltered]);
+  }, [queryEventsByDayFiltered, shouldBuildQueryInsights]);
 
   const queryRecent48hCountById = useMemo(() => {
+      if (!shouldBuildQueryInsights) return {};
       const cutoff = Date.now() - (48 * 60 * 60 * 1000);
       const map = {};
       queryFilteredEventList.forEach((event) => {
@@ -3427,9 +3506,10 @@ export default function App() {
           map[id] = (map[id] || 0) + 1;
       });
       return map;
-  }, [queryFilteredEventList]);
+  }, [queryFilteredEventList, shouldBuildQueryInsights]);
 
   const queryMonitorAlertRows = useMemo(() => {
+      if (!shouldBuildQueryInsights) return [];
       const now = Date.now();
       return queryStatsRowsFiltered
           .map((row) => {
@@ -3490,26 +3570,30 @@ export default function App() {
               return b.latestTs - a.latestTs;
           })
           .slice(0, 12);
-  }, [queryStatsRowsFiltered, queryDayCountByIdMap, queryRecent48hCountById]);
+  }, [queryStatsRowsFiltered, queryDayCountByIdMap, queryRecent48hCountById, shouldBuildQueryInsights]);
 
   const queryClassCoverageSummary = useMemo(() => {
+      if (!shouldBuildQueryInsights) {
+          return { total: 0, queried: 0, unqueried: 0, coverageRate: 0 };
+      }
       const total = queryClassCoverageRows.length;
       const queried = queryClassCoverageRows.filter((row) => row.count > 0).length;
       const unqueried = Math.max(total - queried, 0);
       const coverageRate = total > 0 ? Math.round((queried / total) * 100) : 0;
       return { total, queried, unqueried, coverageRate };
-  }, [queryClassCoverageRows]);
+  }, [queryClassCoverageRows, shouldBuildQueryInsights]);
 
   const queryClassUnqueriedPreview = useMemo(
-      () => queryClassCoverageRows.filter((row) => row.count === 0).slice(0, 12),
-      [queryClassCoverageRows]
+      () => (shouldBuildQueryInsights ? queryClassCoverageRows.filter((row) => row.count === 0).slice(0, 12) : []),
+      [queryClassCoverageRows, shouldBuildQueryInsights]
   );
 
   useEffect(() => {
+      if (!shouldBuildQueryInsights) return;
       if (queryMonitorDateFilter === 'all') return;
       const exists = queryEventsByDay.some((day) => day.dateKey === queryMonitorDateFilter);
       if (!exists) setQueryMonitorDateFilter('all');
-  }, [queryMonitorDateFilter, queryEventsByDay]);
+  }, [queryMonitorDateFilter, queryEventsByDay, shouldBuildQueryInsights]);
 
   const queryStatsLastResetText = useMemo(() => {
       if (!queryStatsLastResetAt) return '尚未初始化';
@@ -3776,6 +3860,15 @@ export default function App() {
                             </p>
                         </div>
                         <div className="flex gap-2 items-center">
+                            {teacherViewMode === 'batch' && latestAvailableDate && batchDate !== latestAvailableDate && (
+                                <button
+                                    type="button"
+                                    onClick={() => setBatchDate(latestAvailableDate)}
+                                    className={`px-3 py-2 rounded-xl text-[11px] font-bold transition-colors border shadow-sm ${darkMode ? 'bg-slate-800 text-slate-200 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+                                >
+                                    切到最新
+                                </button>
+                            )}
                             <input type="text" placeholder="MM/DD" className={`w-24 p-2.5 rounded-xl text-xs text-center font-bold outline-none transition-colors tracking-widest border shadow-sm ${darkMode ? 'bg-[#020617]/50 border-white/10 text-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20' : 'bg-white border-slate-200 text-slate-700 focus:border-blue-400'}`} value={newDateInput} onChange={e=>setNewDateInput(e.target.value)} />
                             <button onClick={addDate} className={`px-3.5 py-2.5 rounded-xl transition-colors shadow-sm border ${darkMode ? 'bg-slate-800 text-white hover:bg-slate-700 border-white/10' : 'bg-slate-800 text-white hover:bg-slate-700 border-slate-800'}`}>
                                 <Plus className="w-4 h-4"/>
@@ -3786,9 +3879,8 @@ export default function App() {
                     <div className={`mt-3.5 rounded-2xl border p-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-white/85 border-slate-200/80'}`}>
                         <div className="overflow-x-auto pb-1">
                             <div className="inline-flex gap-2.5 min-w-full">
-                                {sortedAvailableDatesDesc.map((d, idx) => {
-                                    const phaseId = resolvePhaseByDate(d, sortedAvailableDatesAsc);
-                                    const phaseLabel = phaseId === 'p1' ? '第一階段' : phaseId === 'mock' ? '模考班' : '第二階段';
+                                {teacherDateCards.map((item) => {
+                                    const { date, label, phaseId, phaseLabel, isLatest, isSelected } = item;
                                     const phaseTagClass = phaseId === 'p1'
                                         ? (darkMode ? 'bg-cyan-500/15 text-cyan-200 border-cyan-300/25' : 'bg-cyan-50 text-cyan-700 border-cyan-200')
                                         : phaseId === 'mock'
@@ -3796,19 +3888,26 @@ export default function App() {
                                             : (darkMode ? 'bg-emerald-500/15 text-emerald-200 border-emerald-300/25' : 'bg-emerald-50 text-emerald-700 border-emerald-200');
 
                                     return (
-                                        <div key={d} className={`min-w-[126px] rounded-2xl border px-3 py-2.5 transition-all ${darkMode ? 'bg-slate-800/88 border-white/10' : 'bg-white border-slate-200/80 shadow-[0_8px_18px_rgba(15,23,42,0.06)]'}`}>
+                                        <button
+                                            key={date}
+                                            type="button"
+                                            onClick={() => {
+                                                if (teacherViewMode === 'batch' && date !== batchDate) setBatchDate(date);
+                                            }}
+                                            className={`text-left min-w-[126px] rounded-2xl border px-3 py-2.5 transition-all ${darkMode ? 'bg-slate-800/88 border-white/10 hover:border-emerald-300/30' : 'bg-white border-slate-200/80 shadow-[0_8px_18px_rgba(15,23,42,0.06)] hover:border-emerald-200'} ${isSelected ? (darkMode ? 'ring-1 ring-emerald-300/40 border-emerald-300/40' : 'ring-2 ring-emerald-100 border-emerald-300/60') : ''}`}
+                                        >
                                             <div className="flex items-start justify-between gap-2">
                                                 <span className={`text-[9px] font-black px-2 py-0.5 rounded-full border tracking-wide ${phaseTagClass}`}>{phaseLabel}</span>
-                                                {idx === 0 && (
+                                                {isLatest && (
                                                     <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${darkMode ? 'bg-blue-500/20 text-blue-200' : 'bg-blue-100 text-blue-700'}`}>最新</span>
                                                 )}
                                             </div>
                                             <div className={`mt-2 text-xs font-black tracking-wide ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>
-                                                {weekendLabelByDate[d] || getWeekendDisplayLabel(d)}
+                                                {label}
                                             </div>
                                             <div className="mt-2 flex justify-end">
                                                 {canDeleteDates ? (
-                                                    <button onClick={() => handleDeleteDate(d)} className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg transition-colors ${darkMode ? 'text-rose-300 hover:text-rose-200 bg-rose-500/10' : 'text-rose-600 hover:text-rose-700 bg-rose-50'}`} title="危險操作：刪除日期">
+                                                    <button onClick={(e) => { e.stopPropagation(); handleDeleteDate(date); }} className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg transition-colors ${darkMode ? 'text-rose-300 hover:text-rose-200 bg-rose-500/10' : 'text-rose-600 hover:text-rose-700 bg-rose-50'}`} title="危險操作：刪除日期">
                                                         <X className="w-3 h-3"/> 刪除
                                                     </button>
                                                 ) : (
@@ -3817,7 +3916,7 @@ export default function App() {
                                                     </span>
                                                 )}
                                             </div>
-                                        </div>
+                                        </button>
                                     );
                                 })}
                             </div>

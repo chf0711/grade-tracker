@@ -24,7 +24,7 @@ export default function ParentAbilityRadar({
 }) {
   if (!data || !data.length) return null;
 
-  const wrapperClass = `mt-3 mb-7 rounded-3xl border px-3 sm:px-4 pt-4 pb-3 ${isDarkMode ? 'bg-[#0f1914]/75 border-emerald-200/18' : 'bg-white/92 border-slate-200/80 shadow-[0_12px_28px_rgba(15,23,42,0.07)]'}`;
+  const wrapperClass = `mt-3 mb-7 rounded-3xl border px-4 pt-4 pb-3 ${isDarkMode ? 'bg-[#0f1914]/75 border-emerald-200/18' : 'bg-white/92 border-slate-200/80'}`;
   const subjectRows = data.map((item) => {
     const delta = Number((item.student - item.classAvg).toFixed(1));
     const relativePct = item.classAvg > 0 ? Number(((delta / item.classAvg) * 100).toFixed(1)) : 0;
@@ -46,17 +46,17 @@ export default function ParentAbilityRadar({
 
   return (
     <div className={wrapperClass}>
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3 px-1">
-        <div className="min-w-0">
-          <h4 className={`text-sm font-black tracking-wide ${isDarkMode ? 'text-emerald-100' : 'text-slate-800'}`}>三科能力輪廓</h4>
+      <div className="flex items-center justify-between mb-3 px-1">
+        <div>
+          <h4 className={`text-sm font-black tracking-wide ${isDarkMode ? 'text-emerald-100' : 'text-slate-800'}`}>三科能力雷達圖</h4>
           <p className={`text-[11px] font-semibold mt-0.5 ${isDarkMode ? 'text-emerald-200/75' : 'text-slate-500'}`}>{phaseName || '目前階段'} | 樣本 {recordCount} 次 | 對照全體中位數</p>
         </div>
-        <div className={`w-full sm:w-auto flex items-center justify-start sm:justify-end gap-3 text-[10px] font-bold ${isDarkMode ? 'text-emerald-200/80' : 'text-slate-500'}`}>
+        <div className={`flex items-center gap-3 text-[10px] font-bold ${isDarkMode ? 'text-emerald-200/80' : 'text-slate-500'}`}>
           <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />個人</span>
           <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-400" />全體中位數</span>
         </div>
       </div>
-      <div className="h-64 sm:h-72 lg:h-[24rem] w-full">
+      <div className="h-72 lg:h-[24rem] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <RadarChart data={data} outerRadius="88%">
             <PolarGrid stroke={isDarkMode ? 'rgba(167,243,208,0.24)' : 'rgba(148,163,184,0.28)'} />
@@ -97,15 +97,15 @@ export default function ParentAbilityRadar({
           <div className={`text-sm font-black ${trailingCount > 0 ? 'text-amber-500' : (isDarkMode ? 'text-slate-200' : 'text-slate-700')}`}>{trailingCount} / 3</div>
         </div>
       </div>
-      <div className={`mt-2 rounded-2xl border overflow-x-auto ${isDarkMode ? 'border-white/10' : 'border-slate-200/70'}`}>
-        <div className={`min-w-[24rem] grid grid-cols-[1fr_auto_auto_auto_auto] text-[10px] font-bold px-3 py-2 ${isDarkMode ? 'bg-white/5 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>
+      <div className={`mt-2 rounded-2xl border overflow-hidden ${isDarkMode ? 'border-white/10' : 'border-slate-200/70'}`}>
+        <div className={`grid grid-cols-[1fr_auto_auto_auto_auto] text-[10px] font-bold px-3 py-2 ${isDarkMode ? 'bg-white/5 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>
           <span>科目</span>
           <span>個人</span>
           <span>中位數</span>
           <span>差值</span>
           <span>判讀</span>
         </div>
-        <div className={`min-w-[24rem] ${isDarkMode ? 'bg-[#0b1510]' : 'bg-white'}`}>
+        <div className={isDarkMode ? 'bg-[#0b1510]' : 'bg-white'}>
           {subjectRows.map((row) => (
             <div key={row.subject} className={`grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-2 px-3 py-2.5 text-xs border-t ${isDarkMode ? 'border-white/5' : 'border-slate-100'}`}>
               <span className={`font-bold ${isDarkMode ? 'text-slate-100' : 'text-slate-700'}`}>{row.subject}</span>

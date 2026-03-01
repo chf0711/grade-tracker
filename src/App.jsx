@@ -31,7 +31,6 @@ const TEACHER_ROLE = Object.freeze({
 const SECURITY_CODE = String.fromCharCode(49, 49, 48, 55);
 const QUERY_COUNT_RESET_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000;
 const MAX_QUERY_EVENTS = 3000;
-const MAX_IMPORT_UNIQUE_DATES = 5;
 const TEACHER_MESSAGE_DOC_ID = 'teacher_parent_message_v1';
 const SETTINGS_CACHE_TTL_MS = 10 * 60 * 1000;
 const LOCAL_CACHE_KEYS = Object.freeze({
@@ -119,23 +118,12 @@ const normalizeDateToken = (dateStr) => {
         .replace(/-/g, '/')
         .replace(/[^0-9/]/g, '')
         .replace(/\/+/g, '/');
-    let m = Number.NaN;
-    let d = Number.NaN;
-
-    if (!clean.includes('/')) {
-        if (!/^\d{3,4}$/.test(clean)) return '';
-        const monthPart = clean.length === 3 ? clean.slice(0, 1) : clean.slice(0, 2);
-        const dayPart = clean.slice(-2);
-        m = parseInt(monthPart, 10);
-        d = parseInt(dayPart, 10);
-    } else {
-        const parts = clean.split('/').filter(Boolean);
-        if (parts.length !== 2) return '';
-        const [mStr, dStr] = parts;
-        m = parseInt(mStr, 10);
-        d = parseInt(dStr, 10);
-    }
-
+    if (!clean.includes('/')) return '';
+    const parts = clean.split('/').filter(Boolean);
+    if (parts.length !== 2) return '';
+    const [mStr, dStr] = parts;
+    const m = parseInt(mStr, 10);
+    const d = parseInt(dStr, 10);
     if (Number.isNaN(m) || Number.isNaN(d)) return '';
     if (m < 1 || m > 12 || d < 1 || d > 31) return '';
     const y = m >= 4 ? 2025 : 2026;
@@ -243,7 +231,7 @@ const isConsecutiveDate = (date1, date2) => {
 // 取得測驗日期 ID：如果日期與 availableDates 中某個日期連續，則返回較早的日期作為統一 ID
 // 如果沒有提供 availableDates，則使用舊的週末邏輯（向後兼容）
 const getWeekendID = (dateStr, availableDates = null) => {
-    if (!dateStr) return '';
+    if (!dateStr || !String(dateStr).includes('/')) return '';
     
     try {
         const currentDate = parseDateStr(dateStr);
@@ -319,11 +307,11 @@ const PHASES = [
     { id: 'mock', name: '模考班' } 
 ];
 const BATCH_INSIGHT_TABS = [
-    { id: 'grades', label: '成績總覽' },
-    { id: 'risk', label: '關注名單' },
-    { id: 'heatmap', label: '成績光譜' },
-    { id: 'messages', label: '導師寄語' },
-    { id: 'query', label: '查詢洞察' }
+    { id: 'grades', label: '成績總表' },
+    { id: 'risk', label: '風險預警' },
+    { id: 'heatmap', label: '成績熱點圖' },
+    { id: 'messages', label: '老師的話' },
+    { id: 'query', label: '查詢監控' }
 ];
 
 const COLORS = {
@@ -1622,11 +1610,11 @@ export default function App() {
           setTeacherGlobalMessageDraft(normalizedGlobal);
           setTeacherStudentMessages(normalizedByStudent);
           setTeacherStudentMessageDrafts(normalizedByStudent);
-          setStatusMsg(normalizedGlobal ? '已儲存全班導師寄語' : '已清空全班導師寄語');
+          setStatusMsg(normalizedGlobal ? '已儲存全班老師的話' : '已清空全班老師的話');
           setTimeout(() => setStatusMsg(''), 2000);
       } catch (e) {
           console.error('Save global teacher message error:', e);
-          setStatusMsg('全班導師寄語儲存失敗');
+          setStatusMsg('全班老師的話儲存失敗');
           setTimeout(() => setStatusMsg(''), 2000);
       } finally {
           setTeacherMessageSaving(false);
@@ -1657,11 +1645,11 @@ export default function App() {
               else delete next[normalizedId];
               return next;
           });
-          setStatusMsg(draftMessage ? `已儲存 ${normalizedId} 的個別導師寄語` : `已清空 ${normalizedId} 的個別導師寄語`);
+          setStatusMsg(draftMessage ? `已儲存 ${normalizedId} 的個別老師的話` : `已清空 ${normalizedId} 的個別老師的話`);
           setTimeout(() => setStatusMsg(''), 2000);
       } catch (e) {
           console.error('Save student teacher message error:', e);
-          setStatusMsg('個別導師寄語儲存失敗');
+          setStatusMsg('個別老師的話儲存失敗');
           setTimeout(() => setStatusMsg(''), 2000);
       } finally {
           setTeacherStudentMessageSavingId('');
@@ -2039,7 +2027,6 @@ export default function App() {
 
         const newStudentsMap = allStudentsData.reduce((acc, s) => { acc[s.id] = { ...s, grades: { ...s.grades } }; return acc; }, {});
         const newDates = new Set(availableDates);
-        const importedDateSet = new Set();
         let importCount = 0;
         let lastImportedDate = '';
         let skippedInvalidDateCount = 0;
@@ -2085,12 +2072,6 @@ export default function App() {
           if (!normalizedImportDate) {
               skippedInvalidDateCount += 1;
               continue;
-          }
-          importedDateSet.add(normalizedImportDate);
-          if (importedDateSet.size > MAX_IMPORT_UNIQUE_DATES) {
-              setStatusMsg(`匯入失敗：檔案含有 ${importedDateSet.size} 個不同日期，最多只能匯入 ${MAX_IMPORT_UNIQUE_DATES} 個日期`);
-              setTimeout(() => setStatusMsg(''), 2600);
-              return;
           }
 
           const getVal = (idx) => {
@@ -2477,7 +2458,7 @@ export default function App() {
           { 指標: '平均 PR', 數值: batchWeeklySummary?.avgPR !== null && batchWeeklySummary?.avgPR !== undefined ? Number(f1(batchWeeklySummary.avgPR)) : '' },
           { 指標: '平均錄取機率(%)', 數值: batchWeeklySummary?.avgProb !== null && batchWeeklySummary?.avgProb !== undefined ? Number(f1(batchWeeklySummary.avgProb)) : '' },
           { 指標: '風險學生數', 數值: batchWeeklySummary?.riskCount ?? batchRiskAlerts.length },
-          { 指標: 'PR走弱人數', 數值: batchWeeklySummary?.prDropCount ?? 0 },
+          { 指標: 'PR下滑人數', 數值: batchWeeklySummary?.prDropCount ?? 0 },
           { 指標: '匯出時間', 數值: new Date().toLocaleString() }
       ];
       const summarySheet = window.XLSX.utils.json_to_sheet(summaryRows);
@@ -2575,7 +2556,7 @@ export default function App() {
       const safeClass = String(teacherClassFilter).replace(/[^\w\u4e00-\u9fa5-]/g, '');
       const safeDate = String(batchDate || '').replace('/', '-');
       window.XLSX.writeFile(workbook, `weekly_report_${safeDate}_${safeClass}.xlsx`);
-      setStatusMsg('已匯出週報 Excel');
+      setStatusMsg('已下載週報 Excel');
       setTimeout(() => setStatusMsg(''), 2000);
   };
 
@@ -3746,13 +3727,13 @@ export default function App() {
   if (!db) return <div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400 text-sm font-mono tracking-widest uppercase">Initializing...</div>;
 
   return (
-    <div className={`${isLandingMode ? 'h-[100dvh] min-h-[100svh] overflow-hidden' : 'min-h-screen pb-24 sm:pb-32 overflow-x-hidden'} font-sans antialiased transition-colors duration-500 ease-in-out relative ${darkMode ? 'bg-[#111714] text-slate-200' : 'bg-transparent text-slate-800'}`}>
+    <div className={`${isLandingMode ? 'h-[100dvh] min-h-[100svh] overflow-hidden' : 'min-h-screen pb-32 overflow-x-hidden'} font-sans antialiased transition-colors duration-500 ease-in-out relative ${darkMode ? 'bg-[#111714] text-slate-200' : 'bg-transparent text-slate-800'}`}>
       <div
         aria-hidden="true"
         className="fixed inset-0 pointer-events-none z-0 transition-opacity duration-500"
         style={{
           opacity: sharedBackgroundOpacity,
-          backgroundImage: 'repeating-linear-gradient(0deg, rgba(148,163,184,0.09) 0px, rgba(148,163,184,0.09) 1px, transparent 1px, transparent 24px), repeating-linear-gradient(90deg, rgba(148,163,184,0.07) 0px, rgba(148,163,184,0.07) 1px, transparent 1px, transparent 24px), radial-gradient(circle at 14% 18%, rgba(16,185,129,0.18) 0%, transparent 42%), radial-gradient(circle at 84% 11%, rgba(14,165,233,0.2) 0%, transparent 40%), radial-gradient(circle at 78% 82%, rgba(59,130,246,0.14) 0%, transparent 36%), linear-gradient(140deg, #f8fbff 0%, #eef7ff 46%, #edfdf5 100%)'
+          backgroundImage: 'repeating-linear-gradient(0deg, rgba(148,163,184,0.1) 0px, rgba(148,163,184,0.1) 1px, transparent 1px, transparent 24px), repeating-linear-gradient(90deg, rgba(148,163,184,0.08) 0px, rgba(148,163,184,0.08) 1px, transparent 1px, transparent 24px), radial-gradient(circle at 12% 15%, rgba(99,102,241,0.22) 0%, transparent 40%), radial-gradient(circle at 86% 12%, rgba(14,165,233,0.22) 0%, transparent 40%), radial-gradient(circle at 80% 84%, rgba(236,72,153,0.16) 0%, transparent 36%), linear-gradient(138deg, #f8fafc 0%, #f3f7ff 46%, #eefcf5 100%)'
         }}
       />
 
@@ -3763,21 +3744,21 @@ export default function App() {
       )}
 
       {/* Header */}
-      <header className={`fixed top-0 w-full backdrop-blur-xl z-30 border-b transition-all duration-300 safe-top ${darkMode ? 'bg-[#121a17]/88 border-emerald-200/10 shadow-lg shadow-black/25' : 'bg-[linear-gradient(108deg,rgba(255,255,255,0.78)_0%,rgba(244,252,248,0.84)_52%,rgba(241,247,255,0.8)_100%)] border-white/75 shadow-[0_14px_36px_rgba(15,23,42,0.12)]'}`}>
-        <div className="max-w-5xl mx-auto px-3 sm:px-6 h-[4.25rem] sm:h-16 flex justify-between items-center relative z-10">
+      <header className={`fixed top-0 w-full backdrop-blur-xl z-30 border-b transition-all duration-300 ${darkMode ? 'bg-[#121a17]/88 border-emerald-200/10 shadow-lg shadow-black/25' : 'bg-[linear-gradient(108deg,rgba(255,255,255,0.78)_0%,rgba(244,252,248,0.84)_52%,rgba(241,247,255,0.8)_100%)] border-white/75 shadow-[0_14px_36px_rgba(15,23,42,0.12)]'}`}>
+        <div className="max-w-5xl mx-auto px-6 h-16 flex justify-between items-center relative z-10">
           <div
-            className="flex items-center gap-2 sm:gap-3 cursor-pointer group"
+            className="flex items-center gap-3 cursor-pointer group"
             onClick={() => runWithBatchDiscardGuard(() => setMode('landing'))}
           >
-            <div className={`p-2 rounded-xl transition-transform group-hover:scale-105 duration-300 ${darkMode ? 'bg-emerald-500/10 text-emerald-200 ring-1 ring-emerald-300/35' : 'bg-white/74 text-emerald-700 ring-1 ring-white/90 shadow-sm'}`}><GraduationCap className="h-4.5 w-4.5 sm:h-5 sm:w-5" /></div>
+            <div className={`p-2 rounded-xl transition-transform group-hover:scale-105 duration-300 ${darkMode ? 'bg-emerald-500/10 text-emerald-200 ring-1 ring-emerald-300/35' : 'bg-white/74 text-emerald-700 ring-1 ring-white/90 shadow-sm'}`}><GraduationCap className="h-5 w-5" /></div>
             <div>
-                <h1 className={`text-[1.28rem] sm:text-2xl font-black tracking-[0.14em] sm:tracking-widest font-serif uppercase leading-none bg-clip-text text-transparent ${darkMode ? 'bg-gradient-to-r from-emerald-50 via-emerald-200 to-lime-200' : 'bg-[linear-gradient(112deg,#0f172a_0%,#047857_34%,#0f766e_66%,#0369a1_100%)] drop-shadow-[0_1px_0_rgba(255,255,255,0.55)]'}`}>
+                <h1 className={`text-2xl font-black tracking-widest font-serif uppercase leading-none bg-clip-text text-transparent ${darkMode ? 'bg-gradient-to-r from-emerald-50 via-emerald-200 to-lime-200' : 'bg-[linear-gradient(112deg,#0f172a_0%,#047857_34%,#0f766e_66%,#0369a1_100%)] drop-shadow-[0_1px_0_rgba(255,255,255,0.55)]'}`}>
                   HSINRU
                 </h1>
-                <p className="hidden sm:block text-[9px] text-slate-500/90 font-bold tracking-widest uppercase mt-0.5">Grade Tracker</p>
+                <p className="text-[9px] text-slate-500/90 font-bold tracking-widest uppercase mt-0.5">Grade Tracker</p>
             </div>
           </div>
-          <div className="flex items-center gap-1.5 sm:gap-2">
+          <div className="flex items-center gap-2">
                 <button
                   onClick={() => runWithBatchDiscardGuard(() => {
                     if (isAuthenticated) {
@@ -3788,7 +3769,7 @@ export default function App() {
                       setMode('teacher_login');
                     }
                   })}
-                  className={`px-3 sm:px-4 py-1.5 rounded-full text-[11px] sm:text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : 'text-slate-600 hover:text-slate-800 bg-white/60 border border-white/70 hover:bg-white/85'}`}
+                  className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : 'text-slate-600 hover:text-slate-800 bg-white/60 border border-white/70 hover:bg-white/85'}`}
                 >
                   {isAuthenticated ? '後台' : '老師'}
                 </button>
@@ -3798,22 +3779,22 @@ export default function App() {
                     setSearchError('');
                     setMode('parent');
                   })}
-                  className={`px-3 sm:px-4 py-1.5 rounded-full text-[11px] sm:text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : 'text-slate-600 hover:text-slate-800 bg-white/60 border border-white/70 hover:bg-white/85'}`}
+                  className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : 'text-slate-600 hover:text-slate-800 bg-white/60 border border-white/70 hover:bg-white/85'}`}
                 >
                   家長
                 </button>
             {isAuthenticated && (
-	                <button onClick={handleLogout} className="ml-0.5 sm:ml-1 p-1.5 sm:p-2 text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-full transition-colors" title="登出"><LogOut className="w-4.5 h-4.5 sm:w-5 sm:h-5"/></button>
-	            )}
-	          </div>
-	        </div>
-	      </header>
+                <button onClick={handleLogout} className="ml-1 p-2 text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-full transition-colors" title="登出"><LogOut className="w-5 h-5"/></button>
+            )}
+          </div>
+        </div>
+      </header>
 
-	      <main className={`${isLandingMode ? 'pt-[4.25rem]' : 'pt-[5.7rem] sm:pt-28'} px-3 sm:px-4 max-w-5xl mx-auto relative z-10`}>
-	        {mode === 'landing' && (
-	          <div className="landing-viewport h-[calc(100dvh-68px)] min-h-[calc(100svh-68px)] flex items-center justify-center">
-	            <div className="w-full max-w-4xl h-full">
-	              <div className="landing-shell relative z-10 h-full flex flex-col items-center justify-center px-[clamp(0.9rem,3.6vw,1.55rem)] py-[clamp(0.8rem,2.8vh,1.45rem)]">
+      <main className={`${isLandingMode ? 'pt-16' : 'pt-28'} px-4 max-w-5xl mx-auto relative z-10`}>
+        {mode === 'landing' && (
+          <div className="h-[calc(100dvh-64px)] min-h-[calc(100svh-64px)] flex items-center justify-center">
+            <div className="w-full max-w-4xl h-full">
+              <div className="relative z-10 h-full flex flex-col items-center justify-center px-[clamp(0.9rem,3.6vw,1.55rem)] py-[clamp(0.8rem,2.8vh,1.45rem)]">
                 <div className="px-4 py-1.5 rounded-full mb-[clamp(0.55rem,1.9vh,1.25rem)] border border-white/95 bg-white/92 text-[10px] tracking-[0.22em] font-black uppercase text-slate-600 shadow-[0_8px_24px_rgba(15,23,42,0.08)]">
                     HSINRU CENTRAL
                 </div>
@@ -3832,7 +3813,7 @@ export default function App() {
                           setMode('teacher_login');
                         }
                       })}
-	                      className="group w-full p-4 sm:p-5 rounded-[1.35rem] sm:rounded-[1.45rem] border flex items-center gap-3.5 sm:gap-4 transition-all duration-200 backdrop-blur-xl bg-white/94 border-white/95 shadow-[0_14px_32px_rgba(15,23,42,0.09)] hover:bg-white hover:border-sky-200/90 hover:-translate-y-0.5"
+                      className="group w-full p-5 rounded-[1.45rem] border flex items-center gap-4 transition-all duration-200 backdrop-blur-xl bg-white/94 border-white/95 shadow-[0_14px_32px_rgba(15,23,42,0.09)] hover:bg-white hover:border-sky-200/90 hover:-translate-y-0.5"
                     >
                       <div className="w-11 h-11 rounded-2xl flex items-center justify-center transition-colors bg-gradient-to-br from-indigo-100 to-sky-100 text-indigo-700"><LayoutDashboard className="w-5 h-5" /></div>
                       <div className="text-left flex-1"><h3 className="text-base font-black text-slate-800">老師通道</h3><p className="text-[11px] text-slate-500 mt-0.5">管理成績與設定</p></div>
@@ -3844,10 +3825,10 @@ export default function App() {
                         setSearchError('');
                         setMode('parent');
                       })}
-	                      className="group w-full p-4 sm:p-5 rounded-[1.35rem] sm:rounded-[1.45rem] border flex items-center gap-3.5 sm:gap-4 transition-all duration-200 backdrop-blur-xl bg-white/94 border-white/95 shadow-[0_14px_32px_rgba(15,23,42,0.09)] hover:bg-white hover:border-emerald-200/90 hover:-translate-y-0.5"
+                      className="group w-full p-5 rounded-[1.45rem] border flex items-center gap-4 transition-all duration-200 backdrop-blur-xl bg-white/94 border-white/95 shadow-[0_14px_32px_rgba(15,23,42,0.09)] hover:bg-white hover:border-emerald-200/90 hover:-translate-y-0.5"
                     >
                       <div className="w-11 h-11 rounded-2xl flex items-center justify-center transition-colors bg-gradient-to-br from-sky-100 to-emerald-100 text-sky-700"><BarChart3 className="w-5 h-5" /></div>
-                      <div className="text-left flex-1"><h3 className="text-base font-black text-slate-800">家長洞察</h3><p className="text-[11px] text-slate-500 mt-0.5">輸入學號查看學習分析</p></div>
+                      <div className="text-left flex-1"><h3 className="text-base font-black text-slate-800">家長查詢</h3><p className="text-[11px] text-slate-500 mt-0.5">輸入學號查看分析</p></div>
                       <ChevronRight className="w-4.5 h-4.5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
                    </button>
                 </div>
@@ -3875,16 +3856,16 @@ export default function App() {
 
         {mode === 'teacher' && (
           <div className="space-y-7">
-            <div className={`p-4 sm:p-6 rounded-[1.6rem] sm:rounded-[2rem] border backdrop-blur-2xl relative overflow-hidden ${darkMode ? 'bg-[#0f172a]/70 border-white/10 shadow-xl shadow-black/20 ring-1 ring-white/5' : 'bg-white border-white shadow-[0_24px_52px_rgba(15,23,42,0.1)]'}`}>
+            <div className={`p-6 rounded-[2rem] border backdrop-blur-2xl relative overflow-hidden ${darkMode ? 'bg-[#0f172a]/70 border-white/10 shadow-xl shadow-black/20 ring-1 ring-white/5' : 'bg-white border-white shadow-[0_24px_52px_rgba(15,23,42,0.1)]'}`}>
                 <div className={`absolute inset-x-0 top-0 h-1 ${darkMode ? 'bg-emerald-300/35' : 'bg-gradient-to-r from-sky-500 via-emerald-500 to-indigo-500'}`} />
                 {isLimitedTeacherRole && (
                     <div className={`mb-4 mt-1 inline-flex items-center gap-2 text-[10px] font-black tracking-widest uppercase px-3 py-1.5 rounded-full border ${darkMode ? 'bg-amber-500/10 border-amber-300/25 text-amber-200' : 'bg-amber-50 border-amber-200 text-amber-700'}`}>
                         2491212 權限：唯讀成績
                     </div>
                 )}
-                <div className="flex flex-wrap justify-between items-center gap-2.5 mb-4 pt-1">
-                    <div className={`flex items-center gap-2 font-black tracking-wide ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}><Calendar className="w-4 h-4 text-blue-500"/>測驗檔期</div>
-                    <div className="flex items-center gap-2">
+                <div className="flex justify-between items-center mb-4 pt-1">
+                    <div className={`flex items-center gap-2 font-black tracking-wide ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}><Calendar className="w-4 h-4 text-blue-500"/>管理日期</div>
+                    <div className="flex gap-2">
                          <input type="text" placeholder="MM/DD" className={`w-20 p-2 rounded-lg text-xs text-center font-bold outline-none transition-colors tracking-widest border shadow-sm ${darkMode ? 'bg-[#020617]/50 border-white/10 text-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20' : 'bg-white border-slate-200 text-slate-700 focus:border-blue-400'}`} value={newDateInput} onChange={e=>setNewDateInput(e.target.value)} />
                          <button onClick={addDate} className={`px-3 rounded-lg transition-colors shadow-sm ${darkMode ? 'bg-slate-800 text-white hover:bg-slate-700 border border-white/5' : 'bg-slate-800 text-white hover:bg-slate-700'}`}><Plus className="w-4 h-4"/></button>
                     </div>
@@ -3911,7 +3892,7 @@ export default function App() {
                        onClick={() => setTeacherViewMode('batch')}
                        className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${teacherViewMode==='batch' ? (darkMode ? 'bg-slate-800 text-blue-400 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-blue-700 shadow-sm') : 'text-slate-500'}`}
                      >
-                       班級總覽
+                       批量檢視
                      </button>
                      <button
                        onClick={() => {
@@ -3921,7 +3902,7 @@ export default function App() {
                        }}
                        className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${teacherViewMode==='single' ? (darkMode ? 'bg-slate-800 text-slate-200 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-700 shadow-sm') : 'text-slate-500'}`}
                      >
-                       個別編修
+                       個人檢視
                      </button>
                 </div>
 
@@ -3955,7 +3936,7 @@ export default function App() {
                                     <FileSpreadsheet className="w-4 h-4" /> 匯入 Excel（唯讀）
                                 </button>
                             )}
-                            <button onClick={() => setShowAvgModal(true)} className={`px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors border ${darkMode ? 'text-indigo-300 bg-indigo-500/10 border-indigo-500/20 hover:bg-indigo-500/20' : 'text-indigo-700 bg-white border-indigo-100 hover:bg-indigo-50 shadow-sm'}`}><Edit3 className="w-4 h-4"/> 基準設定</button>
+                            <button onClick={() => setShowAvgModal(true)} className={`px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors border ${darkMode ? 'text-indigo-300 bg-indigo-500/10 border-indigo-500/20 hover:bg-indigo-500/20' : 'text-indigo-700 bg-white border-indigo-100 hover:bg-indigo-50 shadow-sm'}`}><Edit3 className="w-4 h-4"/> 平均設定</button>
                         </div>
                     </div>
                 )}
@@ -3974,16 +3955,16 @@ export default function App() {
                             </div>
                             <div className="flex gap-2 flex-wrap items-center">
                                 <button onClick={() => { setSortByPR((prev) => !prev); setSortByProb(false); }} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByPR ? 'bg-indigo-600 text-white shadow-indigo-500/30' : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
-                                    <ArrowDownWideNarrow className="w-3.5 h-3.5" /> PR排名
+                                    <ArrowDownWideNarrow className="w-3.5 h-3.5" /> PR排序
                                 </button>
                                 <button onClick={() => { setSortByProb((prev) => !prev); setSortByPR(false); }} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByProb ? (darkMode ? 'bg-emerald-700 text-white shadow-emerald-900/45 ring-1 ring-emerald-200/30' : 'bg-emerald-600 text-white shadow-emerald-600/25') : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
-                                    <Percent className="w-3.5 h-3.5" /> 機率排名
+                                    <Percent className="w-3.5 h-3.5" /> 機率排序
                                 </button>
                                 <button onClick={handleExportBatchExcel} className={`px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1 border ${darkMode ? 'bg-slate-800 text-slate-300 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
-                                    <FileSpreadsheet className="w-3.5 h-3.5" /> 匯出 Excel
+                                    <FileSpreadsheet className="w-3.5 h-3.5" /> 下載 Excel
                                 </button>
                                 <button onClick={handleExportWeeklyReportExcel} className={`px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1 border ${darkMode ? 'bg-emerald-900/40 text-emerald-200 border-emerald-400/30 hover:bg-emerald-800/50' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'}`}>
-                                    <FileSpreadsheet className="w-3.5 h-3.5" /> 匯出週報
+                                    <FileSpreadsheet className="w-3.5 h-3.5" /> 下載週報
                                 </button>
                                 <button
                                   onClick={handleSaveBatchGrades}
@@ -4017,11 +3998,11 @@ export default function App() {
                                 <div className={`text-xl font-black ${darkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>{batchWeeklySummary?.avgProb !== null && batchWeeklySummary?.avgProb !== undefined ? `${f1(batchWeeklySummary.avgProb)}%` : '--'}</div>
                             </div>
                             <div className={`rounded-xl border px-3 py-2 ${darkMode ? 'bg-slate-900/40 border-white/10' : 'bg-white border-slate-200'}`}>
-                                <div className={`text-[10px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>關注人數</div>
+                                <div className={`text-[10px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>風險人數</div>
                                 <div className={`text-xl font-black ${darkMode ? 'text-rose-200' : 'text-rose-700'}`}>{batchWeeklySummary?.riskCount ?? 0}</div>
                             </div>
                             <div className={`rounded-xl border px-3 py-2 ${darkMode ? 'bg-slate-900/40 border-white/10' : 'bg-white border-slate-200'}`}>
-                                <div className={`text-[10px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>PR走弱</div>
+                                <div className={`text-[10px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>PR下滑</div>
                                 <div className={`text-xl font-black ${darkMode ? 'text-amber-200' : 'text-amber-700'}`}>{batchWeeklySummary?.prDropCount ?? 0}</div>
                             </div>
                         </div>
@@ -4064,7 +4045,7 @@ export default function App() {
                                             <th className="px-1 py-3 text-center font-bold text-cyan-500">數學</th>
                                             <th className="px-1 py-3 text-center font-bold text-blue-500">總分</th>
                                             <th className="px-1 py-3 text-center font-bold text-indigo-500">PR</th>
-                                            <th className="px-1 py-3 text-center font-bold text-slate-500">錄取機會</th>
+                                            <th className="px-1 py-3 text-center font-bold text-slate-500">錄取機率</th>
                                         </tr>
                                     </thead>
                                     <tbody className={`divide-y ${darkMode ? 'divide-slate-800' : 'divide-slate-100'}`}>
@@ -4098,7 +4079,7 @@ export default function App() {
                         {batchInsightTab === 'risk' && (
                             <div className={`rounded-2xl border p-4 ${darkMode ? 'bg-slate-900/40 border-white/10' : 'bg-white border-slate-200'}`}>
                                 <div className="flex items-center justify-between mb-3">
-                                    <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>關注名單</h4>
+                                    <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>風險預警清單</h4>
                                     <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>{batchRiskAlerts.length} 人</span>
                                 </div>
                                 <div className={`text-[11px] mb-3 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
@@ -4145,7 +4126,7 @@ export default function App() {
                         {batchInsightTab === 'heatmap' && (
                             <div className={`rounded-2xl border p-4 ${darkMode ? 'bg-slate-900/40 border-white/10' : 'bg-white border-slate-200'}`}>
                                 <div className="flex items-center justify-between mb-3">
-                                    <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>班級成績光譜圖</h4>
+                                    <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>班級成績熱點圖</h4>
                                     <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>紅色低分 / 綠色高分</span>
                                 </div>
                                 <div className={`overflow-x-auto rounded-xl border ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
@@ -4188,7 +4169,7 @@ export default function App() {
                                             {batchHeatmapRows.length === 0 && (
                                                 <tr>
                                                     <td colSpan={8} className={`px-3 py-6 text-center text-xs font-bold ${darkMode ? 'text-slate-400' : 'text-slate-400'}`}>
-                                                        目前沒有可顯示的成績光譜圖資料
+                                                        目前沒有可顯示的成績熱點圖資料
                                                     </td>
                                                 </tr>
                                             )}
@@ -4202,7 +4183,7 @@ export default function App() {
                             <div className={`rounded-2xl border p-4 space-y-4 ${darkMode ? 'bg-slate-900/40 border-white/10' : 'bg-white border-slate-200'}`}>
                                 <div className={`rounded-xl border p-3 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
                                     <div className="flex items-center justify-between gap-2 mb-2">
-                                        <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>全班導師寄語</h4>
+                                        <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>全班老師的話</h4>
                                         <span className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                                             {teacherMessageLoading ? '讀取中...' : (teacherGlobalMessage ? '已設定' : '未設定')}
                                         </span>
@@ -4224,14 +4205,14 @@ export default function App() {
                                           disabled={teacherMessageSaving || teacherMessageLoading || !user}
                                           className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                                         >
-                                          {teacherMessageSaving ? '儲存中...' : '儲存全班寄語'}
+                                          {teacherMessageSaving ? '儲存中...' : '儲存全班訊息'}
                                         </button>
                                     </div>
                                 </div>
 
                                 <div className={`rounded-xl border p-3 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
                                     <div className="flex items-center justify-between gap-2 mb-2">
-                                        <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>個別導師寄語（優先顯示）</h4>
+                                        <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>個別老師的話（優先顯示）</h4>
                                         <span className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
                                             目前名單 {batchRowsForDisplay.length} 人
                                         </span>
@@ -4271,7 +4252,7 @@ export default function App() {
                                         })}
                                         {!batchRowsForDisplay.length && (
                                             <div className={`rounded-lg border px-3 py-4 text-center text-xs font-bold ${darkMode ? 'border-white/10 bg-slate-950/40 text-slate-400' : 'border-slate-200 bg-white text-slate-500'}`}>
-                                                目前這個日期與班級沒有學生資料，請切換日期或班級後再設定個別導師寄語
+                                                目前這個日期與班級沒有學生資料，請切換日期或班級後再設定個別老師的話
                                             </div>
                                         )}
                                     </div>
@@ -4284,7 +4265,7 @@ export default function App() {
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                     <div className="flex items-center gap-2">
                                         <Info className={`w-4 h-4 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`} />
-                                        <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>查詢洞察中心</h4>
+                                        <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>查詢監控中心</h4>
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <button
@@ -4375,7 +4356,7 @@ export default function App() {
                                 <div className={`flex flex-wrap items-center justify-between gap-2 text-[11px] font-semibold ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
                                     <span>上次重置：{queryStatsLastResetText}</span>
                                     <span>
-                                        洞察範圍：{queryMonitorScope === 'class' ? `目前班級（${teacherClassFilter}）` : '全部學生'} / 排行 {queryStatsRowsFiltered.length} 人 / 事件 {queryFilteredEventList.length} 筆
+                                        監控範圍：{queryMonitorScope === 'class' ? `目前班級（${teacherClassFilter}）` : '全部學生'} / 排行 {queryStatsRowsFiltered.length} 人 / 事件 {queryFilteredEventList.length} 筆
                                     </span>
                                 </div>
 
@@ -4409,7 +4390,7 @@ export default function App() {
 
                                 <div className={`rounded-xl border p-3 ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
                                     <div className="flex items-center justify-between mb-2">
-                                        <div className={`text-[10px] font-black tracking-widest uppercase ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>洞察提醒</div>
+                                        <div className={`text-[10px] font-black tracking-widest uppercase ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>監控提醒</div>
                                         <div className={`text-[10px] font-black ${darkMode ? 'text-amber-200' : 'text-amber-700'}`}>{queryMonitorAlertRows.length} 筆</div>
                                     </div>
                                     <div className="space-y-1.5 max-h-[11.5rem] overflow-y-auto pr-1">
@@ -4447,15 +4428,15 @@ export default function App() {
                                 </div>
 
                                 <div className="grid grid-cols-1 lg:grid-cols-[1.25fr_0.95fr] gap-3">
-                                    <div className={`rounded-xl border overflow-x-auto ${darkMode ? 'border-white/10' : 'border-slate-200'}`}>
-                                        <div className={`min-w-[24.5rem] grid grid-cols-[6rem_1fr_4rem_6.5rem_4.6rem] px-3 py-2 text-[10px] font-bold tracking-wide ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>
+                                    <div className={`rounded-xl border overflow-hidden ${darkMode ? 'border-white/10' : 'border-slate-200'}`}>
+                                        <div className={`grid grid-cols-[6rem_1fr_4rem_6.5rem_4.6rem] px-3 py-2 text-[10px] font-bold tracking-wide ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>
                                             <span className="text-center">學號</span>
                                             <span className="text-center">姓名</span>
                                             <span className="text-center">次數</span>
                                             <span className="text-center">最後查詢</span>
                                             <span className="text-center">狀態</span>
                                         </div>
-                                        <div className={`min-w-[24.5rem] ${darkMode ? 'bg-slate-900/50' : 'bg-white'}`}>
+                                        <div className={`${darkMode ? 'bg-slate-900/50' : 'bg-white'}`}>
                                             {(queryStatsRowsFiltered.slice(0, 24)).map((row) => {
                                                 const nowTs = Date.now();
                                                 const latestTs = Number(row.latestTs) || 0;
@@ -4513,7 +4494,7 @@ export default function App() {
                                     <div className="space-y-3">
                                         <div className={`rounded-xl border p-3 ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
                                             <div className="flex items-center justify-between mb-2">
-                                                <div className={`text-[10px] font-black tracking-widest uppercase ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>本班查詢覆蓋率</div>
+                                                <div className={`text-[10px] font-black tracking-widest uppercase ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>本班查詢覆蓋</div>
                                                 <div className={`text-sm font-black ${darkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>{queryClassCoverageSummary.coverageRate}%</div>
                                             </div>
                                             <div className={`w-full h-2 rounded-full overflow-hidden ${darkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>
@@ -4591,7 +4572,7 @@ export default function App() {
                                 </div>
 
                                 <div className={`rounded-xl border overflow-hidden ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
-                                    <div className={`px-3 py-2 text-[10px] font-bold tracking-wide uppercase ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>每日查詢紀錄（依時間順序）</div>
+                                    <div className={`px-3 py-2 text-[10px] font-bold tracking-wide uppercase ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>每日查詢名單（依時間順序）</div>
                                     <div className="max-h-[20rem] overflow-y-auto">
                                         {queryEventsByDayFiltered.map((day) => (
                                             <div key={day.dateKey} className={`border-t ${darkMode ? 'border-white/5' : 'border-slate-100'}`}>
@@ -4623,7 +4604,7 @@ export default function App() {
                 )}
             </div>
             {/* ... other modals ... */}
-	            {statusMsg && <div className="fixed left-1/2 -translate-x-1/2 bottom-[max(1.2rem,env(safe-area-inset-bottom))] bg-slate-900/90 text-white px-4 sm:px-5 py-2.5 sm:py-3 rounded-full flex items-center text-[11px] sm:text-xs font-bold shadow-2xl backdrop-blur-md z-50 border border-white/10 pointer-events-none"><Check className="w-4 h-4 mr-2 text-blue-400" /> {statusMsg}</div>}
+            {statusMsg && <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/90 text-white px-5 py-3 rounded-full flex items-center text-xs font-bold shadow-2xl backdrop-blur-md z-50 border border-white/10"><Check className="w-4 h-4 mr-2 text-blue-400" /> {statusMsg}</div>}
               
             {/* ... Single View ... */}
             {teacherViewMode === 'single' && currentStudentId && !loading && (
@@ -4690,44 +4671,44 @@ export default function App() {
 
         {/* ... Parent View ... */}
         {mode === 'parent' && (
-          <div className={`${viewData ? 'max-w-5xl' : 'max-w-md'} mx-auto space-y-5 sm:space-y-6 pt-6 sm:pt-10 transition-all duration-300`}> 
+          <div className={`${viewData ? 'max-w-5xl' : 'max-w-md'} mx-auto space-y-6 pt-10 transition-all duration-300`}> 
             {!viewData && (
-            <div className={`backdrop-blur-2xl p-5 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] shadow-2xl border text-center relative overflow-hidden ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/15 shadow-black/30' : 'bg-white border-white shadow-[0_24px_55px_rgba(15,23,42,0.12)]'}`}>
+            <div className={`backdrop-blur-2xl p-8 rounded-[2.5rem] shadow-2xl border text-center relative overflow-hidden ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/15 shadow-black/30' : 'bg-white border-white shadow-[0_24px_55px_rgba(15,23,42,0.12)]'}`}>
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-sky-500 via-emerald-500 to-indigo-500"></div>
-              <h2 className={`text-xl sm:text-2xl font-black mb-6 sm:mb-8 tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>成績查詢</h2>
+              <h2 className={`text-2xl font-black mb-8 tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>查詢成績</h2>
               <div className={`w-full p-2 rounded-2xl border transition-all mb-6 shadow-inner ${darkMode ? 'bg-[#08120d]/70 border-emerald-200/15 focus-within:ring-2 focus-within:ring-emerald-500/20' : 'bg-slate-50 border-slate-200 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100'}`}>
                 <input type="text" placeholder="請輸入學號" className={`w-full bg-transparent border-none px-4 py-3 outline-none text-xl uppercase font-bold text-center tracking-widest placeholder:text-base placeholder:tracking-normal placeholder:font-medium ${darkMode ? 'text-white placeholder:text-slate-600' : 'text-slate-800 placeholder:text-slate-400'}`} value={searchId} onChange={(e) => setSearchId(e.target.value)} />
               </div>
-              <button onClick={handleParentSearch} disabled={loading || !user} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3.5 sm:py-4 rounded-2xl font-bold text-base sm:text-lg shadow-sm transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 tracking-wide">{loading ? '查詢中...' : (!user ? '連線中...' : '查詢分析')}</button>
+              <button onClick={handleParentSearch} disabled={loading || !user} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-2xl font-bold text-lg shadow-sm transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 tracking-wide">{loading ? '查詢中...' : (!user ? '連線中...' : '開始查詢')}</button>
               {searchError && <p className="mt-6 text-red-500 text-xs font-bold bg-red-500/10 inline-block px-4 py-2 rounded-full animate-pulse">{searchError}</p>}
             </div>
             )}
 
             {viewData && (
-              <div className={`rounded-[2rem] sm:rounded-[2.5rem] shadow-2xl overflow-hidden border backdrop-blur-2xl ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/15 shadow-black/30' : 'bg-white border-white shadow-[0_26px_60px_rgba(15,23,42,0.13)]'}`}>
-                <div className={`p-5 sm:p-8 pb-5 sm:pb-6 relative overflow-hidden ${darkMode ? 'bg-[#0d1712] text-white border-b border-emerald-200/10' : 'bg-gradient-to-r from-emerald-50 via-sky-50 to-white text-slate-800 border-b border-slate-100'}`}>
+              <div className={`rounded-[2.5rem] shadow-2xl overflow-hidden border backdrop-blur-2xl ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/15 shadow-black/30' : 'bg-white border-white shadow-[0_26px_60px_rgba(15,23,42,0.13)]'}`}>
+                <div className={`p-8 pb-6 relative overflow-hidden ${darkMode ? 'bg-[#0d1712] text-white border-b border-emerald-200/10' : 'bg-gradient-to-r from-emerald-50 via-sky-50 to-white text-slate-800 border-b border-slate-100'}`}>
                    <div className={`absolute top-0 right-0 w-64 h-64 rounded-full -mr-20 -mt-20 blur-3xl ${darkMode ? 'bg-emerald-500 opacity-20' : 'bg-emerald-300 opacity-25'}`}></div>
                    
-                   <div className="relative z-10 flex flex-col sm:flex-row justify-between items-start gap-4 sm:gap-5 mb-4 sm:mb-6">
+                   <div className="relative z-10 flex justify-between items-start mb-6">
                        {/* Left Side: Name & ID */}
-                       <div className="min-w-0">
+                       <div>
                            <div className={`text-[9px] font-bold uppercase tracking-widest mb-2 border inline-block px-2 py-1 rounded ${darkMode ? 'text-emerald-300 border-emerald-300/25' : 'text-emerald-700 border-emerald-200'}`}>Student Profile</div>
-                           <h3 className={`text-2xl sm:text-3xl font-bold tracking-tighter break-words ${darkMode ? 'text-white' : 'text-slate-800'}`}>{viewData.name}</h3>
+                           <h3 className={`text-3xl font-bold tracking-tighter ${darkMode ? 'text-white' : 'text-slate-800'}`}>{viewData.name}</h3>
                            <p className="font-mono text-xs mt-1 font-bold text-slate-500">{viewData.id}</p>
                        </div>
 
                        {/* Right Side: Logout & Prob */}
-                       <div className="w-full sm:w-auto flex flex-row sm:flex-col items-start sm:items-end justify-between sm:justify-start gap-3 sm:gap-4">
+                       <div className="flex flex-col items-end gap-4">
                            <button onClick={() => setViewData(null)} className={`p-2 rounded-full backdrop-blur-md transition-colors ${darkMode ? 'text-slate-400 hover:text-white bg-white/5' : 'text-slate-500 hover:text-slate-700 bg-white border border-slate-200'}`}><LogOut className="w-4 h-4"/></button>
                            
                            {/* --- NEW PROBABILITY DISPLAY --- */}
                            {viewData.prob && viewData.prob !== '-' && (
-                               <div className="text-left sm:text-right mt-0 sm:mt-2">
-                                   <div className={`text-[10px] font-bold uppercase tracking-widest mb-0.5 ${darkMode ? 'text-emerald-300/80' : 'text-emerald-700/80'}`}>錄取機會</div>
-                                   <div className="text-3xl sm:text-4xl font-black flex items-baseline justify-start sm:justify-end gap-1" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>
+                               <div className="text-right mt-2">
+                                   <div className={`text-[10px] font-bold uppercase tracking-widest mb-0.5 ${darkMode ? 'text-emerald-300/80' : 'text-emerald-700/80'}`}>錄取機率</div>
+                                   <div className="text-4xl font-black flex items-baseline justify-end gap-1" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>
                                        {viewData.prob}<span className="text-lg font-bold" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>%</span>
                                    </div>
-                                   <div className="mt-1 flex items-center justify-start sm:justify-end gap-1.5 opacity-50">
+                                   <div className="mt-1 flex items-center justify-end gap-1.5 opacity-50">
                                         <p className={`text-[9px] font-medium ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
                                             系統綜合歷史成績運算，<span className={`${darkMode ? 'text-white/90 border-white/20' : 'text-slate-700 border-slate-300'} border-b pb-0.5`}>僅供參考</span>
                                         </p>
@@ -4738,10 +4719,10 @@ export default function App() {
                    </div>
                 </div>
 
-                <div className="p-4 sm:p-6">
+                <div className="p-6">
                   {teacherMessageForParent && (
                   <div className={`mb-6 rounded-2xl border px-4 py-3 ${darkMode ? 'bg-emerald-500/10 border-emerald-300/25 text-emerald-100' : 'bg-emerald-50/85 border-emerald-200 text-emerald-900'}`}>
-                      <div className={`text-[10px] font-black uppercase tracking-widest mb-1.5 ${darkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>導師寄語</div>
+                      <div className={`text-[10px] font-black uppercase tracking-widest mb-1.5 ${darkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>老師的話</div>
                       <p className={`text-sm leading-relaxed font-medium whitespace-pre-line ${darkMode ? 'text-emerald-50' : 'text-slate-700'}`}>{teacherMessageForParent}</p>
                   </div>
                   )}
@@ -4781,7 +4762,7 @@ export default function App() {
                   )}
                 </div>
                   
-                <div className={`p-4 sm:p-6 border-t ${darkMode ? 'bg-[#101a15] border-emerald-200/10' : 'bg-white border-slate-100/80'}`}>
+                <div className={`p-6 border-t ${darkMode ? 'bg-[#101a15] border-emerald-200/10' : 'bg-white border-slate-100/80'}`}>
                     <h4 className={`font-bold mb-6 text-xs flex items-center justify-center gap-2 tracking-widest uppercase ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>詳細紀錄</h4>
                     <div className="space-y-4">
                         {parentPhaseDataDesc.map((d, rowIndex) => {
@@ -4790,8 +4771,8 @@ export default function App() {
                              const totalRank = calculateRank(dateForRank, 'total', d.total, d.class);
                              const globalPR = calculateGlobalPR(dateForRank, 'total', d.total);
                              return (
-                             <div key={`${d.weekendID || d.date}-${rowIndex}`} className={`group p-4 sm:p-5 rounded-3xl border transition-all duration-300 ${darkMode ? 'bg-white/5 border-white/5 hover:border-blue-500/20' : 'bg-white border-slate-200/70 shadow-[0_10px_28px_rgba(15,23,42,0.06)] hover:border-sky-200 hover:shadow-[0_18px_34px_rgba(14,165,233,0.12)]'}`}>
-                                <div className="flex flex-col sm:flex-row justify-between items-start gap-3 sm:gap-4 mb-4">
+                             <div key={`${d.weekendID || d.date}-${rowIndex}`} className={`group p-5 rounded-3xl border transition-all duration-300 ${darkMode ? 'bg-white/5 border-white/5 hover:border-blue-500/20' : 'bg-white border-slate-200/70 shadow-[0_10px_28px_rgba(15,23,42,0.06)] hover:border-sky-200 hover:shadow-[0_18px_34px_rgba(14,165,233,0.12)]'}`}>
+                                <div className="flex justify-between items-start mb-4">
                                     <div className="flex flex-col gap-2 items-start">
                                         <div className="flex items-center gap-2">
                                             <span className="text-sm font-bold text-slate-400 font-mono">{d.date}</span>
@@ -4799,17 +4780,17 @@ export default function App() {
                                         </div>
                                         <button onClick={() => openStatsModal(dateForRank, { total: d.total, chi: d.chi, eng: d.eng, math: d.math }, d.class)} className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all hover:scale-105 active:scale-95 shadow-md ${darkMode ? 'bg-[#193227] text-emerald-100 hover:bg-[#214233] border border-emerald-200/20 shadow-black/25' : 'bg-[linear-gradient(122deg,#ecfdf5_0%,#e0f2fe_55%,#eef2ff_100%)] text-emerald-800 hover:bg-[linear-gradient(122deg,#d1fae5_0%,#dbeafe_55%,#e0e7ff_100%)] shadow-emerald-200/70 border border-emerald-200/70'}`}>
                                             <BarChart2 className="w-3.5 h-3.5" /> 
-                                            查看落點報告
+                                            查看落點分析
                                             <ChevronRight className="w-3 h-3 opacity-80" />
                                         </button>
                                     </div>
-                                    <div className="w-full sm:w-auto text-left sm:text-right">
-                                        <div className={`text-2xl sm:text-3xl font-bold tracking-tighter text-blue-500`}>{f1(d.total)}</div>
-                                        <div className="flex items-center justify-start sm:justify-end gap-2 mt-1">
+                                    <div className="text-right">
+                                        <div className={`text-3xl font-bold tracking-tighter text-blue-500`}>{f1(d.total)}</div>
+                                        <div className="flex items-center justify-end gap-2 mt-1">
                                             {totalRank !== '-' && <span className="bg-amber-100 text-amber-700 text-[10px] px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5"><Trophy className="w-3 h-3"/> #{totalRank}</span>}
                                             {globalPR !== null && globalPR !== '-' && <span className="bg-indigo-100 text-indigo-700 text-[10px] px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">本部PR {globalPR}</span>}
                                         </div>
-                                        {d.avgTotal && <div className="text-[10px] font-bold text-slate-400 tracking-wide text-left sm:text-right mt-1">Avg {f1(d.avgTotal)}</div>}
+                                        {d.avgTotal && <div className="text-[10px] font-bold text-slate-400 tracking-wide text-right mt-1">Avg {f1(d.avgTotal)}</div>}
                                     </div>
                                 </div>
                                 <div className={`grid grid-cols-3 gap-2 mt-3 pt-3 border-t ${darkMode ? 'border-white/5' : 'border-slate-50'}`}>
@@ -4842,8 +4823,8 @@ export default function App() {
         )}
 
         {showAddStudentModal && (
-	          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowAddStudentModal(false)}>
-	              <div className={`rounded-[2.2rem] p-6 sm:p-7 w-full max-w-sm max-h-[88svh] overflow-y-auto ${darkMode ? 'bg-slate-800 border border-white/10' : 'bg-white shadow-2xl'}`} onClick={e => e.stopPropagation()}>
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowAddStudentModal(false)}>
+              <div className={`rounded-[2.2rem] p-7 w-full max-w-sm ${darkMode ? 'bg-slate-800 border border-white/10' : 'bg-white shadow-2xl'}`} onClick={e => e.stopPropagation()}>
                   <h3 className={`text-lg font-black mb-4 ${darkMode ? 'text-white' : 'text-slate-800'}`}>新增學生</h3>
                   <p className={`text-xs mb-4 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>輸入學號後可建立新學生，或載入既有資料。</p>
                   <input
@@ -4929,7 +4910,7 @@ export default function App() {
                         <button onClick={() => setStatsModalData(null)} className={`absolute top-5 right-5 p-2 rounded-full transition ${darkMode ? 'bg-white/5 hover:bg-white/10 text-white' : 'bg-white hover:bg-slate-50 text-slate-500 border border-slate-200'}`}><X className="w-5 h-5"/></button>
                         <div className="pr-12">
                             <div className={`text-[10px] font-black uppercase tracking-[0.18em] mb-2 ${darkMode ? 'text-blue-400' : 'text-sky-700'}`}>Placement Insight</div>
-                            <h3 className={`text-2xl font-black tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>{statsModalData.date} 落點報告</h3>
+                            <h3 className={`text-2xl font-black tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>{statsModalData.date} 落點分析</h3>
                             <div className="mt-3 flex flex-wrap items-center gap-2">
                                 <span className={`text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border ${darkMode ? 'text-slate-200 border-white/20 bg-white/5' : 'text-slate-700 border-slate-300 bg-white'}`}>{statsModalData.className || 'A班'}</span>
                                 <span className={`text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border ${darkMode ? 'text-emerald-200 border-emerald-300/30 bg-emerald-500/10' : 'text-emerald-700 border-emerald-200 bg-emerald-50'}`}>{COLORS[statsActiveTab]?.label || '總分'}分布</span>
@@ -4999,8 +4980,8 @@ export default function App() {
         )}
 
         {showSecurityModal && (
-	            <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[60] p-6 animate-in fade-in duration-200" onClick={closeSecurityModal}>
-	                <div className={`p-7 sm:p-8 rounded-[2rem] shadow-2xl max-w-xs w-full max-h-[86svh] overflow-y-auto text-center transform transition-all scale-100 border ${darkMode ? 'bg-slate-800 border-white/10' : 'bg-white border-white/50'}`} onClick={e => e.stopPropagation()}>
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[60] p-6 animate-in fade-in duration-200" onClick={closeSecurityModal}>
+                <div className={`p-8 rounded-[2rem] shadow-2xl max-w-xs w-full text-center transform transition-all scale-100 border ${darkMode ? 'bg-slate-800 border-white/10' : 'bg-white border-white/50'}`} onClick={e => e.stopPropagation()}>
                     <div className={`mx-auto mb-6 p-4 rounded-full inline-block shadow-inner ${darkMode ? 'bg-blue-500/10 text-blue-400' : 'bg-blue-50 text-blue-600'}`}>
                         <ShieldCheck className="w-8 h-8" />
                     </div>
@@ -5019,8 +5000,8 @@ export default function App() {
         )}
 
         {(deleteTarget || studentToDelete) && (
-	            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => { setDeleteTarget(null); setStudentToDelete(null); }}>
-	              <div className={`rounded-[2.5rem] p-6 sm:p-8 shadow-2xl max-w-sm w-full max-h-[88svh] overflow-y-auto animate-in zoom-in duration-300 ${darkMode ? 'bg-slate-800 border border-white/10' : 'bg-white'}`} onClick={e => e.stopPropagation()}>
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => { setDeleteTarget(null); setStudentToDelete(null); }}>
+              <div className={`rounded-[2.5rem] p-8 shadow-2xl max-w-sm w-full animate-in zoom-in duration-300 ${darkMode ? 'bg-slate-800 border border-white/10' : 'bg-white'}`} onClick={e => e.stopPropagation()}>
                   <div className="flex items-center gap-4 mb-6">
                       <div className="bg-red-500/10 p-4 rounded-2xl text-red-500"><AlertTriangle className="w-8 h-8" /></div>
                       <div><h3 className={`font-bold text-xl ${darkMode ? 'text-white' : 'text-slate-800'}`}>確認刪除</h3><p className="text-slate-400 text-xs mt-1 font-bold opacity-80">此動作無法復原</p></div>

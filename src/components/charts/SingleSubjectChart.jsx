@@ -27,10 +27,10 @@ export default function SingleSubjectChart({
   const shouldAnimate = !prefersReducedMotion && pointCount > 1 && pointCount <= 42;
 
   return (
-    <div className={`mb-6 rounded-2xl border px-3 pt-3 pb-2 ${isDarkMode ? 'bg-slate-900/30 border-white/10' : 'bg-white border-slate-200/90 shadow-[0_10px_24px_rgba(15,23,42,0.06)]'}`}>
+    <div className={`mb-6 rounded-2xl border px-3 pt-3 pb-2 backdrop-blur-sm ${isDarkMode ? 'bg-slate-900/30 border-white/10' : 'bg-white/86 border-slate-200/85 shadow-[0_10px_24px_rgba(15,23,42,0.06)]'}`}>
       <div className="flex items-center justify-between px-1 mb-1">
         <h4 className={`text-xs font-black tracking-[0.12em] uppercase ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>{title} 趨勢</h4>
-        <span className={`text-[10px] font-bold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>個人 vs 班平均</span>
+        <span className={`text-[10px] font-bold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>每次測驗：個人 vs 班平均</span>
       </div>
       <div className="h-56 md:h-64 w-full -ml-1">
         <ResponsiveContainer width="100%" height="100%">

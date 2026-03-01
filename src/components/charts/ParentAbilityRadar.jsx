@@ -24,11 +24,11 @@ export default function ParentAbilityRadar({
 }) {
   if (!data || !data.length) return null;
 
-  const wrapperClass = `mt-3 mb-7 rounded-3xl border px-4 pt-4 pb-3 ${isDarkMode ? 'bg-[#0f1914]/75 border-emerald-200/18' : 'bg-white/92 border-slate-200/80'}`;
+  const wrapperClass = `mt-3 mb-7 rounded-3xl border px-4 pt-4 pb-3 backdrop-blur-md ${isDarkMode ? 'bg-[#0f1914]/75 border-emerald-200/18' : 'bg-white/82 border-white/80 ring-1 ring-white/55 shadow-[0_12px_30px_rgba(15,23,42,0.08)]'}`;
   const subjectRows = data.map((item) => {
     const delta = Number((item.student - item.classAvg).toFixed(1));
     const relativePct = item.classAvg > 0 ? Number(((delta / item.classAvg) * 100).toFixed(1)) : 0;
-    const trendLabel = delta >= 5 ? '明顯領先' : delta >= 1 ? '略優' : delta > -1 ? '持平' : delta > -5 ? '待補強' : '需追蹤';
+    const trendLabel = delta >= 5 ? '優勢明顯' : delta >= 1 ? '略高於中位' : delta > -1 ? '接近中位' : delta > -5 ? '可再加強' : '建議優先補強';
     return {
       ...item,
       delta,
@@ -49,7 +49,7 @@ export default function ParentAbilityRadar({
       <div className="flex items-center justify-between mb-3 px-1">
         <div>
           <h4 className={`text-sm font-black tracking-wide ${isDarkMode ? 'text-emerald-100' : 'text-slate-800'}`}>三科能力雷達圖</h4>
-          <p className={`text-[11px] font-semibold mt-0.5 ${isDarkMode ? 'text-emerald-200/75' : 'text-slate-500'}`}>{phaseName || '目前階段'} | 樣本 {recordCount} 次 | 對照全體中位數</p>
+          <p className={`text-[11px] font-semibold mt-0.5 ${isDarkMode ? 'text-emerald-200/75' : 'text-slate-500'}`}>{phaseName || '目前階段'} | 樣本 {recordCount} 次 | 與全體中位數比較</p>
         </div>
         <div className={`flex items-center gap-3 text-[10px] font-bold ${isDarkMode ? 'text-emerald-200/80' : 'text-slate-500'}`}>
           <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" />個人</span>
@@ -103,7 +103,7 @@ export default function ParentAbilityRadar({
           <span>個人</span>
           <span>中位數</span>
           <span>差值</span>
-          <span>判讀</span>
+          <span>家長提醒</span>
         </div>
         <div className={isDarkMode ? 'bg-[#0b1510]' : 'bg-white'}>
           {subjectRows.map((row) => (

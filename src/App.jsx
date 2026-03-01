@@ -327,6 +327,20 @@ const TAB_DOT_BG_CLASS = {
     eng: 'bg-amber-500',
     math: 'bg-cyan-500'
 };
+const PARENT_TERM_GUIDE = [
+    {
+        term: '本部PR',
+        description: '和本部所有同學相比的百分等級；例如 PR60 代表約高於 60% 同學。'
+    },
+    {
+        term: '錄取機率（推估）',
+        description: '依歷次成績、階段權重與科目表現估算，做為努力方向參考，不是保證結果。'
+    },
+    {
+        term: '落點分析',
+        description: '看你在同班分數分布中的位置，快速知道自己落在哪一段、和多數同學差多少。'
+    }
+];
 const EMPTY_GRADE = { chi: '', eng: '', math: '', total: '', class: 'A班' };
 
 const hasAnySubjectScore = (gradeObj) => {
@@ -400,6 +414,20 @@ const resolveRiskLevel = (score) => {
     if (score >= 70) return '高風險';
     if (score >= 45) return '中風險';
     return '觀察';
+};
+
+const formatSignedScore = (value, digits = 1) => {
+    if (!Number.isFinite(value)) return '-';
+    const rounded = Number(value.toFixed(digits));
+    return rounded > 0 ? `+${rounded}` : `${rounded}`;
+};
+
+const resolveParentProbabilityDescription = (probability) => {
+    if (!Number.isFinite(probability)) return '目前資料不足，先觀察趨勢與本部PR變化。';
+    if (probability >= 80) return '目前落點穩健，持續維持學習節奏。';
+    if (probability >= 60) return '已接近安全區，建議穩定補強弱科。';
+    if (probability >= 40) return '仍在努力區，建議優先拉高落後科目。';
+    return '目前風險偏高，建議密集追蹤與加強練習。';
 };
 
 const getHeatCellStyle = (ratio, isDarkMode) => {
@@ -2827,6 +2855,25 @@ export default function App() {
       return Math.min(120, Math.ceil(maxValue / 10) * 10);
   }, [parentRadarData]);
 
+  const parentSubjectInsight = useMemo(() => {
+      if (!parentRadarData.length) return null;
+      const rows = parentRadarData.map((item) => ({
+          subject: item.subject,
+          delta: Number((item.student - item.classAvg).toFixed(1))
+      }));
+      if (!rows.length) return null;
+
+      const strongest = rows.reduce((top, current) => (
+          current.delta > top.delta ? current : top
+      ), rows[0]);
+      const weakest = rows.reduce((low, current) => (
+          current.delta < low.delta ? current : low
+      ), rows[0]);
+      const isBalanced = rows.every((row) => Math.abs(row.delta) < 2.5);
+
+      return { strongest, weakest, isBalanced };
+  }, [parentRadarData]);
+
   const activePhaseLabel = useMemo(() => {
       const phase = PHASES.find((item) => item.id === activePhase);
       return phase ? phase.name : '';
@@ -3000,9 +3047,82 @@ export default function App() {
       return template.buckets.map((bucket, idx) => ({
           range: bucket.label,
           count: counts[idx] || 0,
+          min: bucket.min,
+          max: bucket.max,
           isMyRange: idx === myBucketIdx
       }));
   };
+
+  const parentQuickStats = useMemo(() => {
+      if (!parentPhaseDataDesc.length) return null;
+
+      const latest = parentPhaseDataDesc[0];
+      const previous = parentPhaseDataDesc[1] || null;
+      const weekendID = latest.weekendID || getTestDateID(latest.date);
+      const className = latest.class || 'A班';
+      const latestTotal = toNumberOrNull(latest.total);
+      const previousTotal = toNumberOrNull(previous?.total);
+
+      const totalDelta = latestTotal !== null && previousTotal !== null
+          ? Number((latestTotal - previousTotal).toFixed(1))
+          : null;
+      const trendText = totalDelta === null
+          ? '資料不足'
+          : totalDelta >= 8
+              ? '明顯進步'
+              : totalDelta >= 2
+                  ? '穩定進步'
+                  : totalDelta > -2
+                      ? '表現持平'
+                      : totalDelta > -8
+                          ? '小幅回落'
+                          : '需優先補強';
+
+      const classScores = scoreIndexByWeekendAndClass[weekendID]?.[className]?.total || [];
+      const classRankLookup = rankLookupByWeekendClassSubject[weekendID]?.[className]?.total;
+      const classRank = latestTotal !== null && classRankLookup
+          ? classRankLookup[latestTotal]
+          : undefined;
+      const classCount = classScores.length;
+      const classTopPercent = classRank !== undefined && classCount > 0
+          ? Math.max(1, Math.round((classRank / classCount) * 100))
+          : null;
+
+      const prLookup = globalPRLookupByWeekendSubject[weekendID]?.total;
+      const globalPRValue = latestTotal !== null && prLookup
+          ? prLookup.get(latestTotal)
+          : undefined;
+      const globalPRLabel = globalPRValue !== undefined ? `PR ${globalPRValue}` : '樣本不足';
+
+      const probability = toNumberOrNull(viewData?.prob);
+      const probabilityHint = resolveParentProbabilityDescription(probability);
+      const subjectInsightText = parentSubjectInsight
+          ? parentSubjectInsight.isBalanced
+              ? '三科差距小，整體節奏穩定。'
+              : `${parentSubjectInsight.weakest.subject}相對較弱，建議優先補強。`
+          : '等待更多測驗資料後提供。';
+
+      return {
+          latestDate: latest.date,
+          className,
+          classRank: classRank !== undefined ? classRank : null,
+          classCount,
+          classTopPercent,
+          globalPRLabel,
+          totalDelta,
+          trendText,
+          probabilityHint,
+          subjectInsightText
+      };
+  }, [
+      parentPhaseDataDesc,
+      getTestDateID,
+      scoreIndexByWeekendAndClass,
+      rankLookupByWeekendClassSubject,
+      globalPRLookupByWeekendSubject,
+      viewData,
+      parentSubjectInsight
+  ]);
 
   const globalPRByStudentAndWeekend = useMemo(() => {
       const totalsByWeekend = {};
@@ -3700,19 +3820,83 @@ export default function App() {
       if (!statsModalData) return null;
       const distribution = statsModalData[statsActiveTab] || [];
       const sampleCount = distribution.reduce((sum, bucket) => sum + (bucket.count || 0), 0);
-      const myRange = distribution.find((bucket) => bucket.isMyRange)?.range || '-';
+      const myBucketIndex = distribution.findIndex((bucket) => bucket.isMyRange);
+      const myBucket = myBucketIndex >= 0 ? distribution[myBucketIndex] : null;
+      const myRange = myBucket?.range || '-';
+      const myBucketCount = myBucket?.count || 0;
       const peakBucket = distribution.reduce((top, bucket) => {
           if (!top || (bucket.count || 0) > (top.count || 0)) return bucket;
           return top;
       }, null);
 
+      const myScore = toNumberOrNull(statsModalData.myGrades?.[statsActiveTab]);
+      const weekendID = getTestDateID(statsModalData.date);
+      const className = statsModalData.className || 'A班';
+      const classScores = scoreIndexByWeekendAndClass[weekendID]?.[className]?.[statsActiveTab] || [];
+
+      let higherCount = 0;
+      let equalCount = 0;
+      let lowerCount = 0;
+      let classRank = null;
+      let classTopPercent = null;
+      let classPercentile = null;
+      let medianScore = null;
+      let medianGap = null;
+
+      if (myScore !== null && classScores.length) {
+          classScores.forEach((score) => {
+              if (score > myScore) higherCount += 1;
+              else if (score < myScore) lowerCount += 1;
+              else equalCount += 1;
+          });
+
+          classRank = higherCount + 1;
+          classTopPercent = Math.max(1, Math.round((classRank / classScores.length) * 100));
+          classPercentile = Number((((lowerCount + (equalCount * 0.5)) / classScores.length) * 100).toFixed(1));
+          medianScore = resolveMedianScore(classScores);
+          if (medianScore !== null) {
+              medianGap = Number((myScore - medianScore).toFixed(1));
+          }
+      }
+
+      const nextBucket = myBucketIndex > 0 ? distribution[myBucketIndex - 1] : null;
+      const pointsToNextBucket = myScore !== null && nextBucket
+          ? Math.max(0, Number((nextBucket.min - myScore).toFixed(1)))
+          : null;
+      const myRangeRatio = sampleCount > 0
+          ? Number(((myBucketCount / sampleCount) * 100).toFixed(1))
+          : null;
+      const standingLabel = classPercentile === null
+          ? '資料不足'
+          : classPercentile >= 70
+              ? '高於班上多數同學'
+              : classPercentile >= 50
+                  ? '位於班級中段偏上'
+                  : classPercentile >= 35
+                      ? '位於班級中段'
+                      : '目前低於班級中段';
+
       return {
           sampleCount,
           myRange,
+          myBucketCount,
+          myRangeRatio,
           peakRange: peakBucket?.range || '-',
-          peakCount: peakBucket?.count || 0
+          peakCount: peakBucket?.count || 0,
+          myScore,
+          classRank,
+          classSize: classScores.length,
+          classTopPercent,
+          classPercentile,
+          standingLabel,
+          higherCount,
+          equalCount,
+          lowerCount,
+          medianScore,
+          medianGap,
+          pointsToNextBucket
       };
-  }, [statsModalData, statsActiveTab]);
+  }, [statsModalData, statsActiveTab, getTestDateID, scoreIndexByWeekendAndClass]);
 
   const isLandingMode = mode === 'landing';
   const isConnectionReady = Boolean(user);
@@ -3834,7 +4018,7 @@ export default function App() {
                 </div>
 
                 <p className="mt-[clamp(0.9rem,3vh,1.8rem)] text-[11px] font-serif font-semibold tracking-[0.14em] text-slate-500/90">
-                  Created by CH.Fan
+                  Created by CH Fan
                 </p>
               </div>
             </div>
@@ -4673,10 +4857,10 @@ export default function App() {
         {mode === 'parent' && (
           <div className={`${viewData ? 'max-w-5xl' : 'max-w-md'} mx-auto space-y-6 pt-10 transition-all duration-300`}> 
             {!viewData && (
-            <div className={`backdrop-blur-2xl p-8 rounded-[2.5rem] shadow-2xl border text-center relative overflow-hidden ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/15 shadow-black/30' : 'bg-white border-white shadow-[0_24px_55px_rgba(15,23,42,0.12)]'}`}>
+            <div className={`backdrop-blur-[26px] p-8 rounded-[2.5rem] shadow-2xl border text-center relative overflow-hidden ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/15 shadow-black/30' : 'bg-white/78 border-white/85 ring-1 ring-white/55 shadow-[0_24px_55px_rgba(15,23,42,0.12)]'}`}>
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-sky-500 via-emerald-500 to-indigo-500"></div>
               <h2 className={`text-2xl font-black mb-8 tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>查詢成績</h2>
-              <div className={`w-full p-2 rounded-2xl border transition-all mb-6 shadow-inner ${darkMode ? 'bg-[#08120d]/70 border-emerald-200/15 focus-within:ring-2 focus-within:ring-emerald-500/20' : 'bg-slate-50 border-slate-200 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100'}`}>
+              <div className={`w-full p-2 rounded-2xl border transition-all mb-6 shadow-inner ${darkMode ? 'bg-[#08120d]/70 border-emerald-200/15 focus-within:ring-2 focus-within:ring-emerald-500/20' : 'bg-white/75 border-white/85 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100'}`}>
                 <input type="text" placeholder="請輸入學號" className={`w-full bg-transparent border-none px-4 py-3 outline-none text-xl uppercase font-bold text-center tracking-widest placeholder:text-base placeholder:tracking-normal placeholder:font-medium ${darkMode ? 'text-white placeholder:text-slate-600' : 'text-slate-800 placeholder:text-slate-400'}`} value={searchId} onChange={(e) => setSearchId(e.target.value)} />
               </div>
               <button onClick={handleParentSearch} disabled={loading || !user} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-2xl font-bold text-lg shadow-sm transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 tracking-wide">{loading ? '查詢中...' : (!user ? '連線中...' : '開始查詢')}</button>
@@ -4685,14 +4869,14 @@ export default function App() {
             )}
 
             {viewData && (
-              <div className={`rounded-[2.5rem] shadow-2xl overflow-hidden border backdrop-blur-2xl ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/15 shadow-black/30' : 'bg-white border-white shadow-[0_26px_60px_rgba(15,23,42,0.13)]'}`}>
-                <div className={`p-8 pb-6 relative overflow-hidden ${darkMode ? 'bg-[#0d1712] text-white border-b border-emerald-200/10' : 'bg-gradient-to-r from-emerald-50 via-sky-50 to-white text-slate-800 border-b border-slate-100'}`}>
+              <div className={`rounded-[2.5rem] shadow-2xl overflow-hidden border backdrop-blur-[28px] ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/15 shadow-black/30' : 'bg-white/74 border-white/85 ring-1 ring-white/55 shadow-[0_26px_60px_rgba(15,23,42,0.13)]'}`}>
+                <div className={`p-8 pb-6 relative overflow-hidden ${darkMode ? 'bg-[#0d1712] text-white border-b border-emerald-200/10' : 'bg-[linear-gradient(112deg,rgba(236,253,245,0.93)_0%,rgba(224,242,254,0.9)_54%,rgba(255,255,255,0.92)_100%)] text-slate-800 border-b border-white/70'}`}>
                    <div className={`absolute top-0 right-0 w-64 h-64 rounded-full -mr-20 -mt-20 blur-3xl ${darkMode ? 'bg-emerald-500 opacity-20' : 'bg-emerald-300 opacity-25'}`}></div>
                    
                    <div className="relative z-10 flex justify-between items-start mb-6">
                        {/* Left Side: Name & ID */}
                        <div>
-                           <div className={`text-[9px] font-bold uppercase tracking-widest mb-2 border inline-block px-2 py-1 rounded ${darkMode ? 'text-emerald-300 border-emerald-300/25' : 'text-emerald-700 border-emerald-200'}`}>Student Profile</div>
+                           <div className={`text-[9px] font-bold uppercase tracking-widest mb-2 border inline-block px-2 py-1 rounded ${darkMode ? 'text-emerald-300 border-emerald-300/25' : 'text-emerald-700 border-emerald-200'}`}>學習檔案</div>
                            <h3 className={`text-3xl font-bold tracking-tighter ${darkMode ? 'text-white' : 'text-slate-800'}`}>{viewData.name}</h3>
                            <p className="font-mono text-xs mt-1 font-bold text-slate-500">{viewData.id}</p>
                        </div>
@@ -4704,15 +4888,13 @@ export default function App() {
                            {/* --- NEW PROBABILITY DISPLAY --- */}
                            {viewData.prob && viewData.prob !== '-' && (
                                <div className="text-right mt-2">
-                                   <div className={`text-[10px] font-bold uppercase tracking-widest mb-0.5 ${darkMode ? 'text-emerald-300/80' : 'text-emerald-700/80'}`}>錄取機率</div>
+                                   <div className={`text-[10px] font-bold uppercase tracking-widest mb-0.5 ${darkMode ? 'text-emerald-300/80' : 'text-emerald-700/80'}`}>錄取機率（推估）</div>
                                    <div className="text-4xl font-black flex items-baseline justify-end gap-1" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>
                                        {viewData.prob}<span className="text-lg font-bold" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>%</span>
                                    </div>
-                                   <div className="mt-1 flex items-center justify-end gap-1.5 opacity-50">
-                                        <p className={`text-[9px] font-medium ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
-                                            系統綜合歷史成績運算，<span className={`${darkMode ? 'text-white/90 border-white/20' : 'text-slate-700 border-slate-300'} border-b pb-0.5`}>僅供參考</span>
-                                        </p>
-                                   </div>
+                                   <p className={`mt-1 text-[9px] font-medium ${darkMode ? 'text-slate-300/85' : 'text-slate-500'}`}>
+                                      依歷次成績推估，供家長判讀趨勢參考
+                                   </p>
                                </div>
                            )}
                        </div>
@@ -4726,6 +4908,59 @@ export default function App() {
                       <p className={`text-sm leading-relaxed font-medium whitespace-pre-line ${darkMode ? 'text-emerald-50' : 'text-slate-700'}`}>{teacherMessageForParent}</p>
                   </div>
                   )}
+
+                  {parentQuickStats && (
+                  <div className="mb-6 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                      <div className={`rounded-2xl border px-4 py-3 backdrop-blur-md ${darkMode ? 'bg-white/6 border-white/10' : 'bg-white/76 border-white/80 shadow-[0_10px_22px_rgba(15,23,42,0.07)]'}`}>
+                          <div className={`text-[10px] font-black uppercase tracking-widest ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>最新定位</div>
+                          <div className={`mt-1 text-sm font-black ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>
+                              {parentQuickStats.classRank ? `班內 #${parentQuickStats.classRank} / ${parentQuickStats.classCount}` : '班級定位資料不足'}
+                          </div>
+                          <div className={`mt-1 text-[11px] font-bold ${darkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>
+                              {parentQuickStats.classTopPercent ? `約前 ${parentQuickStats.classTopPercent}%` : parentQuickStats.globalPRLabel}
+                          </div>
+                      </div>
+                      <div className={`rounded-2xl border px-4 py-3 backdrop-blur-md ${darkMode ? 'bg-white/6 border-white/10' : 'bg-white/76 border-white/80 shadow-[0_10px_22px_rgba(15,23,42,0.07)]'}`}>
+                          <div className={`text-[10px] font-black uppercase tracking-widest ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>與上次比較</div>
+                          <div className={`mt-1 text-sm font-black ${parentQuickStats.totalDelta !== null && parentQuickStats.totalDelta < 0 ? 'text-rose-500' : (darkMode ? 'text-slate-100' : 'text-slate-800')}`}>
+                              {parentQuickStats.totalDelta !== null ? `${formatSignedScore(parentQuickStats.totalDelta)} 分` : '資料不足'}
+                          </div>
+                          <div className={`mt-1 text-[11px] font-bold ${darkMode ? 'text-cyan-200' : 'text-cyan-700'}`}>
+                              {parentQuickStats.trendText}
+                          </div>
+                      </div>
+                      <div className={`rounded-2xl border px-4 py-3 backdrop-blur-md ${darkMode ? 'bg-white/6 border-white/10' : 'bg-white/76 border-white/80 shadow-[0_10px_22px_rgba(15,23,42,0.07)]'}`}>
+                          <div className={`text-[10px] font-black uppercase tracking-widest ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>科目焦點</div>
+                          <div className={`mt-1 text-[13px] font-bold leading-snug ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>
+                              {parentQuickStats.subjectInsightText}
+                          </div>
+                          <div className={`mt-1 text-[11px] font-bold ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
+                              最近測驗：{parentQuickStats.latestDate}（{parentQuickStats.className}）
+                          </div>
+                      </div>
+                      <div className={`rounded-2xl border px-4 py-3 backdrop-blur-md ${darkMode ? 'bg-white/6 border-white/10' : 'bg-white/76 border-white/80 shadow-[0_10px_22px_rgba(15,23,42,0.07)]'}`}>
+                          <div className={`text-[10px] font-black uppercase tracking-widest ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>家長建議</div>
+                          <div className={`mt-1 text-[13px] font-bold leading-snug ${darkMode ? 'text-emerald-100' : 'text-emerald-800'}`}>
+                              {parentQuickStats.probabilityHint}
+                          </div>
+                          <div className={`mt-1 text-[11px] font-bold ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
+                              {parentQuickStats.globalPRLabel}
+                          </div>
+                      </div>
+                  </div>
+                  )}
+
+                  <div className={`mb-6 rounded-2xl border p-4 backdrop-blur-md ${darkMode ? 'bg-white/5 border-white/10' : 'bg-white/72 border-white/80 shadow-[0_10px_24px_rgba(15,23,42,0.06)]'}`}>
+                      <div className={`text-[10px] font-black uppercase tracking-[0.16em] mb-3 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>家長看懂指標</div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          {PARENT_TERM_GUIDE.map((item) => (
+                              <div key={item.term} className={`rounded-xl border px-3 py-2.5 ${darkMode ? 'bg-slate-900/55 border-white/10' : 'bg-white/75 border-slate-200/70'}`}>
+                                  <div className={`text-[11px] font-black mb-1 ${darkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>{item.term}</div>
+                                  <div className={`text-[11px] leading-relaxed font-semibold ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>{item.description}</div>
+                              </div>
+                          ))}
+                      </div>
+                  </div>
 
                   {hasPriorHistory && (
                   <div className={`flex p-1 mb-6 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#08120d]/70 border-emerald-200/10' : 'bg-slate-50 border-slate-100'}`}>
@@ -4778,7 +5013,7 @@ export default function App() {
                                             <span className="text-sm font-bold text-slate-400 font-mono">{d.date}</span>
                                             {d.class && <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold opacity-60 ${darkMode ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-600'}`}>{d.class}</span>}
                                         </div>
-                                        <button onClick={() => openStatsModal(dateForRank, { total: d.total, chi: d.chi, eng: d.eng, math: d.math }, d.class)} className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all hover:scale-105 active:scale-95 shadow-md ${darkMode ? 'bg-[#193227] text-emerald-100 hover:bg-[#214233] border border-emerald-200/20 shadow-black/25' : 'bg-[linear-gradient(122deg,#ecfdf5_0%,#e0f2fe_55%,#eef2ff_100%)] text-emerald-800 hover:bg-[linear-gradient(122deg,#d1fae5_0%,#dbeafe_55%,#e0e7ff_100%)] shadow-emerald-200/70 border border-emerald-200/70'}`}>
+                                        <button onClick={() => openStatsModal(dateForRank, { total: d.total, chi: d.chi, eng: d.eng, math: d.math }, d.class)} className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all hover:scale-[1.03] active:scale-95 shadow-md backdrop-blur-md ${darkMode ? 'bg-[#193227]/92 text-emerald-100 hover:bg-[#214233] border border-emerald-200/20 shadow-black/25' : 'bg-[linear-gradient(122deg,rgba(236,253,245,0.92)_0%,rgba(224,242,254,0.92)_58%,rgba(238,242,255,0.9)_100%)] text-emerald-800 hover:bg-[linear-gradient(122deg,rgba(220,252,231,0.95)_0%,rgba(219,234,254,0.95)_58%,rgba(224,231,255,0.94)_100%)] shadow-emerald-200/70 border border-white/90 ring-1 ring-white/55'}`}>
                                             <BarChart2 className="w-3.5 h-3.5" /> 
                                             查看落點分析
                                             <ChevronRight className="w-3 h-3 opacity-80" />
@@ -4904,12 +5139,12 @@ export default function App() {
         )}
 
         {statsModalData && (
-            <div className="fixed inset-0 bg-black/62 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setStatsModalData(null)}>
-                <div className={`rounded-[2.2rem] w-full max-w-2xl overflow-hidden flex flex-col max-h-[92vh] border ${darkMode ? 'bg-slate-800 border-white/10' : 'bg-white border-slate-200 shadow-[0_30px_70px_rgba(15,23,42,0.22)]'}`} onClick={e => e.stopPropagation()}>
-                    <div className={`p-6 sm:p-7 border-b relative ${darkMode ? 'border-white/5 bg-slate-800/60' : 'border-slate-200 bg-gradient-to-r from-sky-50 via-white to-emerald-50'}`}>
+            <div className="fixed inset-0 bg-black/62 backdrop-blur-sm flex items-start sm:items-center justify-center z-[70] px-4 pb-4 pt-[calc(5rem+env(safe-area-inset-top))] sm:p-4" onClick={() => setStatsModalData(null)}>
+                <div className={`rounded-[2.2rem] w-full max-w-2xl overflow-hidden flex flex-col max-h-[calc(100svh-6rem-env(safe-area-inset-top))] sm:max-h-[92vh] border ${darkMode ? 'bg-slate-800 border-white/10' : 'bg-white/82 border-white/85 ring-1 ring-white/55 shadow-[0_30px_70px_rgba(15,23,42,0.22)] backdrop-blur-[24px]'}`} onClick={e => e.stopPropagation()}>
+                    <div className={`p-6 sm:p-7 border-b relative ${darkMode ? 'border-white/5 bg-slate-800/60' : 'border-white/75 bg-[linear-gradient(112deg,rgba(224,242,254,0.9)_0%,rgba(255,255,255,0.92)_46%,rgba(236,253,245,0.9)_100%)]'}`}>
                         <button onClick={() => setStatsModalData(null)} className={`absolute top-5 right-5 p-2 rounded-full transition ${darkMode ? 'bg-white/5 hover:bg-white/10 text-white' : 'bg-white hover:bg-slate-50 text-slate-500 border border-slate-200'}`}><X className="w-5 h-5"/></button>
                         <div className="pr-12">
-                            <div className={`text-[10px] font-black uppercase tracking-[0.18em] mb-2 ${darkMode ? 'text-blue-400' : 'text-sky-700'}`}>Placement Insight</div>
+                            <div className={`text-[10px] font-black uppercase tracking-[0.18em] mb-2 ${darkMode ? 'text-blue-400' : 'text-sky-700'}`}>落點分析報告</div>
                             <h3 className={`text-2xl font-black tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>{statsModalData.date} 落點分析</h3>
                             <div className="mt-3 flex flex-wrap items-center gap-2">
                                 <span className={`text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border ${darkMode ? 'text-slate-200 border-white/20 bg-white/5' : 'text-slate-700 border-slate-300 bg-white'}`}>{statsModalData.className || 'A班'}</span>
@@ -4932,29 +5167,60 @@ export default function App() {
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4">
-                            <div className={`rounded-xl px-3 py-2.5 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-white border-slate-200'}`}>
-                                <div className={`text-[10px] font-black uppercase tracking-wide ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>樣本數</div>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5 mb-4">
+                            <div className={`rounded-xl px-3 py-2.5 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-white/85 border-slate-200/85'}`}>
+                                <div className={`text-[10px] font-black uppercase tracking-wide ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>同場人數</div>
                                 <div className={`text-xl font-black ${darkMode ? 'text-white' : 'text-slate-800'}`}>{statsSummary?.sampleCount || 0}</div>
                             </div>
-                            <div className={`rounded-xl px-3 py-2.5 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-white border-slate-200'}`}>
+                            <div className={`rounded-xl px-3 py-2.5 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-white/85 border-slate-200/85'}`}>
+                                <div className={`text-[10px] font-black uppercase tracking-wide ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>班內位置</div>
+                                <div className={`text-sm font-black ${darkMode ? 'text-blue-300' : 'text-blue-700'}`}>
+                                    {statsSummary?.classRank !== null && statsSummary?.classRank !== undefined && statsSummary?.classSize
+                                        ? `#${statsSummary.classRank} / ${statsSummary.classSize}`
+                                        : '--'}
+                                </div>
+                                <div className={`text-[10px] font-bold mt-1 ${darkMode ? 'text-cyan-200' : 'text-cyan-700'}`}>
+                                    {statsSummary?.classTopPercent ? `約前 ${statsSummary.classTopPercent}%` : '班級排名資料不足'}
+                                </div>
+                            </div>
+                            <div className={`rounded-xl px-3 py-2.5 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-white/85 border-slate-200/85'}`}>
+                                <div className={`text-[10px] font-black uppercase tracking-wide ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>本次中位數</div>
+                                <div className={`text-sm font-black ${darkMode ? 'text-emerald-300' : 'text-emerald-700'}`}>
+                                    {statsSummary?.medianScore !== null && statsSummary?.medianScore !== undefined ? f1(statsSummary.medianScore) : '--'}
+                                </div>
+                                <div className={`text-[10px] font-bold mt-1 ${statsSummary?.medianGap !== null && statsSummary?.medianGap !== undefined && statsSummary.medianGap < 0 ? 'text-rose-500' : (darkMode ? 'text-emerald-200' : 'text-emerald-700')}`}>
+                                    {statsSummary?.medianGap !== null && statsSummary?.medianGap !== undefined ? `與中位數 ${formatSignedScore(statsSummary.medianGap)}` : '無法比較'}
+                                </div>
+                            </div>
+                            <div className={`rounded-xl px-3 py-2.5 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-white/85 border-slate-200/85'}`}>
                                 <div className={`text-[10px] font-black uppercase tracking-wide ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>我的區間</div>
                                 <div className={`text-sm font-black ${darkMode ? 'text-blue-300' : 'text-blue-700'}`}>{statsSummary?.myRange || '-'}</div>
+                                <div className={`text-[10px] font-bold mt-1 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
+                                    {statsSummary?.myBucketCount ? `${statsSummary.myBucketCount} 人（${statsSummary.myRangeRatio || 0}%）` : '同區間人數不足'}
+                                </div>
                             </div>
-                            <div className={`rounded-xl px-3 py-2.5 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-white border-slate-200'}`}>
+                            <div className={`rounded-xl px-3 py-2.5 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-white/85 border-slate-200/85'}`}>
                                 <div className={`text-[10px] font-black uppercase tracking-wide ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>最多人區間</div>
                                 <div className={`text-sm font-black ${darkMode ? 'text-amber-300' : 'text-amber-700'}`}>{statsSummary?.peakRange || '-'}</div>
+                                <div className={`text-[10px] font-bold mt-1 ${darkMode ? 'text-amber-200' : 'text-amber-700'}`}>{statsSummary?.peakCount || 0} 人</div>
                             </div>
-                            <div className={`rounded-xl px-3 py-2.5 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-white border-slate-200'}`}>
-                                <div className={`text-[10px] font-black uppercase tracking-wide ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>最多人數</div>
-                                <div className={`text-xl font-black ${darkMode ? 'text-emerald-300' : 'text-emerald-700'}`}>{statsSummary?.peakCount || 0}</div>
+                            <div className={`rounded-xl px-3 py-2.5 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-white/85 border-slate-200/85'}`}>
+                                <div className={`text-[10px] font-black uppercase tracking-wide ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>前進下一區間</div>
+                                <div className={`text-sm font-black ${darkMode ? 'text-violet-200' : 'text-violet-700'}`}>
+                                    {statsSummary?.pointsToNextBucket === null || statsSummary?.pointsToNextBucket === undefined
+                                        ? '--'
+                                        : statsSummary.pointsToNextBucket === 0
+                                            ? '已在最高區間'
+                                            : `再 +${statsSummary.pointsToNextBucket} 分`}
+                                </div>
+                                <div className={`text-[10px] font-bold mt-1 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>同科目分布估算</div>
                             </div>
                         </div>
 
-                        <div className={`rounded-2xl border p-3 mb-4 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-white border-slate-200'}`}>
+                        <div className={`rounded-2xl border p-3 mb-4 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-white/82 border-slate-200/90 backdrop-blur-md'}`}>
                             <div className="flex items-center justify-between px-2 mb-1">
                                 <div className={`text-xs font-black tracking-wide ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>{COLORS[statsActiveTab]?.label || '總分'}分布圖</div>
-                                <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>高亮柱為你的所在區間</div>
+                                <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>高亮柱為你目前所在區間</div>
                             </div>
                             <Suspense fallback={<ChartFallback heightClass="h-72" />}>
                                 <DistributionChart
@@ -4965,13 +5231,26 @@ export default function App() {
                             </Suspense>
                         </div>
 
-                        <div className={`rounded-2xl border p-4 ${darkMode ? 'bg-white/5 border-white/5' : 'bg-slate-50 border-slate-200'}`}>
-                            <div className="flex items-center justify-between">
+                        <div className={`rounded-2xl border p-4 ${darkMode ? 'bg-white/5 border-white/5' : 'bg-white/80 border-slate-200/80 backdrop-blur-md'}`}>
+                            <div className="flex items-center justify-between gap-3">
                                 <span className={`text-sm font-black ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>我的{COLORS[statsActiveTab]?.label || '總分'}分數</span>
                                 <span className={`text-2xl font-black ${darkMode ? 'text-white' : 'text-slate-800'}`}>{statsModalData.myGrades?.[statsActiveTab] ?? '-'}</span>
                             </div>
-                            <div className={`mt-3 text-xs leading-relaxed ${darkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-                                你的分數落在 <span className="font-black">{statsSummary?.myRange || '-'}</span>，本次最多學生集中在 <span className="font-black">{statsSummary?.peakRange || '-'}</span>（{statsSummary?.peakCount || 0} 人）。
+                            <div className={`mt-3 rounded-xl px-3 py-2 border ${darkMode ? 'border-white/10 bg-slate-900/60 text-slate-300' : 'border-slate-200 bg-white/90 text-slate-600'}`}>
+                                <div className="flex items-center gap-1.5 mb-1">
+                                    <Info className="w-3.5 h-3.5 text-sky-500" />
+                                    <span className="text-[11px] font-black tracking-wide">家長解讀</span>
+                                </div>
+                                <div className="text-xs leading-relaxed font-semibold">
+                                    {statsSummary?.standingLabel || '資料不足'}
+                                    ，目前落在 <span className="font-black">{statsSummary?.myRange || '-'}</span> 區間；
+                                    本次最多同學集中在 <span className="font-black">{statsSummary?.peakRange || '-'}</span>（{statsSummary?.peakCount || 0} 人）。
+                                </div>
+                            </div>
+                            <div className={`mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                                <div className={`rounded-lg px-2.5 py-2 border ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-slate-50'}`}>高於你：<span className="font-black">{statsSummary?.higherCount ?? 0}</span> 人</div>
+                                <div className={`rounded-lg px-2.5 py-2 border ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-slate-50'}`}>同分：<span className="font-black">{statsSummary?.equalCount ?? 0}</span> 人</div>
+                                <div className={`rounded-lg px-2.5 py-2 border ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-slate-50'}`}>低於你：<span className="font-black">{statsSummary?.lowerCount ?? 0}</span> 人</div>
                             </div>
                         </div>
                     </div>

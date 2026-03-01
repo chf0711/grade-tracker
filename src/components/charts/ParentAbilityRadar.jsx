@@ -98,9 +98,7 @@ export default function ParentAbilityRadar({
       <div className={`mt-2 rounded-2xl border overflow-hidden ${isDarkMode ? 'border-white/10' : 'border-slate-200/70'}`}>
         <div className={`grid grid-cols-[1fr_auto_auto_auto] text-[10px] font-bold px-3 py-2 ${isDarkMode ? 'bg-white/5 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>
           <span>科目</span>
-          <span>個人與成績中位數差值</span>
-          <span>個人</span>
-          <span>中位數</span>
+          <span className="col-span-3">個人與成績中位數差值</span>
         </div>
         <div className={isDarkMode ? 'bg-[#0b1510]' : 'bg-white'}>
           {subjectRows.map((row) => (

@@ -327,20 +327,6 @@ const TAB_DOT_BG_CLASS = {
     eng: 'bg-amber-500',
     math: 'bg-cyan-500'
 };
-const PARENT_TERM_GUIDE = [
-    {
-        term: '本部PR',
-        description: '和本部所有同學相比的百分等級；例如 PR60 代表約高於 60% 同學。'
-    },
-    {
-        term: '錄取機率（推估）',
-        description: '依歷次成績、階段權重與科目表現估算，做為努力方向參考，不是保證結果。'
-    },
-    {
-        term: '落點分析',
-        description: '看你在同班分數分布中的位置，快速知道自己落在哪一段、和多數同學差多少。'
-    }
-];
 const EMPTY_GRADE = { chi: '', eng: '', math: '', total: '', class: 'A班' };
 
 const hasAnySubjectScore = (gradeObj) => {
@@ -416,20 +402,6 @@ const resolveRiskLevel = (score) => {
     return '觀察';
 };
 
-const formatSignedScore = (value, digits = 1) => {
-    if (!Number.isFinite(value)) return '-';
-    const rounded = Number(value.toFixed(digits));
-    return rounded > 0 ? `+${rounded}` : `${rounded}`;
-};
-
-const resolveParentProbabilityDescription = (probability) => {
-    if (!Number.isFinite(probability)) return '目前資料不足，先觀察趨勢與本部PR變化。';
-    if (probability >= 80) return '目前落點穩健，持續維持學習節奏。';
-    if (probability >= 60) return '已接近安全區，建議穩定補強弱科。';
-    if (probability >= 40) return '仍在努力區，建議優先拉高落後科目。';
-    return '目前風險偏高，建議密集追蹤與加強練習。';
-};
-
 const getHeatCellStyle = (ratio, isDarkMode) => {
     if (!Number.isFinite(ratio)) {
         return isDarkMode
@@ -488,34 +460,31 @@ const getProbabilityVisual = (probValue, isDarkMode) => {
 };
 
 const buildDistributionTemplate = (maxScore) => {
-    const thresholds = [];
-    if (maxScore === 300) {
-        for (let i = 290; i >= 150; i -= 10) thresholds.push(i);
-    } else {
-        const floor = maxScore === 80 ? 40 : 60;
-        const start = maxScore - 10;
-        for (let i = start; i >= floor; i -= 10) thresholds.push(i);
+    const normalizedMax = Number.isFinite(maxScore) ? maxScore : 100;
+    const step = normalizedMax >= 260 ? 20 : 10;
+    const bucketCount = Math.max(1, Math.ceil(normalizedMax / step));
+    const buckets = [];
+
+    for (let index = bucketCount - 1; index >= 0; index -= 1) {
+        const min = index * step;
+        const upperBound = Math.min(normalizedMax, (index + 1) * step);
+        const label = index === bucketCount - 1
+            ? `${min}-${normalizedMax}`
+            : `${min}-${Math.max(min, upperBound - 1)}`;
+        buckets.push({ min, max: upperBound, label });
     }
 
-    const buckets = thresholds.map((min, i) => {
-        let label = `${min}-${min + 9}`;
-        let max = min + 9;
-        if (i === 0) {
-            label = `${min}-${maxScore}`;
-            max = maxScore;
-        }
-        return { min, max, label };
-    });
-
-    const bottomThreshold = thresholds[thresholds.length - 1] || 0;
-    buckets.push({ min: 0, max: bottomThreshold - 1, label: `<${bottomThreshold}` });
-
-    return { buckets };
+    return { buckets, step, maxScore: normalizedMax, bucketCount };
 };
 
 const resolveDistributionBucketIndex = (value, template) => {
-    if (!Number.isFinite(value)) return -1;
-    return template.buckets.findIndex((bucket) => value >= bucket.min && value <= bucket.max);
+    if (!Number.isFinite(value) || !template?.bucketCount || !template?.step) return -1;
+    const boundedValue = clamp(value, 0, template.maxScore);
+    const idxFromBottom = Math.min(
+        template.bucketCount - 1,
+        Math.floor(boundedValue / template.step)
+    );
+    return (template.bucketCount - 1) - idxFromBottom;
 };
 
 const buildPRLookupByScore = (scoresDesc) => {
@@ -2456,138 +2425,6 @@ export default function App() {
       setTimeout(() => setStatusMsg(''), 2000);
   };
 
-  const handleExportWeeklyReportExcel = async () => {
-      if (!window.XLSX) {
-          setStatusMsg('Excel 模組載入中，請稍後');
-          try {
-              await ensureXlsxReady();
-          } catch (error) {
-              console.error('XLSX load error:', error);
-              setStatusMsg('Excel 模組載入失敗');
-              setTimeout(() => setStatusMsg(''), 2000);
-              return;
-          }
-      }
-
-      if (!batchRowsForDisplay.length) {
-          setStatusMsg('目前沒有可匯出的資料');
-          setTimeout(() => setStatusMsg(''), 2000);
-          return;
-      }
-
-      const workbook = window.XLSX.utils.book_new();
-      const displayDateLabel = weekendLabelByDate[batchDate] || getWeekendDisplayLabel(batchDate) || batchDate;
-
-      const summaryRows = [
-          { 指標: '日期', 數值: displayDateLabel },
-          { 指標: '班級', 數值: teacherClassFilter },
-          { 指標: '人數', 數值: batchWeeklySummary?.count ?? batchRowsForDisplay.length },
-          { 指標: '平均總分', 數值: batchWeeklySummary?.avgTotal !== null && batchWeeklySummary?.avgTotal !== undefined ? Number(f1(batchWeeklySummary.avgTotal)) : '' },
-          { 指標: '平均 PR', 數值: batchWeeklySummary?.avgPR !== null && batchWeeklySummary?.avgPR !== undefined ? Number(f1(batchWeeklySummary.avgPR)) : '' },
-          { 指標: '平均錄取機率(%)', 數值: batchWeeklySummary?.avgProb !== null && batchWeeklySummary?.avgProb !== undefined ? Number(f1(batchWeeklySummary.avgProb)) : '' },
-          { 指標: '風險學生數', 數值: batchWeeklySummary?.riskCount ?? batchRiskAlerts.length },
-          { 指標: 'PR下滑人數', 數值: batchWeeklySummary?.prDropCount ?? 0 },
-          { 指標: '匯出時間', 數值: new Date().toLocaleString() }
-      ];
-      const summarySheet = window.XLSX.utils.json_to_sheet(summaryRows);
-      summarySheet['!cols'] = [{ wch: 16 }, { wch: 24 }];
-      window.XLSX.utils.book_append_sheet(workbook, summarySheet, '週報摘要');
-
-      const detailRows = batchRowsForDisplay.map((row, index) => ({
-          '序號': index + 1,
-          '學號': row.student.id,
-          '姓名': row.student.name || '',
-          '班級': row.dateGrades.class || '',
-          '國文': row.dateGrades.chi ?? '',
-          '英文': row.dateGrades.eng ?? '',
-          '數學': row.dateGrades.math ?? '',
-          '總分': row.dateGrades.total ?? '',
-          'PR': row.prValue === '-' ? '' : row.prValue,
-          '錄取機率(%)': row.probValue === '-' ? '' : row.probValue,
-          '查詢次數': queryStatsById[row.student.id] || 0
-      }));
-      const detailSheet = window.XLSX.utils.json_to_sheet(detailRows);
-      detailSheet['!cols'] = [
-          { wch: 6 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 12 }, { wch: 10 }
-      ];
-      window.XLSX.utils.book_append_sheet(workbook, detailSheet, '班級成績總表');
-
-      const riskRows = batchRiskAlerts.map((item, index) => ({
-          '序號': index + 1,
-          '學號': item.id,
-          '姓名': item.name,
-          '風險等級': item.riskLevel,
-          '風險分數': item.riskScore,
-          '總分': item.total ?? '',
-          'PR': item.pr ?? '',
-          '錄取機率(%)': item.prob ?? '',
-          '本部PR較上次變化': item.prDelta === null ? '' : item.prDelta,
-          '原因': item.reasons.join('、')
-      }));
-      const riskSheet = window.XLSX.utils.json_to_sheet(
-          riskRows.length ? riskRows : [{ 序號: '', 學號: '', 姓名: '', 風險等級: '', 風險分數: '', 原因: '本次無高風險名單' }]
-      );
-      riskSheet['!cols'] = [{ wch: 6 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 8 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 36 }];
-      window.XLSX.utils.book_append_sheet(workbook, riskSheet, '風險預警');
-
-      const heatmapRows = batchHeatmapRows.map((row) => ({
-          '學號': row.id,
-          '姓名': row.name,
-          '國文': row.values.chi ?? '',
-          '國文強度(0-1)': row.ratios.chi !== null ? Number(row.ratios.chi.toFixed(3)) : '',
-          '英文': row.values.eng ?? '',
-          '英文強度(0-1)': row.ratios.eng !== null ? Number(row.ratios.eng.toFixed(3)) : '',
-          '數學': row.values.math ?? '',
-          '數學強度(0-1)': row.ratios.math !== null ? Number(row.ratios.math.toFixed(3)) : '',
-          '總分': row.values.total ?? '',
-          '總分強度(0-1)': row.ratios.total !== null ? Number(row.ratios.total.toFixed(3)) : '',
-          'PR': row.values.pr ?? '',
-          'PR強度(0-1)': row.ratios.pr !== null ? Number(row.ratios.pr.toFixed(3)) : '',
-          '錄取機率(%)': row.values.prob ?? '',
-          '機率強度(0-1)': row.ratios.prob !== null ? Number(row.ratios.prob.toFixed(3)) : '',
-          '風險分數': row.riskScore || ''
-      }));
-      const heatmapSheet = window.XLSX.utils.json_to_sheet(heatmapRows);
-      heatmapSheet['!cols'] = [
-          { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 8 }, { wch: 12 },
-          { wch: 8 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 10 }
-      ];
-      window.XLSX.utils.book_append_sheet(workbook, heatmapSheet, '成績熱點圖數據');
-
-      const latestQueryLabelById = {};
-      queryStatsRows.forEach((item) => {
-          latestQueryLabelById[item.id] = item.latestAtLabel;
-      });
-      const queryRows = batchRowsForDisplay.map((row) => ({
-          '學號': row.student.id,
-          '姓名': row.student.name || '',
-          '查詢次數': Number(queryStatsById[row.student.id] || 0),
-          '最後查詢': latestQueryLabelById[row.student.id] || '--'
-      })).sort((a, b) => b['查詢次數'] - a['查詢次數']);
-      const querySheet = window.XLSX.utils.json_to_sheet(queryRows);
-      querySheet['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 18 }];
-      window.XLSX.utils.book_append_sheet(workbook, querySheet, '查詢次數');
-
-      const queryTimelineRows = queryEventTimeline.map((event, index) => ({
-          '序號': index + 1,
-          '日期': event.dateKey,
-          '時間': event.timeLabel,
-          '學號': event.id,
-          '姓名': event.name || ''
-      }));
-      const queryTimelineSheet = window.XLSX.utils.json_to_sheet(
-          queryTimelineRows.length ? queryTimelineRows : [{ 序號: '', 日期: '', 時間: '', 學號: '', 姓名: '' }]
-      );
-      queryTimelineSheet['!cols'] = [{ wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
-      window.XLSX.utils.book_append_sheet(workbook, queryTimelineSheet, '查詢時間序');
-
-      const safeClass = String(teacherClassFilter).replace(/[^\w\u4e00-\u9fa5-]/g, '');
-      const safeDate = String(batchDate || '').replace('/', '-');
-      window.XLSX.writeFile(workbook, `weekly_report_${safeDate}_${safeClass}.xlsx`);
-      setStatusMsg('已下載週報 Excel');
-      setTimeout(() => setStatusMsg(''), 2000);
-  };
-
   const parentSearchScoreContext = useMemo(() => {
       if (!cachedClassData.length || !sortedAvailableDatesAsc.length) return null;
       return buildProbabilityContext(cachedClassData, sortedAvailableDatesAsc, getTestDateID);
@@ -2855,25 +2692,6 @@ export default function App() {
       return Math.min(120, Math.ceil(maxValue / 10) * 10);
   }, [parentRadarData]);
 
-  const parentSubjectInsight = useMemo(() => {
-      if (!parentRadarData.length) return null;
-      const rows = parentRadarData.map((item) => ({
-          subject: item.subject,
-          delta: Number((item.student - item.classAvg).toFixed(1))
-      }));
-      if (!rows.length) return null;
-
-      const strongest = rows.reduce((top, current) => (
-          current.delta > top.delta ? current : top
-      ), rows[0]);
-      const weakest = rows.reduce((low, current) => (
-          current.delta < low.delta ? current : low
-      ), rows[0]);
-      const isBalanced = rows.every((row) => Math.abs(row.delta) < 2.5);
-
-      return { strongest, weakest, isBalanced };
-  }, [parentRadarData]);
-
   const activePhaseLabel = useMemo(() => {
       const phase = PHASES.find((item) => item.id === activePhase);
       return phase ? phase.name : '';
@@ -3052,77 +2870,6 @@ export default function App() {
           isMyRange: idx === myBucketIdx
       }));
   };
-
-  const parentQuickStats = useMemo(() => {
-      if (!parentPhaseDataDesc.length) return null;
-
-      const latest = parentPhaseDataDesc[0];
-      const previous = parentPhaseDataDesc[1] || null;
-      const weekendID = latest.weekendID || getTestDateID(latest.date);
-      const className = latest.class || 'A班';
-      const latestTotal = toNumberOrNull(latest.total);
-      const previousTotal = toNumberOrNull(previous?.total);
-
-      const totalDelta = latestTotal !== null && previousTotal !== null
-          ? Number((latestTotal - previousTotal).toFixed(1))
-          : null;
-      const trendText = totalDelta === null
-          ? '資料不足'
-          : totalDelta >= 8
-              ? '明顯進步'
-              : totalDelta >= 2
-                  ? '穩定進步'
-                  : totalDelta > -2
-                      ? '表現持平'
-                      : totalDelta > -8
-                          ? '小幅回落'
-                          : '需優先補強';
-
-      const classScores = scoreIndexByWeekendAndClass[weekendID]?.[className]?.total || [];
-      const classRankLookup = rankLookupByWeekendClassSubject[weekendID]?.[className]?.total;
-      const classRank = latestTotal !== null && classRankLookup
-          ? classRankLookup[latestTotal]
-          : undefined;
-      const classCount = classScores.length;
-      const classTopPercent = classRank !== undefined && classCount > 0
-          ? Math.max(1, Math.round((classRank / classCount) * 100))
-          : null;
-
-      const prLookup = globalPRLookupByWeekendSubject[weekendID]?.total;
-      const globalPRValue = latestTotal !== null && prLookup
-          ? prLookup.get(latestTotal)
-          : undefined;
-      const globalPRLabel = globalPRValue !== undefined ? `PR ${globalPRValue}` : '樣本不足';
-
-      const probability = toNumberOrNull(viewData?.prob);
-      const probabilityHint = resolveParentProbabilityDescription(probability);
-      const subjectInsightText = parentSubjectInsight
-          ? parentSubjectInsight.isBalanced
-              ? '三科差距小，整體節奏穩定。'
-              : `${parentSubjectInsight.weakest.subject}相對較弱，建議優先補強。`
-          : '等待更多測驗資料後提供。';
-
-      return {
-          latestDate: latest.date,
-          className,
-          classRank: classRank !== undefined ? classRank : null,
-          classCount,
-          classTopPercent,
-          globalPRLabel,
-          totalDelta,
-          trendText,
-          probabilityHint,
-          subjectInsightText
-      };
-  }, [
-      parentPhaseDataDesc,
-      getTestDateID,
-      scoreIndexByWeekendAndClass,
-      rankLookupByWeekendClassSubject,
-      globalPRLookupByWeekendSubject,
-      viewData,
-      parentSubjectInsight
-  ]);
 
   const globalPRByStudentAndWeekend = useMemo(() => {
       const totalsByWeekend = {};
@@ -3840,8 +3587,6 @@ export default function App() {
       let classRank = null;
       let classTopPercent = null;
       let classPercentile = null;
-      let medianScore = null;
-      let medianGap = null;
 
       if (myScore !== null && classScores.length) {
           classScores.forEach((score) => {
@@ -3853,16 +3598,8 @@ export default function App() {
           classRank = higherCount + 1;
           classTopPercent = Math.max(1, Math.round((classRank / classScores.length) * 100));
           classPercentile = Number((((lowerCount + (equalCount * 0.5)) / classScores.length) * 100).toFixed(1));
-          medianScore = resolveMedianScore(classScores);
-          if (medianScore !== null) {
-              medianGap = Number((myScore - medianScore).toFixed(1));
-          }
       }
 
-      const nextBucket = myBucketIndex > 0 ? distribution[myBucketIndex - 1] : null;
-      const pointsToNextBucket = myScore !== null && nextBucket
-          ? Math.max(0, Number((nextBucket.min - myScore).toFixed(1)))
-          : null;
       const myRangeRatio = sampleCount > 0
           ? Number(((myBucketCount / sampleCount) * 100).toFixed(1))
           : null;
@@ -3891,10 +3628,7 @@ export default function App() {
           standingLabel,
           higherCount,
           equalCount,
-          lowerCount,
-          medianScore,
-          medianGap,
-          pointsToNextBucket
+          lowerCount
       };
   }, [statsModalData, statsActiveTab, getTestDateID, scoreIndexByWeekendAndClass]);
 
@@ -4146,9 +3880,6 @@ export default function App() {
                                 </button>
                                 <button onClick={handleExportBatchExcel} className={`px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1 border ${darkMode ? 'bg-slate-800 text-slate-300 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
                                     <FileSpreadsheet className="w-3.5 h-3.5" /> 下載 Excel
-                                </button>
-                                <button onClick={handleExportWeeklyReportExcel} className={`px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1 border ${darkMode ? 'bg-emerald-900/40 text-emerald-200 border-emerald-400/30 hover:bg-emerald-800/50' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'}`}>
-                                    <FileSpreadsheet className="w-3.5 h-3.5" /> 下載週報
                                 </button>
                                 <button
                                   onClick={handleSaveBatchGrades}
@@ -4876,7 +4607,7 @@ export default function App() {
                    <div className="relative z-10 flex justify-between items-start mb-6">
                        {/* Left Side: Name & ID */}
                        <div>
-                           <div className={`text-[9px] font-bold uppercase tracking-widest mb-2 border inline-block px-2 py-1 rounded ${darkMode ? 'text-emerald-300 border-emerald-300/25' : 'text-emerald-700 border-emerald-200'}`}>學習檔案</div>
+                           <div className={`text-[9px] font-bold uppercase tracking-widest mb-2 border inline-block px-2 py-1 rounded ${darkMode ? 'text-emerald-300 border-emerald-300/25' : 'text-emerald-700 border-emerald-200'}`}>Student Profile</div>
                            <h3 className={`text-3xl font-bold tracking-tighter ${darkMode ? 'text-white' : 'text-slate-800'}`}>{viewData.name}</h3>
                            <p className="font-mono text-xs mt-1 font-bold text-slate-500">{viewData.id}</p>
                        </div>
@@ -4888,13 +4619,15 @@ export default function App() {
                            {/* --- NEW PROBABILITY DISPLAY --- */}
                            {viewData.prob && viewData.prob !== '-' && (
                                <div className="text-right mt-2">
-                                   <div className={`text-[10px] font-bold uppercase tracking-widest mb-0.5 ${darkMode ? 'text-emerald-300/80' : 'text-emerald-700/80'}`}>錄取機率（推估）</div>
+                                   <div className={`text-[10px] font-bold uppercase tracking-widest mb-0.5 ${darkMode ? 'text-emerald-300/80' : 'text-emerald-700/80'}`}>錄取機率</div>
                                    <div className="text-4xl font-black flex items-baseline justify-end gap-1" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>
                                        {viewData.prob}<span className="text-lg font-bold" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>%</span>
                                    </div>
-                                   <p className={`mt-1 text-[9px] font-medium ${darkMode ? 'text-slate-300/85' : 'text-slate-500'}`}>
-                                      依歷次成績推估，供家長判讀趨勢參考
-                                   </p>
+                                   <div className="mt-1 flex items-center justify-end gap-1.5 opacity-50">
+                                        <p className={`text-[9px] font-medium ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
+                                            系統綜合歷史成績運算，<span className={`${darkMode ? 'text-white/90 border-white/20' : 'text-slate-700 border-slate-300'} border-b pb-0.5`}>僅供參考</span>
+                                        </p>
+                                   </div>
                                </div>
                            )}
                        </div>
@@ -4908,59 +4641,6 @@ export default function App() {
                       <p className={`text-sm leading-relaxed font-medium whitespace-pre-line ${darkMode ? 'text-emerald-50' : 'text-slate-700'}`}>{teacherMessageForParent}</p>
                   </div>
                   )}
-
-                  {parentQuickStats && (
-                  <div className="mb-6 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-                      <div className={`rounded-2xl border px-4 py-3 backdrop-blur-md ${darkMode ? 'bg-white/6 border-white/10' : 'bg-white/76 border-white/80 shadow-[0_10px_22px_rgba(15,23,42,0.07)]'}`}>
-                          <div className={`text-[10px] font-black uppercase tracking-widest ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>最新定位</div>
-                          <div className={`mt-1 text-sm font-black ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>
-                              {parentQuickStats.classRank ? `班內 #${parentQuickStats.classRank} / ${parentQuickStats.classCount}` : '班級定位資料不足'}
-                          </div>
-                          <div className={`mt-1 text-[11px] font-bold ${darkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>
-                              {parentQuickStats.classTopPercent ? `約前 ${parentQuickStats.classTopPercent}%` : parentQuickStats.globalPRLabel}
-                          </div>
-                      </div>
-                      <div className={`rounded-2xl border px-4 py-3 backdrop-blur-md ${darkMode ? 'bg-white/6 border-white/10' : 'bg-white/76 border-white/80 shadow-[0_10px_22px_rgba(15,23,42,0.07)]'}`}>
-                          <div className={`text-[10px] font-black uppercase tracking-widest ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>與上次比較</div>
-                          <div className={`mt-1 text-sm font-black ${parentQuickStats.totalDelta !== null && parentQuickStats.totalDelta < 0 ? 'text-rose-500' : (darkMode ? 'text-slate-100' : 'text-slate-800')}`}>
-                              {parentQuickStats.totalDelta !== null ? `${formatSignedScore(parentQuickStats.totalDelta)} 分` : '資料不足'}
-                          </div>
-                          <div className={`mt-1 text-[11px] font-bold ${darkMode ? 'text-cyan-200' : 'text-cyan-700'}`}>
-                              {parentQuickStats.trendText}
-                          </div>
-                      </div>
-                      <div className={`rounded-2xl border px-4 py-3 backdrop-blur-md ${darkMode ? 'bg-white/6 border-white/10' : 'bg-white/76 border-white/80 shadow-[0_10px_22px_rgba(15,23,42,0.07)]'}`}>
-                          <div className={`text-[10px] font-black uppercase tracking-widest ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>科目焦點</div>
-                          <div className={`mt-1 text-[13px] font-bold leading-snug ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>
-                              {parentQuickStats.subjectInsightText}
-                          </div>
-                          <div className={`mt-1 text-[11px] font-bold ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
-                              最近測驗：{parentQuickStats.latestDate}（{parentQuickStats.className}）
-                          </div>
-                      </div>
-                      <div className={`rounded-2xl border px-4 py-3 backdrop-blur-md ${darkMode ? 'bg-white/6 border-white/10' : 'bg-white/76 border-white/80 shadow-[0_10px_22px_rgba(15,23,42,0.07)]'}`}>
-                          <div className={`text-[10px] font-black uppercase tracking-widest ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>家長建議</div>
-                          <div className={`mt-1 text-[13px] font-bold leading-snug ${darkMode ? 'text-emerald-100' : 'text-emerald-800'}`}>
-                              {parentQuickStats.probabilityHint}
-                          </div>
-                          <div className={`mt-1 text-[11px] font-bold ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
-                              {parentQuickStats.globalPRLabel}
-                          </div>
-                      </div>
-                  </div>
-                  )}
-
-                  <div className={`mb-6 rounded-2xl border p-4 backdrop-blur-md ${darkMode ? 'bg-white/5 border-white/10' : 'bg-white/72 border-white/80 shadow-[0_10px_24px_rgba(15,23,42,0.06)]'}`}>
-                      <div className={`text-[10px] font-black uppercase tracking-[0.16em] mb-3 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>家長看懂指標</div>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                          {PARENT_TERM_GUIDE.map((item) => (
-                              <div key={item.term} className={`rounded-xl border px-3 py-2.5 ${darkMode ? 'bg-slate-900/55 border-white/10' : 'bg-white/75 border-slate-200/70'}`}>
-                                  <div className={`text-[11px] font-black mb-1 ${darkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>{item.term}</div>
-                                  <div className={`text-[11px] leading-relaxed font-semibold ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>{item.description}</div>
-                              </div>
-                          ))}
-                      </div>
-                  </div>
 
                   {hasPriorHistory && (
                   <div className={`flex p-1 mb-6 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#08120d]/70 border-emerald-200/10' : 'bg-slate-50 border-slate-100'}`}>
@@ -4997,7 +4677,7 @@ export default function App() {
                   )}
                 </div>
                   
-                <div className={`p-6 border-t ${darkMode ? 'bg-[#101a15] border-emerald-200/10' : 'bg-white border-slate-100/80'}`}>
+                <div className={`p-6 border-t backdrop-blur-md ${darkMode ? 'bg-[#101a15] border-emerald-200/10' : 'bg-white/74 border-white/75 ring-1 ring-white/45'}`}>
                     <h4 className={`font-bold mb-6 text-xs flex items-center justify-center gap-2 tracking-widest uppercase ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>詳細紀錄</h4>
                     <div className="space-y-4">
                         {parentPhaseDataDesc.map((d, rowIndex) => {
@@ -5006,7 +4686,7 @@ export default function App() {
                              const totalRank = calculateRank(dateForRank, 'total', d.total, d.class);
                              const globalPR = calculateGlobalPR(dateForRank, 'total', d.total);
                              return (
-                             <div key={`${d.weekendID || d.date}-${rowIndex}`} className={`group p-5 rounded-3xl border transition-all duration-300 ${darkMode ? 'bg-white/5 border-white/5 hover:border-blue-500/20' : 'bg-white border-slate-200/70 shadow-[0_10px_28px_rgba(15,23,42,0.06)] hover:border-sky-200 hover:shadow-[0_18px_34px_rgba(14,165,233,0.12)]'}`}>
+                             <div key={`${d.weekendID || d.date}-${rowIndex}`} className={`group p-5 rounded-3xl border transition-all duration-300 ${darkMode ? 'bg-white/5 border-white/5 hover:border-blue-500/20' : 'bg-white/84 border-white/85 ring-1 ring-white/45 shadow-[0_10px_28px_rgba(15,23,42,0.06)] backdrop-blur-md hover:border-sky-200/90 hover:shadow-[0_18px_34px_rgba(14,165,233,0.12)]'}`}>
                                 <div className="flex justify-between items-start mb-4">
                                     <div className="flex flex-col gap-2 items-start">
                                         <div className="flex items-center gap-2">
@@ -5035,7 +4715,7 @@ export default function App() {
                                         const subScore = d[sub];
                                         const subRank = calculateRank(dateForRank, sub, subScore, d.class);
                                         return (
-                                            <div key={sub} className={`rounded-2xl p-2 text-center ${darkMode ? 'bg-slate-900' : 'bg-slate-50 border border-slate-200/70'}`}>
+                                            <div key={sub} className={`rounded-2xl p-2 text-center ${darkMode ? 'bg-slate-900' : 'bg-white/78 border border-white/80 ring-1 ring-white/45'}`}>
                                                 <div className={`text-[9px] font-bold opacity-80 mb-0.5 ${subColor}`}>{subLabel}</div>
                                                 <div className={`font-bold ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}>{f1(subScore)}</div>
                                                 {subRank !== '-' && <div className="text-[9px] font-bold text-slate-400 mt-0.5">#{subRank}</div>}
@@ -5140,8 +4820,8 @@ export default function App() {
 
         {statsModalData && (
             <div className="fixed inset-0 bg-black/62 backdrop-blur-sm flex items-start sm:items-center justify-center z-[70] px-4 pb-4 pt-[calc(5rem+env(safe-area-inset-top))] sm:p-4" onClick={() => setStatsModalData(null)}>
-                <div className={`rounded-[2.2rem] w-full max-w-2xl overflow-hidden flex flex-col max-h-[calc(100svh-6rem-env(safe-area-inset-top))] sm:max-h-[92vh] border ${darkMode ? 'bg-slate-800 border-white/10' : 'bg-white/82 border-white/85 ring-1 ring-white/55 shadow-[0_30px_70px_rgba(15,23,42,0.22)] backdrop-blur-[24px]'}`} onClick={e => e.stopPropagation()}>
-                    <div className={`p-6 sm:p-7 border-b relative ${darkMode ? 'border-white/5 bg-slate-800/60' : 'border-white/75 bg-[linear-gradient(112deg,rgba(224,242,254,0.9)_0%,rgba(255,255,255,0.92)_46%,rgba(236,253,245,0.9)_100%)]'}`}>
+                <div className={`rounded-[2.2rem] w-full max-w-2xl overflow-hidden flex flex-col max-h-[calc(100svh-6rem-env(safe-area-inset-top))] sm:max-h-[92vh] border ${darkMode ? 'bg-slate-800 border-white/10' : 'bg-white/95 border-slate-200/95 shadow-[0_30px_70px_rgba(15,23,42,0.22)]'}`} onClick={e => e.stopPropagation()}>
+                    <div className={`p-6 sm:p-7 border-b relative ${darkMode ? 'border-white/5 bg-slate-800/75' : 'border-slate-200/95 bg-[linear-gradient(112deg,rgba(224,242,254,0.96)_0%,rgba(255,255,255,0.98)_46%,rgba(236,253,245,0.96)_100%)]'}`}>
                         <button onClick={() => setStatsModalData(null)} className={`absolute top-5 right-5 p-2 rounded-full transition ${darkMode ? 'bg-white/5 hover:bg-white/10 text-white' : 'bg-white hover:bg-slate-50 text-slate-500 border border-slate-200'}`}><X className="w-5 h-5"/></button>
                         <div className="pr-12">
                             <div className={`text-[10px] font-black uppercase tracking-[0.18em] mb-2 ${darkMode ? 'text-blue-400' : 'text-sky-700'}`}>落點分析報告</div>
@@ -5167,12 +4847,12 @@ export default function App() {
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5 mb-4">
-                            <div className={`rounded-xl px-3 py-2.5 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-white/85 border-slate-200/85'}`}>
-                                <div className={`text-[10px] font-black uppercase tracking-wide ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>同場人數</div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 mb-4">
+                            <div className={`rounded-xl px-3 py-2.5 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-white border-slate-200/90'}`}>
+                                <div className={`text-[10px] font-black uppercase tracking-wide ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>應試人數</div>
                                 <div className={`text-xl font-black ${darkMode ? 'text-white' : 'text-slate-800'}`}>{statsSummary?.sampleCount || 0}</div>
                             </div>
-                            <div className={`rounded-xl px-3 py-2.5 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-white/85 border-slate-200/85'}`}>
+                            <div className={`rounded-xl px-3 py-2.5 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-white border-slate-200/90'}`}>
                                 <div className={`text-[10px] font-black uppercase tracking-wide ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>班內位置</div>
                                 <div className={`text-sm font-black ${darkMode ? 'text-blue-300' : 'text-blue-700'}`}>
                                     {statsSummary?.classRank !== null && statsSummary?.classRank !== undefined && statsSummary?.classSize
@@ -5183,41 +4863,21 @@ export default function App() {
                                     {statsSummary?.classTopPercent ? `約前 ${statsSummary.classTopPercent}%` : '班級排名資料不足'}
                                 </div>
                             </div>
-                            <div className={`rounded-xl px-3 py-2.5 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-white/85 border-slate-200/85'}`}>
-                                <div className={`text-[10px] font-black uppercase tracking-wide ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>本次中位數</div>
-                                <div className={`text-sm font-black ${darkMode ? 'text-emerald-300' : 'text-emerald-700'}`}>
-                                    {statsSummary?.medianScore !== null && statsSummary?.medianScore !== undefined ? f1(statsSummary.medianScore) : '--'}
-                                </div>
-                                <div className={`text-[10px] font-bold mt-1 ${statsSummary?.medianGap !== null && statsSummary?.medianGap !== undefined && statsSummary.medianGap < 0 ? 'text-rose-500' : (darkMode ? 'text-emerald-200' : 'text-emerald-700')}`}>
-                                    {statsSummary?.medianGap !== null && statsSummary?.medianGap !== undefined ? `與中位數 ${formatSignedScore(statsSummary.medianGap)}` : '無法比較'}
-                                </div>
-                            </div>
-                            <div className={`rounded-xl px-3 py-2.5 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-white/85 border-slate-200/85'}`}>
+                            <div className={`rounded-xl px-3 py-2.5 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-white border-slate-200/90'}`}>
                                 <div className={`text-[10px] font-black uppercase tracking-wide ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>我的區間</div>
                                 <div className={`text-sm font-black ${darkMode ? 'text-blue-300' : 'text-blue-700'}`}>{statsSummary?.myRange || '-'}</div>
                                 <div className={`text-[10px] font-bold mt-1 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
                                     {statsSummary?.myBucketCount ? `${statsSummary.myBucketCount} 人（${statsSummary.myRangeRatio || 0}%）` : '同區間人數不足'}
                                 </div>
                             </div>
-                            <div className={`rounded-xl px-3 py-2.5 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-white/85 border-slate-200/85'}`}>
+                            <div className={`rounded-xl px-3 py-2.5 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-white border-slate-200/90'}`}>
                                 <div className={`text-[10px] font-black uppercase tracking-wide ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>最多人區間</div>
                                 <div className={`text-sm font-black ${darkMode ? 'text-amber-300' : 'text-amber-700'}`}>{statsSummary?.peakRange || '-'}</div>
                                 <div className={`text-[10px] font-bold mt-1 ${darkMode ? 'text-amber-200' : 'text-amber-700'}`}>{statsSummary?.peakCount || 0} 人</div>
                             </div>
-                            <div className={`rounded-xl px-3 py-2.5 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-white/85 border-slate-200/85'}`}>
-                                <div className={`text-[10px] font-black uppercase tracking-wide ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>前進下一區間</div>
-                                <div className={`text-sm font-black ${darkMode ? 'text-violet-200' : 'text-violet-700'}`}>
-                                    {statsSummary?.pointsToNextBucket === null || statsSummary?.pointsToNextBucket === undefined
-                                        ? '--'
-                                        : statsSummary.pointsToNextBucket === 0
-                                            ? '已在最高區間'
-                                            : `再 +${statsSummary.pointsToNextBucket} 分`}
-                                </div>
-                                <div className={`text-[10px] font-bold mt-1 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>同科目分布估算</div>
-                            </div>
                         </div>
 
-                        <div className={`rounded-2xl border p-3 mb-4 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-white/82 border-slate-200/90 backdrop-blur-md'}`}>
+                        <div className={`rounded-2xl border p-3 mb-4 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-white border-slate-200/90'}`}>
                             <div className="flex items-center justify-between px-2 mb-1">
                                 <div className={`text-xs font-black tracking-wide ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>{COLORS[statsActiveTab]?.label || '總分'}分布圖</div>
                                 <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>高亮柱為你目前所在區間</div>
@@ -5231,7 +4891,7 @@ export default function App() {
                             </Suspense>
                         </div>
 
-                        <div className={`rounded-2xl border p-4 ${darkMode ? 'bg-white/5 border-white/5' : 'bg-white/80 border-slate-200/80 backdrop-blur-md'}`}>
+                        <div className={`rounded-2xl border p-4 ${darkMode ? 'bg-white/5 border-white/5' : 'bg-white border-slate-200/90'}`}>
                             <div className="flex items-center justify-between gap-3">
                                 <span className={`text-sm font-black ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>我的{COLORS[statsActiveTab]?.label || '總分'}分數</span>
                                 <span className={`text-2xl font-black ${darkMode ? 'text-white' : 'text-slate-800'}`}>{statsModalData.myGrades?.[statsActiveTab] ?? '-'}</span>

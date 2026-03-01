@@ -83,7 +83,7 @@ export default function ParentAbilityRadar({
       </div>
       <div className="grid grid-cols-3 gap-2 mt-1 mb-2">
         <div className={`rounded-xl border px-2.5 py-2 ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200/70'}`}>
-          <div className={`text-[10px] font-bold tracking-wide ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>個人與成績中位數差值</div>
+          <div className={`text-[10px] font-bold tracking-wide ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>平均差值</div>
           <div className={`text-sm font-black ${avgDelta >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{avgDelta > 0 ? `+${avgDelta}` : avgDelta}</div>
         </div>
         <div className={`rounded-xl border px-2.5 py-2 ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200/70'}`}>

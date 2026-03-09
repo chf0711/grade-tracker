@@ -34,13 +34,16 @@ const MAX_QUERY_EVENTS = 3000;
 const TEACHER_MESSAGE_DOC_ID = 'teacher_parent_message_v1';
 const SETTINGS_CACHE_TTL_MS = 10 * 60 * 1000;
 const STUDENT_CACHE_TTL_MS = 20 * 60 * 1000;
+const PARENT_QUERY_CACHE_TTL_MS = 20 * 60 * 1000;
+const MAX_PARENT_QUERY_CACHE_ENTRIES = 40;
 const QUERY_STATS_CACHE_TTL_MS = 2 * 60 * 1000;
 const QUERY_STATS_FLUSH_DELAY_MS = 2500;
 const LOCAL_CACHE_KEYS = Object.freeze({
     dates: 'grade_tracker_cache_dates_v1',
     classAverages: 'grade_tracker_cache_class_averages_v18',
     students: 'grade_tracker_cache_students_v1',
-    queryStats: 'grade_tracker_cache_query_stats_v1'
+    queryStats: 'grade_tracker_cache_query_stats_v1',
+    parentQueryResults: 'grade_tracker_cache_parent_query_results_v1'
 });
 
 const runtimeFirebaseConfig =
@@ -95,6 +98,145 @@ const writeLocalCache = (key, data) => {
     } catch {
         return;
     }
+};
+
+const hashFingerprint = (value) => {
+    const text = String(value || '');
+    let hash = 2166136261;
+    for (let i = 0; i < text.length; i += 1) {
+        hash ^= text.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(36);
+};
+
+const getParentCacheEntryKey = (studentId, dataVersion) => {
+    const normalizedId = String(studentId || '').toUpperCase().trim();
+    const normalizedVersion = String(dataVersion || '').trim();
+    if (!normalizedId || !normalizedVersion) return '';
+    return `${normalizedId}::${normalizedVersion}`;
+};
+
+const buildStudentGradesSignature = (student, getDateID) => {
+    if (!student || typeof student !== 'object') return '';
+    const gradeTokens = Object.entries(student.grades || {})
+        .map(([date, grade]) => {
+            const normalizedDate = getDateID(date) || normalizeDateToken(date) || String(date || '');
+            return `${normalizedDate}:${grade?.chi ?? ''},${grade?.eng ?? ''},${grade?.math ?? ''},${grade?.total ?? ''},${grade?.class ?? ''}`;
+        })
+        .sort()
+        .join('|');
+    return `${student.id || ''}:${student.lastUpdated || ''}:${gradeTokens}`;
+};
+
+const buildClassContextSignature = (students = [], getDateID) =>
+    students
+        .map((student) => buildStudentGradesSignature(student, getDateID))
+        .sort()
+        .join('|');
+
+const buildClassAveragesSignature = (dates, classAveragesMap, getDateID) => {
+    const weekendIDs = Array.from(
+        new Set((Array.isArray(dates) ? dates : []).map((date) => getDateID(date)).filter(Boolean))
+    );
+    return weekendIDs
+        .map((weekendID) => {
+            const avgData = classAveragesMap?.[weekendID] || {};
+            const all = avgData.all || {};
+            const classTokens = CLASS_DEFS
+                .map(({ id }) => {
+                    const classAvg = avgData[id] || {};
+                    return `${id}:${classAvg.total || ''},${classAvg.chi || ''},${classAvg.eng || ''},${classAvg.math || ''}`;
+                })
+                .join(';');
+            return `${weekendID}:${all.total || ''},${all.chi || ''},${all.eng || ''},${all.math || ''}|${classTokens}`;
+        })
+        .join('|');
+};
+
+const buildParentQueryDataVersion = ({ student, classData, dates, classAveragesMap, getDateID }) => {
+    const fingerprint = [
+        (Array.isArray(dates) ? dates : []).join('|'),
+        buildStudentGradesSignature(student, getDateID),
+        buildClassContextSignature(classData, getDateID),
+        buildClassAveragesSignature(dates, classAveragesMap, getDateID)
+    ].join('||');
+    return hashFingerprint(fingerprint);
+};
+
+const readParentQueryCache = (studentId, dataVersion) => {
+    const entryKey = getParentCacheEntryKey(studentId, dataVersion);
+    if (!entryKey) return null;
+    const cache = readLocalCache(LOCAL_CACHE_KEYS.parentQueryResults, PARENT_QUERY_CACHE_TTL_MS);
+    if (!cache || typeof cache !== 'object') return null;
+    const entry = cache[entryKey];
+    if (!entry || typeof entry !== 'object') return null;
+    if (!entry.result || typeof entry.result !== 'object') return null;
+    return entry.result;
+};
+
+const writeParentQueryCache = (studentId, dataVersion, result) => {
+    const entryKey = getParentCacheEntryKey(studentId, dataVersion);
+    if (!entryKey || !result || typeof result !== 'object') return;
+
+    const now = Date.now();
+    const currentCache = readLocalCache(LOCAL_CACHE_KEYS.parentQueryResults, PARENT_QUERY_CACHE_TTL_MS);
+    const safeCache = currentCache && typeof currentCache === 'object' ? currentCache : {};
+    const nextCache = {
+        ...safeCache,
+        [entryKey]: { ts: now, result }
+    };
+    const sortedEntries = Object.entries(nextCache).sort(
+        (a, b) => (Number(a?.[1]?.ts) || 0) - (Number(b?.[1]?.ts) || 0)
+    );
+    while (sortedEntries.length > MAX_PARENT_QUERY_CACHE_ENTRIES) {
+        sortedEntries.shift();
+    }
+    writeLocalCache(LOCAL_CACHE_KEYS.parentQueryResults, Object.fromEntries(sortedEntries));
+};
+
+const normalizeSearchText = (value) =>
+    String(value || '')
+        .trim()
+        .replace(/\s+/g, '')
+        .toUpperCase();
+
+const findStudentByIdOrName = (students, keyword) => {
+    if (!Array.isArray(students) || students.length === 0) {
+        return { student: null, duplicateName: false };
+    }
+
+    const rawKeyword = String(keyword || '').trim();
+    if (!rawKeyword) return { student: null, duplicateName: false };
+
+    const normalizedId = rawKeyword.toUpperCase();
+    const byId = students.find((student) => String(student?.id || '').toUpperCase() === normalizedId) || null;
+    if (byId) return { student: byId, duplicateName: false };
+
+    const normalizedName = normalizeSearchText(rawKeyword);
+    if (!normalizedName) return { student: null, duplicateName: false };
+
+    const exactNameMatches = students.filter(
+        (student) => normalizeSearchText(student?.name) === normalizedName
+    );
+    if (exactNameMatches.length === 1) {
+        return { student: exactNameMatches[0], duplicateName: false };
+    }
+    if (exactNameMatches.length > 1) {
+        return { student: null, duplicateName: true };
+    }
+
+    const fuzzyNameMatches = students.filter((student) =>
+        normalizeSearchText(student?.name).includes(normalizedName)
+    );
+    if (fuzzyNameMatches.length === 1) {
+        return { student: fuzzyNameMatches[0], duplicateName: false };
+    }
+    if (fuzzyNameMatches.length > 1) {
+        return { student: null, duplicateName: true };
+    }
+
+    return { student: null, duplicateName: false };
 };
 
 // --- Helpers ---
@@ -956,6 +1098,7 @@ export default function App() {
   const [teacherMessageLoading, setTeacherMessageLoading] = useState(false);
   const [teacherMessageSaving, setTeacherMessageSaving] = useState(false);
   const [teacherStudentMessageSavingId, setTeacherStudentMessageSavingId] = useState('');
+  const batchDirtyStudentIdsRef = useRef(new Set());
   const queryPendingCountsRef = useRef({});
   const queryPendingEventsRef = useRef([]);
   const queryFlushTimerRef = useRef(null);
@@ -1584,6 +1727,7 @@ export default function App() {
               if (!Array.isArray(cachedStudents) || cachedStudents.length === 0) return;
               setCachedClassData(cachedStudents);
               if (mode === 'teacher' && teacherViewMode === 'batch' && !isBatchDirty) {
+                  batchDirtyStudentIdsRef.current = new Set();
                   setAllStudentsData(cachedStudents);
               }
               return;
@@ -1978,6 +2122,7 @@ export default function App() {
           setAllStudentsData(sortedStudents);
           setCachedClassData(sortedStudents);
           writeLocalCache(LOCAL_CACHE_KEYS.students, sortedStudents);
+          batchDirtyStudentIdsRef.current = new Set();
           setIsBatchDirty(false);
 
           if (db && cleanupPayloads.length > 0) {
@@ -2180,6 +2325,7 @@ export default function App() {
           }
           return { ...s, grades: { ...currentGrades, [targetDate]: updatedDateGrades } };
       }));
+      batchDirtyStudentIdsRef.current.add(String(studentId));
       setIsBatchDirty(true);
   }, [batchDate, teacherClassFilter, getTestDateID, canEditStudentGrades, notifyPermissionDenied]); 
 
@@ -2271,6 +2417,7 @@ export default function App() {
 
         const newStudentsMap = allStudentsData.reduce((acc, s) => { acc[s.id] = { ...s, grades: { ...s.grades } }; return acc; }, {});
         const newDates = new Set(availableDates);
+        const touchedStudentIds = new Set();
         let importCount = 0;
         let lastImportedDate = '';
         let skippedInvalidDateCount = 0;
@@ -2366,6 +2513,7 @@ export default function App() {
               total: calculateTotal(chi, eng, math),
               class: className
           };
+          touchedStudentIds.add(rawId);
           importCount++;
         }
 
@@ -2387,7 +2535,10 @@ export default function App() {
         setAllStudentsData([...sortedStudents]);
         setCachedClassData([...sortedStudents]);
         writeLocalCache(LOCAL_CACHE_KEYS.students, sortedStudents);
-        setIsBatchDirty(true);
+        if (touchedStudentIds.size > 0) {
+            touchedStudentIds.forEach((id) => batchDirtyStudentIdsRef.current.add(String(id)));
+            setIsBatchDirty(true);
+        }
 
         if (importCount === 0) {
             if (skippedInvalidDateCount > 0) {
@@ -2447,6 +2598,7 @@ export default function App() {
       setAllStudentsData(prev => {
           const newData = [...prev];
           let updated = false;
+          const changedIds = new Set();
           rows.forEach((row, rIndex) => {
               const studentIndex = startStudentIndex + rIndex;
               if (studentIndex >= newData.length) return;
@@ -2466,10 +2618,12 @@ export default function App() {
                   currentDateGrades.total = calculateTotal(currentDateGrades.chi, currentDateGrades.eng, currentDateGrades.math);
                   student.grades = { ...currentGrades, [batchDate]: currentDateGrades };
                   newData[studentIndex] = student;
+                  changedIds.add(student.id);
                   updated = true;
               }
           });
           if(updated) {
+              changedIds.forEach((id) => batchDirtyStudentIdsRef.current.add(String(id)));
               setStatusMsg(`已貼上 ${rows.length} 筆資料`);
               setTimeout(() => setStatusMsg(''), 2000);
               setIsBatchDirty(true);
@@ -2610,16 +2764,33 @@ export default function App() {
           notifyPermissionDenied('2491212 權限無法修改學生成績');
           return;
       }
+      const dirtyIdSet = new Set(Array.from(batchDirtyStudentIdsRef.current));
+      const dirtyStudents = allStudentsData.filter((student) => dirtyIdSet.has(String(student.id)));
+      if (dirtyStudents.length === 0) {
+          setIsBatchDirty(false);
+          setStatusMsg('沒有變更需要儲存');
+          setTimeout(() => setStatusMsg(''), 1800);
+          return;
+      }
       setStatusMsg("批次儲存中...");
       try {
+          const nowIso = new Date().toISOString();
           if (db) {
-              const batchPromises = allStudentsData.map(student => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${student.id}`), { id: student.id, name: student.name, grades: student.grades, lastUpdated: new Date().toISOString() }, { merge: true }));
+              const batchPromises = dirtyStudents.map((student) =>
+                  setDoc(
+                      doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${student.id}`),
+                      { id: student.id, name: student.name, grades: student.grades, lastUpdated: nowIso },
+                      { merge: true }
+                  )
+              );
               await Promise.all(batchPromises);
-              setCachedClassData(allStudentsData);
-              writeLocalCache(LOCAL_CACHE_KEYS.students, allStudentsData);
-              setIsBatchDirty(false);
-              setStatusMsg("全班儲存成功"); setTimeout(() => setStatusMsg(''), 2000);
           }
+          setCachedClassData(allStudentsData);
+          writeLocalCache(LOCAL_CACHE_KEYS.students, allStudentsData);
+          batchDirtyStudentIdsRef.current = new Set();
+          setIsBatchDirty(false);
+          setStatusMsg(`已儲存 ${dirtyStudents.length} 位學生`);
+          setTimeout(() => setStatusMsg(''), 2000);
       } catch (e) {
           console.error('Save batch grades error:', e);
           setStatusMsg("儲存失敗");
@@ -2686,6 +2857,10 @@ export default function App() {
     }
     setSearchError(''); setViewData(null); setLoading(true);
     try {
+      const rawSearchKeyword = searchId.trim();
+      const normalizedSearchId = rawSearchKeyword.toUpperCase();
+      const matchFromList = (list) => findStudentByIdOrName(list, rawSearchKeyword);
+
       const effectiveDates = sortedAvailableDatesAsc.length > 0
           ? sortedAvailableDatesAsc
           : await loadDates();
@@ -2700,17 +2875,28 @@ export default function App() {
       });
       let data = null;
       let fullClassData = [];
-      const normalizedSearchId = searchId.toUpperCase().trim();
+      let hasDuplicateName = false;
 
       if (cachedClassData.length > 0) {
           fullClassData = cachedClassData;
-          data = cachedClassData.find((student) => String(student.id || '').toUpperCase() === normalizedSearchId) || null;
+          const matched = matchFromList(cachedClassData);
+          data = matched.student;
+          hasDuplicateName = matched.duplicateName;
       } else if (allStudentsData.length > 0) {
           fullClassData = allStudentsData;
-          data = allStudentsData.find((student) => String(student.id || '').toUpperCase() === normalizedSearchId) || null;
+          const matched = matchFromList(allStudentsData);
+          data = matched.student;
+          hasDuplicateName = matched.duplicateName;
       }
 
-      if (db && !data) {
+      if (!data && hasDuplicateName) {
+          setSearchError('同名學生超過 1 位，請改用學號查詢');
+          setLoading(false);
+          return;
+      }
+
+      const likelyStudentId = /^[A-Z0-9_-]{3,24}$/.test(normalizedSearchId);
+      if (db && !data && likelyStudentId) {
           const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${normalizedSearchId}`);
           const docSnap = await getDoc(docRef);
           if (docSnap.exists()) {
@@ -2726,7 +2912,7 @@ export default function App() {
           }
       }
 
-      if (db && data && fullClassData.length === 0) {
+      if (db && (!data || fullClassData.length === 0)) {
           const cachedStudents = readLocalCache(LOCAL_CACHE_KEYS.students, STUDENT_CACHE_TTL_MS);
           if (Array.isArray(cachedStudents) && cachedStudents.length > 0) {
               fullClassData = cachedStudents;
@@ -2756,8 +2942,37 @@ export default function App() {
               setCachedClassData(fullClassData);
               writeLocalCache(LOCAL_CACHE_KEYS.students, fullClassData);
           }
+
+          if (!data) {
+              const matched = matchFromList(fullClassData);
+              if (matched.duplicateName) {
+                  setSearchError('同名學生超過 1 位，請改用學號查詢');
+                  setLoading(false);
+                  return;
+              }
+              data = matched.student;
+          }
       }
       if (data) {
+        const contextData = fullClassData.length > 0
+            ? fullClassData
+            : (cachedClassData.length > 0 ? cachedClassData : allStudentsData);
+        const cacheStudentId = String(data.id || '').toUpperCase();
+        const parentQueryDataVersion = buildParentQueryDataVersion({
+            student: data,
+            classData: contextData,
+            dates: sortedDates,
+            classAveragesMap: classAverages,
+            getDateID: getSearchDateID
+        });
+        const cachedView = readParentQueryCache(cacheStudentId, parentQueryDataVersion);
+        if (cachedView) {
+            setViewData(cachedView);
+            incrementQueryCount(data.id);
+            setLoading(false);
+            return;
+        }
+
         const allChartData = [];
         
         // 建立 availableDates 的 weekendID Set，用於快速查找（使用新的連續日期邏輯）
@@ -2817,10 +3032,6 @@ export default function App() {
           return indexA - indexB;
         });
         const avg = allChartData.length > 0 ? (allChartData.reduce((a,b)=>a+b.total,0)/allChartData.length).toFixed(1) : 0;
-        
-        const contextData = fullClassData.length > 0
-            ? fullClassData
-            : (cachedClassData.length > 0 ? cachedClassData : allStudentsData);
         let studentProb = '-';
         
         if (contextData.length > 0) {
@@ -2848,9 +3059,11 @@ export default function App() {
             );
         }
 
-        setViewData({ ...data, chartData: allChartData, average: avg, prob: studentProb });
+        const nextViewData = { ...data, chartData: allChartData, average: avg, prob: studentProb };
+        setViewData(nextViewData);
+        writeParentQueryCache(cacheStudentId, parentQueryDataVersion, nextViewData);
         incrementQueryCount(data.id);
-      } else { setSearchError('查無此學號'); }
+      } else { setSearchError('查無此學號或姓名'); }
     } catch (e) {
       console.error('Parent search error:', e);
       setSearchError('系統忙碌');
@@ -4041,7 +4254,7 @@ export default function App() {
                       className="group w-full p-5 rounded-[1.45rem] border flex items-center gap-4 transition-all duration-200 backdrop-blur-xl bg-white/94 border-white/95 shadow-[0_14px_32px_rgba(15,23,42,0.09)] hover:bg-white hover:border-emerald-200/90 hover:-translate-y-0.5"
                     >
                       <div className="w-11 h-11 rounded-2xl flex items-center justify-center transition-colors bg-gradient-to-br from-sky-100 to-emerald-100 text-sky-700"><BarChart3 className="w-5 h-5" /></div>
-                      <div className="text-left flex-1"><h3 className="text-base font-black text-slate-800">家長查詢</h3><p className="text-[11px] text-slate-500 mt-0.5">輸入學號查看分析</p></div>
+                      <div className="text-left flex-1"><h3 className="text-base font-black text-slate-800">家長查詢</h3><p className="text-[11px] text-slate-500 mt-0.5">輸入學號或姓名查看分析</p></div>
                       <ChevronRight className="w-4.5 h-4.5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
                    </button>
                 </div>
@@ -4941,7 +5154,7 @@ export default function App() {
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-sky-500 via-emerald-500 to-indigo-500"></div>
               <h2 className={`text-2xl font-black mb-8 tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>查詢成績</h2>
               <div className={`w-full p-2 rounded-2xl border transition-all mb-6 shadow-inner ${darkMode ? 'bg-[#08120d]/70 border-emerald-200/15 focus-within:ring-2 focus-within:ring-emerald-500/20' : 'bg-white/75 border-white/85 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100'}`}>
-                <input type="text" placeholder="請輸入學號" className={`w-full bg-transparent border-none px-4 py-3 outline-none text-xl uppercase font-bold text-center tracking-widest placeholder:text-base placeholder:tracking-normal placeholder:font-medium ${darkMode ? 'text-white placeholder:text-slate-600' : 'text-slate-800 placeholder:text-slate-400'}`} value={searchId} onChange={(e) => setSearchId(e.target.value)} />
+                <input type="text" placeholder="請輸入學號或姓名" className={`w-full bg-transparent border-none px-4 py-3 outline-none text-xl font-bold text-center tracking-widest placeholder:text-base placeholder:tracking-normal placeholder:font-medium ${darkMode ? 'text-white placeholder:text-slate-600' : 'text-slate-800 placeholder:text-slate-400'}`} value={searchId} onChange={(e) => setSearchId(e.target.value)} />
               </div>
               <button onClick={handleParentSearch} disabled={loading || !user} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-2xl font-bold text-lg shadow-sm transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 tracking-wide">{loading ? '查詢中...' : (!user ? '連線中...' : '開始查詢')}</button>
               {searchError && <p className="mt-6 text-red-500 text-xs font-bold bg-red-500/10 inline-block px-4 py-2 rounded-full animate-pulse">{searchError}</p>}

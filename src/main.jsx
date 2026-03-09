@@ -49,6 +49,8 @@ class AppErrorBoundary extends Component {
   constructor(props) {
     super(props);
     this.state = { hasError: false, message: '' };
+    this.handleGlobalError = this.handleGlobalError.bind(this);
+    this.handleUnhandledRejection = this.handleUnhandledRejection.bind(this);
   }
 
   static getDerivedStateFromError(error) {
@@ -58,8 +60,40 @@ class AppErrorBoundary extends Component {
     };
   }
 
+  componentDidMount() {
+    if (typeof window === 'undefined') return;
+    window.addEventListener('error', this.handleGlobalError);
+    window.addEventListener('unhandledrejection', this.handleUnhandledRejection);
+  }
+
+  componentWillUnmount() {
+    if (typeof window === 'undefined') return;
+    window.removeEventListener('error', this.handleGlobalError);
+    window.removeEventListener('unhandledrejection', this.handleUnhandledRejection);
+  }
+
   componentDidCatch(error, errorInfo) {
     console.error('Runtime crash captured by ErrorBoundary:', error, errorInfo);
+  }
+
+  handleGlobalError(event) {
+    const message = event?.error?.message || event?.message || 'Unknown runtime error';
+    if (!this.state.hasError) {
+      this.setState({ hasError: true, message: String(message) });
+    }
+  }
+
+  handleUnhandledRejection(event) {
+    const reason = event?.reason;
+    const message =
+      typeof reason === 'string'
+        ? reason
+        : reason?.message
+          ? String(reason.message)
+          : 'Unhandled promise rejection';
+    if (!this.state.hasError) {
+      this.setState({ hasError: true, message });
+    }
   }
 
   render() {

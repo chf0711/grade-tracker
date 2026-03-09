@@ -4664,6 +4664,7 @@ export default function App() {
                         <thead className={`text-[10px] uppercase sticky top-0 z-10 backdrop-blur-md ${darkMode ? 'text-slate-500 bg-[#020617]/90' : 'text-slate-400 bg-white/90'}`}>
                             <tr>
                                 <th className="px-4 py-3 font-bold">日期</th>
+                                <th className="px-2 py-3 text-center text-slate-500 font-bold">班級</th>
                                 <th className="px-2 py-3 text-center text-rose-500 font-bold">國文</th>
                                 <th className="px-2 py-3 text-center text-amber-500 font-bold">英文</th>
                                 <th className="px-2 py-3 text-center text-cyan-500 font-bold">數學</th>

@@ -33,9 +33,14 @@ const QUERY_COUNT_RESET_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000;
 const MAX_QUERY_EVENTS = 3000;
 const TEACHER_MESSAGE_DOC_ID = 'teacher_parent_message_v1';
 const SETTINGS_CACHE_TTL_MS = 10 * 60 * 1000;
+const STUDENT_CACHE_TTL_MS = 20 * 60 * 1000;
+const QUERY_STATS_CACHE_TTL_MS = 2 * 60 * 1000;
+const QUERY_STATS_FLUSH_DELAY_MS = 2500;
 const LOCAL_CACHE_KEYS = Object.freeze({
     dates: 'grade_tracker_cache_dates_v1',
-    classAverages: 'grade_tracker_cache_class_averages_v18'
+    classAverages: 'grade_tracker_cache_class_averages_v18',
+    students: 'grade_tracker_cache_students_v1',
+    queryStats: 'grade_tracker_cache_query_stats_v1'
 });
 
 const runtimeFirebaseConfig =
@@ -525,6 +530,57 @@ const normalizeQueryEvent = (rawEvent) => {
     return { id, at, ts };
 };
 
+const toLocalDateKey = (tsLike) => {
+    const dateObj = tsLike instanceof Date ? tsLike : new Date(tsLike);
+    if (Number.isNaN(dateObj.getTime())) return '';
+    const y = dateObj.getFullYear();
+    const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const d = String(dateObj.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+};
+
+const formatMonitorDateLabel = (tsLike) => {
+    const dateObj = tsLike instanceof Date ? tsLike : new Date(tsLike);
+    if (Number.isNaN(dateObj.getTime())) return '--';
+    return dateObj.toLocaleDateString('zh-TW', { month: '2-digit', day: '2-digit', weekday: 'short' });
+};
+
+const formatMonitorTimeLabel = (tsLike, withSeconds = true) => {
+    const dateObj = tsLike instanceof Date ? tsLike : new Date(tsLike);
+    if (Number.isNaN(dateObj.getTime())) return '--';
+    return dateObj.toLocaleTimeString('zh-TW', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: withSeconds ? '2-digit' : undefined,
+        hour12: false
+    });
+};
+
+const formatMonitorDateTimeLabel = (tsLike, withSeconds = false) => {
+    const dateObj = tsLike instanceof Date ? tsLike : new Date(tsLike);
+    if (Number.isNaN(dateObj.getTime())) return '--';
+    return dateObj.toLocaleString('zh-TW', {
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: withSeconds ? '2-digit' : undefined,
+        hour12: false
+    });
+};
+
+const formatMonitorRelativeLabel = (tsLike) => {
+    const dateObj = tsLike instanceof Date ? tsLike : new Date(tsLike);
+    const ts = dateObj.getTime();
+    if (Number.isNaN(ts)) return '--';
+    const diffMs = Math.max(Date.now() - ts, 0);
+    const sec = Math.floor(diffMs / 1000);
+    if (sec < 45) return '剛剛';
+    if (sec < 3600) return `${Math.floor(sec / 60)} 分前`;
+    if (sec < 86400) return `${Math.floor(sec / 3600)} 小時前`;
+    return `${Math.floor(sec / 86400)} 天前`;
+};
+
 const sanitizeQueryEvents = (rawEvents, lastResetAt = '') => {
     const resetTs = new Date(lastResetAt || '').getTime();
     const validResetTs = Number.isNaN(resetTs) ? null : resetTs;
@@ -900,6 +956,10 @@ export default function App() {
   const [teacherMessageLoading, setTeacherMessageLoading] = useState(false);
   const [teacherMessageSaving, setTeacherMessageSaving] = useState(false);
   const [teacherStudentMessageSavingId, setTeacherStudentMessageSavingId] = useState('');
+  const queryPendingCountsRef = useRef({});
+  const queryPendingEventsRef = useRef([]);
+  const queryFlushTimerRef = useRef(null);
+  const queryFlushInFlightRef = useRef(false);
   const deferredQueryMonitorKeyword = useDeferredValue(queryMonitorKeyword);
     
   const [loading, setLoading] = useState(false);
@@ -1255,12 +1315,119 @@ export default function App() {
       return Date.now() - ts >= QUERY_COUNT_RESET_INTERVAL_MS;
   }, []);
 
-  const loadQueryStats = useCallback(async () => {
+  const applyPendingQueryStats = useCallback((baseCounts, baseEvents, lastResetAt) => {
+      const mergedCounts = (baseCounts && typeof baseCounts === 'object') ? { ...baseCounts } : {};
+      Object.entries(queryPendingCountsRef.current || {}).forEach(([id, delta]) => {
+          const nextDelta = Number(delta) || 0;
+          if (!nextDelta) return;
+          mergedCounts[id] = (Number(mergedCounts[id]) || 0) + nextDelta;
+      });
+
+      const pendingEvents = Array.isArray(queryPendingEventsRef.current) ? queryPendingEventsRef.current : [];
+      const mergedEvents = sanitizeQueryEvents(
+          [...(Array.isArray(baseEvents) ? baseEvents : []), ...pendingEvents],
+          lastResetAt
+      );
+
+      return { counts: mergedCounts, events: mergedEvents };
+  }, []);
+
+  const flushPendingQueryStats = useCallback(async (options = {}) => {
+      const force = Boolean(options && options.force);
+      if (!db) return;
+      if (queryFlushInFlightRef.current && !force) return;
+
+      const hasPendingBeforeFlush =
+          Object.keys(queryPendingCountsRef.current || {}).length > 0
+          || (queryPendingEventsRef.current || []).length > 0;
+      if (!hasPendingBeforeFlush) return;
+
+      const pendingCounts = { ...(queryPendingCountsRef.current || {}) };
+      const pendingEvents = [...(queryPendingEventsRef.current || [])];
+      queryPendingCountsRef.current = {};
+      queryPendingEventsRef.current = [];
+      queryFlushInFlightRef.current = true;
+
+      try {
+          const nowIso = new Date().toISOString();
+          const queryStatsDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'query_stats_v1');
+          const docSnap = await getDoc(queryStatsDocRef);
+          const raw = docSnap.exists() ? docSnap.data() : {};
+          let counts = (raw.counts && typeof raw.counts === 'object') ? raw.counts : {};
+          let lastResetAt = raw.lastResetAt || nowIso;
+          let events = sanitizeQueryEvents(raw.events, lastResetAt);
+
+          if (shouldResetQueryStats(lastResetAt)) {
+              counts = {};
+              events = [];
+              lastResetAt = nowIso;
+          }
+
+          Object.entries(pendingCounts).forEach(([id, delta]) => {
+              const nextDelta = Number(delta) || 0;
+              if (!nextDelta) return;
+              counts[id] = (Number(counts[id]) || 0) + nextDelta;
+          });
+          events = sanitizeQueryEvents([...events, ...pendingEvents], lastResetAt);
+
+          await setDoc(queryStatsDocRef, { counts, events, lastResetAt, updatedAt: nowIso }, { merge: true });
+
+          const merged = applyPendingQueryStats(counts, events, lastResetAt);
+          setQueryStatsById(merged.counts);
+          setQueryEvents(merged.events);
+          setQueryStatsLastResetAt(lastResetAt);
+          writeLocalCache(LOCAL_CACHE_KEYS.queryStats, { counts: merged.counts, events: merged.events, lastResetAt });
+      } catch (e) {
+          Object.entries(pendingCounts).forEach(([id, delta]) => {
+              const nextDelta = Number(delta) || 0;
+              if (!nextDelta) return;
+              queryPendingCountsRef.current[id] = (Number(queryPendingCountsRef.current[id]) || 0) + nextDelta;
+          });
+          queryPendingEventsRef.current = [...pendingEvents, ...(queryPendingEventsRef.current || [])].slice(-MAX_QUERY_EVENTS);
+          console.error('Flush query stats error:', e);
+      } finally {
+          queryFlushInFlightRef.current = false;
+          const hasPendingAfterFlush =
+              Object.keys(queryPendingCountsRef.current || {}).length > 0
+              || (queryPendingEventsRef.current || []).length > 0;
+          if (hasPendingAfterFlush && !queryFlushTimerRef.current) {
+              queryFlushTimerRef.current = setTimeout(() => {
+                  queryFlushTimerRef.current = null;
+                  void flushPendingQueryStats();
+              }, QUERY_STATS_FLUSH_DELAY_MS);
+          }
+      }
+  }, [shouldResetQueryStats, applyPendingQueryStats]);
+
+  const scheduleQueryStatsFlush = useCallback(() => {
+      if (!db || queryFlushTimerRef.current) return;
+      queryFlushTimerRef.current = setTimeout(() => {
+          queryFlushTimerRef.current = null;
+          void flushPendingQueryStats();
+      }, QUERY_STATS_FLUSH_DELAY_MS);
+  }, [flushPendingQueryStats]);
+
+  const loadQueryStats = useCallback(async (options = {}) => {
+      const force = Boolean(options && options.force);
       if (!db) {
           setQueryStatsById({});
           setQueryEvents([]);
           setQueryStatsLastResetAt('');
           return;
+      }
+
+      if (!force) {
+          const cachedStats = readLocalCache(LOCAL_CACHE_KEYS.queryStats, QUERY_STATS_CACHE_TTL_MS);
+          const cachedLastResetAt = String(cachedStats?.lastResetAt || '');
+          if (cachedStats && cachedLastResetAt && !shouldResetQueryStats(cachedLastResetAt)) {
+              const cachedCounts = (cachedStats.counts && typeof cachedStats.counts === 'object') ? cachedStats.counts : {};
+              const cachedEvents = sanitizeQueryEvents(cachedStats.events, cachedLastResetAt);
+              const merged = applyPendingQueryStats(cachedCounts, cachedEvents, cachedLastResetAt);
+              setQueryStatsById(merged.counts);
+              setQueryEvents(merged.events);
+              setQueryStatsLastResetAt(cachedLastResetAt);
+              return;
+          }
       }
 
       setQueryStatsLoading(true);
@@ -1280,15 +1447,17 @@ export default function App() {
               await setDoc(queryStatsDocRef, { counts, events, lastResetAt, updatedAt: nowIso }, { merge: true });
           }
 
-          setQueryStatsById(counts);
-          setQueryEvents(events);
+          const merged = applyPendingQueryStats(counts, events, lastResetAt);
+          setQueryStatsById(merged.counts);
+          setQueryEvents(merged.events);
           setQueryStatsLastResetAt(lastResetAt);
+          writeLocalCache(LOCAL_CACHE_KEYS.queryStats, { counts: merged.counts, events: merged.events, lastResetAt });
       } catch (e) {
           console.error('Load query stats error:', e);
       } finally {
           setQueryStatsLoading(false);
       }
-  }, [shouldResetQueryStats]);
+  }, [shouldResetQueryStats, applyPendingQueryStats]);
 
   const loadTeacherMessage = useCallback(async () => {
       if (!db) {
@@ -1318,7 +1487,7 @@ export default function App() {
       }
   }, []);
 
-  const incrementQueryCount = useCallback(async (studentId) => {
+  const incrementQueryCount = useCallback((studentId) => {
       const normalizedId = String(studentId || '').toUpperCase().trim();
       if (!normalizedId) return;
       const nowTs = Date.now();
@@ -1327,41 +1496,25 @@ export default function App() {
       setQueryStatsById((prev) => ({ ...prev, [normalizedId]: (prev[normalizedId] || 0) + 1 }));
       setQueryEvents((prev) => {
           const next = [...prev, { id: normalizedId, at: nowIso, ts: nowTs }];
-          return next.slice(-MAX_QUERY_EVENTS);
+          return sanitizeQueryEvents(next, queryStatsLastResetAt);
       });
 
       if (!db) return;
-
-      try {
-          const queryStatsDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'query_stats_v1');
-          const docSnap = await getDoc(queryStatsDocRef);
-          const raw = docSnap.exists() ? docSnap.data() : {};
-          let counts = (raw.counts && typeof raw.counts === 'object') ? raw.counts : {};
-          let lastResetAt = raw.lastResetAt || nowIso;
-          let events = sanitizeQueryEvents(raw.events, lastResetAt);
-
-          if (shouldResetQueryStats(lastResetAt)) {
-              counts = {};
-              events = [];
-              lastResetAt = nowIso;
-          }
-
-          counts[normalizedId] = (Number(counts[normalizedId]) || 0) + 1;
-          events = sanitizeQueryEvents([...events, { id: normalizedId, at: nowIso }], lastResetAt);
-          await setDoc(queryStatsDocRef, { counts, events, lastResetAt, updatedAt: nowIso }, { merge: true });
-
-          setQueryStatsById(counts);
-          setQueryEvents(events);
-          setQueryStatsLastResetAt(lastResetAt);
-      } catch (e) {
-          console.error('Increment query count error:', e);
-      }
-  }, [shouldResetQueryStats]);
+      queryPendingCountsRef.current[normalizedId] = (Number(queryPendingCountsRef.current[normalizedId]) || 0) + 1;
+      queryPendingEventsRef.current = [...(queryPendingEventsRef.current || []), { id: normalizedId, at: nowIso, ts: nowTs }].slice(-MAX_QUERY_EVENTS);
+      scheduleQueryStatsFlush();
+  }, [queryStatsLastResetAt, scheduleQueryStatsFlush]);
 
   const handleResetQueryStats = useCallback(async () => {
       const nowIso = new Date().toISOString();
       setQueryStatsLoading(true);
       try {
+          queryPendingCountsRef.current = {};
+          queryPendingEventsRef.current = [];
+          if (queryFlushTimerRef.current) {
+              clearTimeout(queryFlushTimerRef.current);
+              queryFlushTimerRef.current = null;
+          }
           if (db) {
               const queryStatsDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'query_stats_v1');
               await setDoc(queryStatsDocRef, { counts: {}, events: [], lastResetAt: nowIso, updatedAt: nowIso }, { merge: true });
@@ -1370,6 +1523,7 @@ export default function App() {
           setQueryStatsById({});
           setQueryEvents([]);
           setQueryStatsLastResetAt(nowIso);
+          writeLocalCache(LOCAL_CACHE_KEYS.queryStats, { counts: {}, events: [], lastResetAt: nowIso });
           setStatusMsg('查詢次數已重置');
           setTimeout(() => setStatusMsg(''), 2000);
       } catch (e) {
@@ -1388,6 +1542,29 @@ export default function App() {
   }, [mode, isAuthenticated, loadQueryStats]);
 
   useEffect(() => {
+      if (typeof document === 'undefined') return;
+      const handleVisibilityChange = () => {
+          if (document.visibilityState !== 'hidden') return;
+          if (queryFlushTimerRef.current) {
+              clearTimeout(queryFlushTimerRef.current);
+              queryFlushTimerRef.current = null;
+          }
+          void flushPendingQueryStats({ force: true });
+      };
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [flushPendingQueryStats]);
+
+  useEffect(() => {
+      return () => {
+          if (queryFlushTimerRef.current) {
+              clearTimeout(queryFlushTimerRef.current);
+              queryFlushTimerRef.current = null;
+          }
+      };
+  }, []);
+
+  useEffect(() => {
       if (mode !== 'teacher') return;
       setTeacherViewMode('batch');
   }, [mode]);
@@ -1396,6 +1573,42 @@ export default function App() {
       if (!user) return;
       loadTeacherMessage();
   }, [user, loadTeacherMessage]);
+
+  useEffect(() => {
+      if (typeof window === 'undefined') return;
+      const handleStorage = (event) => {
+          if (!event.key) return;
+
+          if (event.key === LOCAL_CACHE_KEYS.students) {
+              const cachedStudents = readLocalCache(LOCAL_CACHE_KEYS.students, STUDENT_CACHE_TTL_MS);
+              if (!Array.isArray(cachedStudents) || cachedStudents.length === 0) return;
+              setCachedClassData(cachedStudents);
+              if (mode === 'teacher' && teacherViewMode === 'batch' && !isBatchDirty) {
+                  setAllStudentsData(cachedStudents);
+              }
+              return;
+          }
+
+          if (event.key === LOCAL_CACHE_KEYS.queryStats && mode === 'teacher' && !queryStatsLoading) {
+              const cachedStats = readLocalCache(LOCAL_CACHE_KEYS.queryStats, QUERY_STATS_CACHE_TTL_MS);
+              if (!cachedStats || typeof cachedStats !== 'object') return;
+              const lastResetAt = String(cachedStats.lastResetAt || '');
+              if (!lastResetAt) return;
+              const merged = applyPendingQueryStats(
+                  (cachedStats.counts && typeof cachedStats.counts === 'object') ? cachedStats.counts : {},
+                  sanitizeQueryEvents(cachedStats.events, lastResetAt),
+                  lastResetAt
+              );
+              setQueryStatsById(merged.counts);
+              setQueryEvents(merged.events);
+              setQueryStatsLastResetAt(lastResetAt);
+          }
+      };
+
+      window.addEventListener('storage', handleStorage);
+      return () => window.removeEventListener('storage', handleStorage);
+  }, [mode, teacherViewMode, isBatchDirty, queryStatsLoading, applyPendingQueryStats]);
+
   const closeSecurityModal = useCallback(() => {
       setShowSecurityModal(false);
       setPendingAction(null);
@@ -1764,6 +1977,7 @@ export default function App() {
           const sortedStudents = Object.values(studentsMap).sort((a,b) => a.id.localeCompare(b.id));
           setAllStudentsData(sortedStudents);
           setCachedClassData(sortedStudents);
+          writeLocalCache(LOCAL_CACHE_KEYS.students, sortedStudents);
           setIsBatchDirty(false);
 
           if (db && cleanupPayloads.length > 0) {
@@ -1784,6 +1998,11 @@ export default function App() {
       let cancelled = false;
 
       const preloadClassData = async () => {
+          const cachedStudents = readLocalCache(LOCAL_CACHE_KEYS.students, STUDENT_CACHE_TTL_MS);
+          if (Array.isArray(cachedStudents) && cachedStudents.length > 0) {
+              setCachedClassData(cachedStudents);
+              return;
+          }
           try {
               const qSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'students'));
               if (cancelled) return;
@@ -1809,6 +2028,7 @@ export default function App() {
               }
               if (cancelled) return;
               setCachedClassData(preloaded);
+              writeLocalCache(LOCAL_CACHE_KEYS.students, preloaded);
           } catch (e) {
               console.error('Preload class data error:', e);
           }
@@ -2166,6 +2386,7 @@ export default function App() {
         const sortedStudents = Object.values(newStudentsMap).sort((a,b) => a.id.localeCompare(b.id));
         setAllStudentsData([...sortedStudents]);
         setCachedClassData([...sortedStudents]);
+        writeLocalCache(LOCAL_CACHE_KEYS.students, sortedStudents);
         setIsBatchDirty(true);
 
         if (importCount === 0) {
@@ -2347,8 +2568,10 @@ export default function App() {
     if (!studentToDelete) return;
     try {
         if (db) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${studentToDelete.id}`));
-        setAllStudentsData(prev => prev.filter(s => s.id !== studentToDelete.id));
-        setCachedClassData(prev => prev.filter(s => s.id !== studentToDelete.id));
+        const nextStudents = allStudentsData.filter((s) => s.id !== studentToDelete.id);
+        setAllStudentsData(nextStudents);
+        setCachedClassData(nextStudents);
+        writeLocalCache(LOCAL_CACHE_KEYS.students, nextStudents);
         setCurrentStudentId(null); setStudentName(''); setGrades({});
         setStatusMsg(`已刪除`); setTimeout(() => setStatusMsg(''), 2000); setStudentToDelete(null);
     } catch (e) {
@@ -2368,16 +2591,13 @@ export default function App() {
     try {
       if (db) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${currentStudentId}`), { id: currentStudentId, name: studentName, grades: grades, lastUpdated: new Date().toISOString() }, { merge: true });
       const savedStudent = { id: currentStudentId, name: studentName, grades };
-      setAllStudentsData(prev => {
-          const exists = prev.find(s => s.id === currentStudentId);
-          if(exists) return prev.map(s => s.id === currentStudentId ? { ...s, name: studentName, grades } : s);
-          return [...prev, savedStudent].sort((a,b) => a.id.localeCompare(b.id));
-      });
-      setCachedClassData(prev => {
-          const exists = prev.find(s => s.id === currentStudentId);
-          if (exists) return prev.map(s => s.id === currentStudentId ? { ...s, name: studentName, grades } : s);
-          return [...prev, savedStudent].sort((a, b) => a.id.localeCompare(b.id));
-      });
+      const exists = allStudentsData.find((s) => s.id === currentStudentId);
+      const nextStudents = exists
+          ? allStudentsData.map((s) => (s.id === currentStudentId ? { ...s, name: studentName, grades } : s))
+          : [...allStudentsData, savedStudent].sort((a, b) => a.id.localeCompare(b.id));
+      setAllStudentsData(nextStudents);
+      setCachedClassData(nextStudents);
+      writeLocalCache(LOCAL_CACHE_KEYS.students, nextStudents);
       setStatusMsg('儲存成功'); setTimeout(() => setStatusMsg(''), 2000);
     } catch (e) {
       console.error('Save grades error:', e);
@@ -2396,6 +2616,7 @@ export default function App() {
               const batchPromises = allStudentsData.map(student => setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${student.id}`), { id: student.id, name: student.name, grades: student.grades, lastUpdated: new Date().toISOString() }, { merge: true }));
               await Promise.all(batchPromises);
               setCachedClassData(allStudentsData);
+              writeLocalCache(LOCAL_CACHE_KEYS.students, allStudentsData);
               setIsBatchDirty(false);
               setStatusMsg("全班儲存成功"); setTimeout(() => setStatusMsg(''), 2000);
           }
@@ -2506,28 +2727,35 @@ export default function App() {
       }
 
       if (db && data && fullClassData.length === 0) {
-          const qSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'students'));
-          fullClassData = [];
-          const cleanupPayloads = [];
-          qSnap.forEach(d => {
-              const rawData = d.data();
-              const normalizedResult = normalizeGrades(rawData.grades, { withMeta: true });
-              fullClassData.push({ ...rawData, grades: normalizedResult.normalized });
-              if (normalizedResult.removedInvalidDates > 0 && rawData.id) {
-                  cleanupPayloads.push({
-                      id: rawData.id,
-                      payload: { ...rawData, grades: normalizedResult.normalized, lastUpdated: new Date().toISOString() }
-                  });
+          const cachedStudents = readLocalCache(LOCAL_CACHE_KEYS.students, STUDENT_CACHE_TTL_MS);
+          if (Array.isArray(cachedStudents) && cachedStudents.length > 0) {
+              fullClassData = cachedStudents;
+              setCachedClassData(cachedStudents);
+          } else {
+              const qSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'students'));
+              fullClassData = [];
+              const cleanupPayloads = [];
+              qSnap.forEach(d => {
+                  const rawData = d.data();
+                  const normalizedResult = normalizeGrades(rawData.grades, { withMeta: true });
+                  fullClassData.push({ ...rawData, grades: normalizedResult.normalized });
+                  if (normalizedResult.removedInvalidDates > 0 && rawData.id) {
+                      cleanupPayloads.push({
+                          id: rawData.id,
+                          payload: { ...rawData, grades: normalizedResult.normalized, lastUpdated: new Date().toISOString() }
+                      });
+                  }
+              });
+              if (cleanupPayloads.length > 0) {
+                  void Promise.all(
+                      cleanupPayloads.map((item) =>
+                          setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${item.id}`), item.payload)
+                      )
+                  ).catch((err) => console.error('Parent search cleanup invalid date error:', err));
               }
-          });
-          if (cleanupPayloads.length > 0) {
-              void Promise.all(
-                  cleanupPayloads.map((item) =>
-                      setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${item.id}`), item.payload)
-                  )
-              ).catch((err) => console.error('Parent search cleanup invalid date error:', err));
+              setCachedClassData(fullClassData);
+              writeLocalCache(LOCAL_CACHE_KEYS.students, fullClassData);
           }
-          setCachedClassData(fullClassData);
       }
       if (data) {
         const allChartData = [];
@@ -3204,9 +3432,11 @@ export default function App() {
                   id: event.id,
                   name: studentNameById[event.id] || '',
                   ts,
-                  dateKey: dateObj.toISOString().slice(0, 10),
-                  dateLabel: dateObj.toLocaleDateString('zh-TW', { month: '2-digit', day: '2-digit', weekday: 'short' }),
-                  timeLabel: dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+                  dateKey: toLocalDateKey(dateObj),
+                  dateLabel: formatMonitorDateLabel(dateObj),
+                  timeLabel: formatMonitorTimeLabel(dateObj, true),
+                  timeLabelShort: formatMonitorTimeLabel(dateObj, false),
+                  relativeLabel: formatMonitorRelativeLabel(dateObj)
               };
           })
           .filter(Boolean)
@@ -3223,6 +3453,10 @@ export default function App() {
           grouped[event.dateKey].items.push(event);
       });
       return Object.values(grouped)
+          .map((day) => ({
+              ...day,
+              items: [...day.items].sort((a, b) => b.ts - a.ts)
+          }))
           .sort((a, b) => b.dateKey.localeCompare(a.dateKey));
   }, [queryEventTimeline, shouldBuildQueryInsights]);
 
@@ -3237,7 +3471,7 @@ export default function App() {
           .map(([id, count]) => {
               const latestTs = latestTsById[id] || 0;
               const latestAtLabel = latestTs
-                  ? new Date(latestTs).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+                  ? formatMonitorDateTimeLabel(latestTs, false)
                   : '--';
               return {
                   id,
@@ -3269,13 +3503,7 @@ export default function App() {
           const count = Number(queryStatsById[id] || 0);
           const latestTs = Number(latestQueryTsById[id]) || 0;
           const latestAtLabel = latestTs
-              ? new Date(latestTs).toLocaleString([], {
-                  month: '2-digit',
-                  day: '2-digit',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  hour12: false
-              })
+              ? formatMonitorDateTimeLabel(latestTs, false)
               : '--';
 
           return {
@@ -4303,7 +4531,7 @@ export default function App() {
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <button
-                                          onClick={loadQueryStats}
+                                          onClick={() => loadQueryStats({ force: true })}
                                           disabled={queryStatsLoading}
                                           className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors ${
                                             queryStatsLoading
@@ -4347,7 +4575,7 @@ export default function App() {
                                     >
                                         <option value="all">全部日期</option>
                                         {queryEventsByDay.map((day) => (
-                                            <option key={day.dateKey} value={day.dateKey}>{day.dateLabel}</option>
+                                            <option key={day.dateKey} value={day.dateKey}>{`${day.dateLabel}（${day.items.length}）`}</option>
                                         ))}
                                     </select>
                                     <button
@@ -4388,7 +4616,7 @@ export default function App() {
                                 </div>
 
                                 <div className={`flex flex-wrap items-center justify-between gap-2 text-[11px] font-semibold ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
-                                    <span>上次重置：{queryStatsLastResetText}</span>
+                                    <span>上次重置：{queryStatsLastResetText}（時間依本機）</span>
                                     <span>
                                         監控範圍：{queryMonitorScope === 'class' ? `目前班級（${teacherClassFilter}）` : '全部學生'} / 排行 {queryStatsRowsFiltered.length} 人 / 事件 {queryFilteredEventList.length} 筆
                                     </span>
@@ -4606,7 +4834,7 @@ export default function App() {
                                 </div>
 
                                 <div className={`rounded-xl border overflow-hidden ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
-                                    <div className={`px-3 py-2 text-[10px] font-bold tracking-wide uppercase ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>每日查詢名單（依時間順序）</div>
+                                    <div className={`px-3 py-2 text-[10px] font-bold tracking-wide uppercase ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>每日查詢名單（由新到舊）</div>
                                     <div className="max-h-[20rem] overflow-y-auto">
                                         {queryEventsByDayFiltered.map((day) => (
                                             <div key={day.dateKey} className={`border-t ${darkMode ? 'border-white/5' : 'border-slate-100'}`}>
@@ -4616,10 +4844,11 @@ export default function App() {
                                                 </div>
                                                 <div>
                                                     {day.items.map((event, idx) => (
-                                                        <div key={`${event.id}-${event.ts}-${idx}`} className={`grid grid-cols-[5.4rem_6rem_1fr] gap-2 px-3 py-1.5 text-[11px] ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                                                        <div key={`${event.id}-${event.ts}-${idx}`} className={`grid grid-cols-[5.4rem_6rem_1fr_4.2rem] gap-2 px-3 py-1.5 text-[11px] ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>
                                                             <span className="font-mono">{event.timeLabel}</span>
                                                             <span className="font-mono">{event.id}</span>
                                                             <span className="truncate">{event.name || '-'}</span>
+                                                            <span className={`text-right text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>{event.relativeLabel}</span>
                                                         </div>
                                                     ))}
                                                 </div>

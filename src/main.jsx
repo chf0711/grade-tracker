@@ -78,9 +78,10 @@ class AppErrorBoundary extends Component {
 
   handleGlobalError(event) {
     const message = event?.error?.message || event?.message || 'Unknown runtime error';
-    if (!this.state.hasError) {
-      this.setState({ hasError: true, message: String(message) });
-    }
+    if (tryRecoverChunkFailure(message)) return;
+    if (!isChunkLoadErrorMessage(message)) return;
+    if (this.state.hasError) return;
+    this.setState({ hasError: true, message: String(message) });
   }
 
   handleUnhandledRejection(event) {
@@ -91,9 +92,13 @@ class AppErrorBoundary extends Component {
         : reason?.message
           ? String(reason.message)
           : 'Unhandled promise rejection';
-    if (!this.state.hasError) {
-      this.setState({ hasError: true, message });
+    if (tryRecoverChunkFailure(message)) {
+      event?.preventDefault?.();
+      return;
     }
+    if (!isChunkLoadErrorMessage(message)) return;
+    if (this.state.hasError) return;
+    this.setState({ hasError: true, message });
   }
 
   render() {

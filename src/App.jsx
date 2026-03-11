@@ -45,6 +45,7 @@ const LOCAL_CACHE_KEYS = Object.freeze({
     queryStats: 'grade_tracker_cache_query_stats_v1',
     parentQueryResults: 'grade_tracker_cache_parent_query_results_v1'
 });
+const STUDENTS_SESSION_SYNC_KEY = 'grade_tracker_students_session_synced_v1';
 
 const runtimeFirebaseConfig =
   typeof window !== 'undefined' ? window.__firebase_config : undefined;
@@ -517,6 +518,76 @@ const toNumberOrNull = (value) => {
     return Number.isFinite(num) ? num : null;
 };
 
+const countFilledSubjects = (gradeObj) =>
+    ['chi', 'eng', 'math'].reduce((count, key) => {
+        const value = gradeObj?.[key];
+        return value === '' || value === null || value === undefined ? count : count + 1;
+    }, 0);
+
+const resolveGradePriorityScore = (gradeObj) => {
+    const total = toNumberOrNull(gradeObj?.total);
+    const filledSubjects = countFilledSubjects(gradeObj);
+    return (total !== null ? 100 : 0) + (filledSubjects * 10);
+};
+
+const shouldReplaceGradeEntry = (currentEntry, nextEntry) => {
+    if (!currentEntry) return true;
+    const currentScore = resolveGradePriorityScore(currentEntry.grade);
+    const nextScore = resolveGradePriorityScore(nextEntry.grade);
+    if (nextScore !== currentScore) return nextScore > currentScore;
+    return customDateSort(currentEntry.sourceDate, nextEntry.sourceDate) < 0;
+};
+
+const buildWeekendGradeEntryMap = (grades, getDateID) => {
+    const weekendEntryMap = {};
+    Object.entries(grades || {}).forEach(([sourceDate, grade]) => {
+        const weekendID = getDateID(sourceDate);
+        if (!weekendID) return;
+        const nextEntry = { sourceDate, grade };
+        if (shouldReplaceGradeEntry(weekendEntryMap[weekendID], nextEntry)) {
+            weekendEntryMap[weekendID] = nextEntry;
+        }
+    });
+    return weekendEntryMap;
+};
+
+const normalizeAverageGrade = (gradeObj) => {
+    const normalized = {
+        chi: gradeObj?.chi ?? '',
+        eng: gradeObj?.eng ?? '',
+        math: gradeObj?.math ?? '',
+        total: gradeObj?.total ?? ''
+    };
+    if (
+        normalized.total === ''
+        && (normalized.chi !== '' || normalized.eng !== '' || normalized.math !== '')
+    ) {
+        normalized.total = calculateTotal(normalized.chi, normalized.eng, normalized.math);
+    }
+    return normalized;
+};
+
+const normalizeClassAveragesByWeekend = (rawAverages, getDateID) => {
+    if (!rawAverages || typeof rawAverages !== 'object') return {};
+    const normalized = {};
+    const orderedDateKeys = Object.keys(rawAverages).sort(customDateSort);
+
+    orderedDateKeys.forEach((dateKey) => {
+        const weekendID = getDateID(dateKey) || normalizeDateToken(dateKey);
+        if (!weekendID) return;
+        const classMap = rawAverages?.[dateKey];
+        if (!classMap || typeof classMap !== 'object') return;
+        if (!normalized[weekendID]) normalized[weekendID] = {};
+
+        Object.entries(classMap).forEach(([classId, gradeObj]) => {
+            if (!gradeObj || typeof gradeObj !== 'object') return;
+            normalized[weekendID][classId] = normalizeAverageGrade(gradeObj);
+        });
+    });
+
+    return normalized;
+};
+
 const PROBABILITY_RULES = Object.freeze({
     NORMAL_WEIGHT: 1,
     MOCK_WEIGHT: 2.5,
@@ -771,7 +842,8 @@ const calculateProbLogic = (
     const myGrades = studentGradeMaps[targetStudent.id] || {};
 
     availableDates.forEach((date) => {
-         const weekendID = getWeekendID(date, availableDates);
+         const weekendID = normalizeDateToken(date) || getWeekendID(date, availableDates);
+         if (!weekendID) return;
          const grade = myGrades[weekendID];
          let myTotal = null;
          let myMath = null;
@@ -870,7 +942,9 @@ const calculateProbLogic = (
 };
 
 const buildProbabilityContext = (students, availableDates, getDateID) => {
-    const normalizedDates = Array.isArray(availableDates) ? availableDates : [];
+    const normalizedDates = Array.from(
+        new Set((Array.isArray(availableDates) ? availableDates : []).map((date) => getDateID(date)).filter(Boolean))
+    ).sort(customDateSort);
     const scoresByDate = {};
     const mathScoresByDate = {};
     const probabilityProfiles = {};
@@ -884,16 +958,16 @@ const buildProbabilityContext = (students, availableDates, getDateID) => {
         }
     };
 
-    normalizedDates.forEach((date) => {
-        ensureWeekendBucket(getDateID(date));
+    normalizedDates.forEach((weekendID) => {
+        ensureWeekendBucket(weekendID);
     });
 
     students.forEach((student) => {
         if (!student?.grades) return;
-        Object.entries(student.grades).forEach(([date, grade]) => {
-            const weekendID = getDateID(date);
-            if (!weekendID) return;
+        const weekendEntries = buildWeekendGradeEntryMap(student.grades, getDateID);
+        Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
             ensureWeekendBucket(weekendID);
+            const grade = entry.grade;
 
             const totalRaw = grade?.total;
             if (totalRaw && !Number.isNaN(parseFloat(totalRaw))) {
@@ -1180,28 +1254,64 @@ export default function App() {
       return labels;
   }, [sortedAvailableDatesDesc]);
 
+  // 單人檢視改為以「考次(weekendID)」去重，避免同一週末出現兩列（例如 03/08 與 03/09）
+  const singleViewDateEntries = useMemo(() => {
+      const weekendEntryMap = buildWeekendGradeEntryMap(grades, getTestDateID);
+
+      const seen = new Set();
+      const entries = [];
+      sortedAvailableDatesDesc.forEach((date) => {
+          const weekendID = getTestDateID(date);
+          if (!weekendID || seen.has(weekendID)) return;
+          seen.add(weekendID);
+          const gradeKey = weekendEntryMap?.[weekendID]?.sourceDate || date;
+          entries.push({
+              date,
+              weekendID,
+              gradeKey,
+              label: weekendLabelByDate[date] || getWeekendDisplayLabel(date)
+          });
+      });
+      return entries;
+  }, [sortedAvailableDatesDesc, grades, getTestDateID, weekendLabelByDate]);
+
+  const singleViewDateKeys = useMemo(
+      () => singleViewDateEntries.map((entry) => entry.gradeKey),
+      [singleViewDateEntries]
+  );
+
   const selectedBatchWeekendID = useMemo(
       () => (batchDate ? getTestDateID(batchDate) : ''),
       [batchDate, getTestDateID]
   );
 
   const teacherDateCards = useMemo(() => {
-      return sortedAvailableDatesDesc.map((date, idx) => {
+      const cards = [];
+      const seenWeekendIds = new Set();
+      sortedAvailableDatesDesc.forEach((date) => {
+          const weekendID = getTestDateID(date);
+          if (!weekendID || seenWeekendIds.has(weekendID)) return;
+          seenWeekendIds.add(weekendID);
           const phaseId = resolvePhaseByDate(date, sortedAvailableDatesAsc);
           const phaseLabel = phaseId === 'p1' ? '第一階段' : phaseId === 'mock' ? '模考班' : '第二階段';
-          const weekendID = getTestDateID(date);
-          return {
+          cards.push({
               date,
+              weekendID,
               label: weekendLabelByDate[date] || getWeekendDisplayLabel(date),
               phaseId,
               phaseLabel,
-              isLatest: idx === 0,
+              isLatest: cards.length === 0,
               isSelected: teacherViewMode === 'batch' && Boolean(selectedBatchWeekendID) && weekendID === selectedBatchWeekendID
-          };
+          });
       });
+      return cards;
   }, [sortedAvailableDatesDesc, sortedAvailableDatesAsc, weekendLabelByDate, teacherViewMode, selectedBatchWeekendID, getTestDateID]);
 
-  const latestAvailableDate = sortedAvailableDatesDesc[0] || '';
+  const latestAvailableDate = useMemo(() => {
+      if (!sortedAvailableDatesAsc.length) return '';
+      const latestRawDate = sortedAvailableDatesAsc[sortedAvailableDatesAsc.length - 1];
+      return getTestDateID(latestRawDate) || latestRawDate;
+  }, [sortedAvailableDatesAsc, getTestDateID]);
 
   const orderedWeekendIds = useMemo(() => {
       const ids = [];
@@ -1220,16 +1330,19 @@ export default function App() {
       const gradeMaps = {};
       allStudentsData.forEach((student) => {
           const weekendGrades = {};
-          Object.entries(student.grades || {}).forEach(([date, grade]) => {
-              const weekendID = getTestDateID(date);
-              if (!(weekendID in weekendGrades)) {
-                  weekendGrades[weekendID] = grade;
-              }
+          const weekendEntries = buildWeekendGradeEntryMap(student.grades, getTestDateID);
+          Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
+              weekendGrades[weekendID] = entry.grade;
           });
           gradeMaps[student.id] = weekendGrades;
       });
       return gradeMaps;
   }, [allStudentsData, getTestDateID]);
+
+  const avgSettingsDateKeysDesc = useMemo(
+      () => [...orderedWeekendIds].slice().reverse(),
+      [orderedWeekendIds]
+  );
 
   useEffect(() => {
       const storedAuth = localStorage.getItem('teacher_auth');
@@ -1363,18 +1476,21 @@ export default function App() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-      if (!sortedAvailableDatesAsc.length) return;
-      const latestDate = sortedAvailableDatesAsc[sortedAvailableDatesAsc.length - 1];
-      if (!batchDate || !sortedAvailableDatesAsc.includes(batchDate)) {
-          setBatchDate(latestDate);
+      if (!orderedWeekendIds.length) return;
+      const latestWeekendID = orderedWeekendIds[orderedWeekendIds.length - 1];
+      const currentWeekendID = batchDate ? getTestDateID(batchDate) : '';
+      if (!currentWeekendID || !orderedWeekendIds.includes(currentWeekendID)) {
+          setBatchDate(latestWeekendID);
       }
-  }, [sortedAvailableDatesAsc, batchDate]);
+  }, [orderedWeekendIds, batchDate, getTestDateID]);
 
   useEffect(() => {
-      if (mode !== 'teacher' || !sortedAvailableDatesAsc.length) return;
-      const latestDate = sortedAvailableDatesAsc[sortedAvailableDatesAsc.length - 1];
-      setBatchDate(latestDate);
-  }, [mode, sortedAvailableDatesAsc]);
+      if (mode !== 'teacher' || !orderedWeekendIds.length) return;
+      const latestWeekendID = orderedWeekendIds[orderedWeekendIds.length - 1];
+      if (!batchDate) {
+          setBatchDate(latestWeekendID);
+      }
+  }, [mode, orderedWeekendIds, batchDate]);
 
   const hasPendingBatchChanges = mode === 'teacher' && teacherViewMode === 'batch' && isBatchDirty;
 
@@ -1808,20 +1924,20 @@ export default function App() {
           return buckets;
       };
 
-      const dateToWeekendID = {};
       const groupsByWeekendID = {};
 
       availableDates.forEach(date => {
           const weekendID = getTestDateID(date);
-          dateToWeekendID[date] = weekendID;
+          if (!weekendID) return;
           if (!groupsByWeekendID[weekendID]) {
               groupsByWeekendID[weekendID] = createBuckets();
           }
       });
 
       allStudentsData.forEach(student => {
-          Object.entries(student.grades || {}).forEach(([gradeDate, grade]) => {
-              const weekendID = getTestDateID(gradeDate);
+          const weekendEntries = buildWeekendGradeEntryMap(student.grades, getTestDateID);
+          Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
+              const grade = entry.grade;
               const groups = groupsByWeekendID[weekendID];
               if (!groups) return;
 
@@ -1851,15 +1967,14 @@ export default function App() {
           });
       });
 
-      availableDates.forEach(date => {
-          const weekendID = dateToWeekendID[date];
+      Object.keys(groupsByWeekendID).forEach((weekendID) => {
           const groups = groupsByWeekendID[weekendID] || createBuckets();
-          avgs[date] = {};
+          avgs[weekendID] = {};
 
           Object.keys(groups).forEach(key => {
               const g = groups[key];
               if (g.count > 0) {
-                  avgs[date][key] = {
+                  avgs[weekendID][key] = {
                       total: (g.t / g.count).toFixed(1),
                       chi: (g.c / g.count).toFixed(1),
                       eng: (g.e / g.count).toFixed(1),
@@ -1874,7 +1989,10 @@ export default function App() {
   const loadClassAverages = async () => {
       const cachedAverages = readLocalCache(LOCAL_CACHE_KEYS.classAverages);
       if (cachedAverages && typeof cachedAverages === 'object') {
-          setClassAverages({ ...localComputedAverages, ...cachedAverages });
+          const normalizedCache = normalizeClassAveragesByWeekend(cachedAverages, getTestDateID);
+          const mergedAverages = { ...localComputedAverages, ...normalizedCache };
+          setClassAverages(mergedAverages);
+          writeLocalCache(LOCAL_CACHE_KEYS.classAverages, mergedAverages);
           return;
       }
       if (!db) {
@@ -1885,7 +2003,7 @@ export default function App() {
       try {
           const docSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'class_averages_v18'));
           let dbAverages = {};
-          if (docSnap.exists()) dbAverages = docSnap.data().averages || {};
+          if (docSnap.exists()) dbAverages = normalizeClassAveragesByWeekend(docSnap.data().averages || {}, getTestDateID);
           const mergedAverages = { ...localComputedAverages, ...dbAverages };
           setClassAverages(mergedAverages);
           writeLocalCache(LOCAL_CACHE_KEYS.classAverages, mergedAverages);
@@ -1899,16 +2017,17 @@ export default function App() {
   useEffect(() => {
       if (allStudentsData.length > 0) {
           setClassAverages(prev => {
-              const next = { ...prev, ...localComputedAverages };
+              const next = normalizeClassAveragesByWeekend({ ...prev, ...localComputedAverages }, getTestDateID);
               writeLocalCache(LOCAL_CACHE_KEYS.classAverages, next);
               return next;
           });
       }
-  }, [localComputedAverages, allStudentsData.length]);
+  }, [localComputedAverages, allStudentsData.length, getTestDateID]);
 
   const handleManualAverageChange = (date, classId, subject, value) => {
+      const weekendID = getTestDateID(date) || date;
       setClassAverages(prev => {
-          const dateData = prev[date] || {};
+          const dateData = prev[weekendID] || {};
           const classData = dateData[classId] || { chi: '', eng: '', math: '', total: '' };
           const updatedClassData = { ...classData, [subject]: value };
           
@@ -1919,20 +2038,21 @@ export default function App() {
                   subject === 'math' ? value : updatedClassData.math
               );
           }
-          return { ...prev, [date]: { ...dateData, [classId]: updatedClassData } };
+          return { ...prev, [weekendID]: { ...dateData, [classId]: updatedClassData } };
       });
       setIsClassAveragesDirty(true);
   };
 
   const persistClassAverages = useCallback(async (nextAverages, options = {}) => {
       const { closeModal = false, showToast = false, toastMessage = '設定已儲存' } = options;
-      writeLocalCache(LOCAL_CACHE_KEYS.classAverages, nextAverages);
+      const normalizedAverages = normalizeClassAveragesByWeekend(nextAverages, getTestDateID);
+      writeLocalCache(LOCAL_CACHE_KEYS.classAverages, normalizedAverages);
       if (!db) {
           if (closeModal) setShowAvgModal(false);
           return true;
       }
       try {
-          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'class_averages_v18'), { averages: nextAverages }, { merge: true });
+          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'class_averages_v18'), { averages: normalizedAverages }, { merge: true });
           if (showToast) {
               setStatusMsg(toastMessage);
               setTimeout(() => setStatusMsg(''), 2000);
@@ -1947,7 +2067,7 @@ export default function App() {
           }
           return false;
       }
-  }, []);
+  }, [getTestDateID]);
 
   useEffect(() => {
       if (!isClassAveragesDirty) return undefined;
@@ -2051,11 +2171,12 @@ export default function App() {
           return;
       }
       if (!deleteTarget) return;
-      const newList = availableDates.filter(d => d !== deleteTarget);
+      const targetWeekendID = getTestDateID(deleteTarget);
+      const newList = availableDates.filter((d) => getTestDateID(d) !== targetWeekendID);
       setAvailableDates(newList);
       writeLocalCache(LOCAL_CACHE_KEYS.dates, newList);
       if (db) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: newList }, { merge: true });
-      setStatusMsg(`已刪除: ${deleteTarget}`); setTimeout(() => setStatusMsg(''), 2000); setDeleteTarget(null);
+      setStatusMsg(`已刪除考次: ${targetWeekendID || deleteTarget}`); setTimeout(() => setStatusMsg(''), 2000); setDeleteTarget(null);
   };
 
   const handleLoginSubmit = () => {
@@ -2081,13 +2202,32 @@ export default function App() {
           setTeacherAuthRole(TEACHER_ROLE.FULL);
           localStorage.removeItem('teacher_auth');
           localStorage.removeItem('teacher_role');
+          if (typeof window !== 'undefined') {
+              sessionStorage.removeItem(STUDENTS_SESSION_SYNC_KEY);
+          }
           setMode('landing');
       });
   };
 
-  const loadAllStudents = async () => {
+  const loadAllStudents = async (options = {}) => {
+      const { forceRemote = false } = options;
       setLoading(true);
       try {
+          const cachedStudents = readLocalCache(LOCAL_CACHE_KEYS.students, STUDENT_CACHE_TTL_MS);
+          const hasSessionSynced =
+              typeof window !== 'undefined'
+              && sessionStorage.getItem(STUDENTS_SESSION_SYNC_KEY) === '1';
+          if (!forceRemote && Array.isArray(cachedStudents)) {
+              setAllStudentsData(cachedStudents);
+              setCachedClassData(cachedStudents);
+              batchDirtyStudentIdsRef.current = new Set();
+              setIsBatchDirty(false);
+              if (hasSessionSynced || !db) {
+                  setLoading(false);
+                  return;
+              }
+          }
+
           let studentsMap = {};
           RAW_STUDENT_RECORDS.forEach(s => { studentsMap[s.id] = { ...s, grades: normalizeGrades(s.grades) }; });
           let cleanedInvalidDateCount = 0;
@@ -2099,7 +2239,7 @@ export default function App() {
                   const normalizedResult = normalizeGrades(data.grades, { withMeta: true });
                   const sanitizedData = { ...data, grades: normalizedResult.normalized };
 
-                  if (normalizedResult.removedInvalidDates > 0 && data.id) {
+                  if (normalizedResult.changed && data.id) {
                       cleanedInvalidDateCount += normalizedResult.removedInvalidDates;
                       cleanupPayloads.push({
                           id: data.id,
@@ -2122,6 +2262,9 @@ export default function App() {
           setAllStudentsData(sortedStudents);
           setCachedClassData(sortedStudents);
           writeLocalCache(LOCAL_CACHE_KEYS.students, sortedStudents);
+          if (typeof window !== 'undefined') {
+              sessionStorage.setItem(STUDENTS_SESSION_SYNC_KEY, '1');
+          }
           batchDirtyStudentIdsRef.current = new Set();
           setIsBatchDirty(false);
 
@@ -2131,7 +2274,11 @@ export default function App() {
                       setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${item.id}`), item.payload)
                   )
               );
-              setStatusMsg(`已自動刪除 ${cleanedInvalidDateCount} 筆不合理日期資料`);
+              setStatusMsg(
+                  cleanedInvalidDateCount > 0
+                      ? `已自動刪除 ${cleanedInvalidDateCount} 筆不合理日期資料`
+                      : `已自動整理 ${cleanupPayloads.length} 筆重複考次資料`
+              );
               setTimeout(() => setStatusMsg(''), 2400);
           }
       } catch (e) { console.error("Load error:", e); }
@@ -2157,7 +2304,7 @@ export default function App() {
                   const rawData = d.data();
                   const normalizedResult = normalizeGrades(rawData.grades, { withMeta: true });
                   preloaded.push({ ...rawData, grades: normalizedResult.normalized });
-                  if (normalizedResult.removedInvalidDates > 0 && rawData.id) {
+                  if (normalizedResult.changed && rawData.id) {
                       cleanupPayloads.push({
                           id: rawData.id,
                           payload: { ...rawData, grades: normalizedResult.normalized, lastUpdated: new Date().toISOString() }
@@ -2183,9 +2330,11 @@ export default function App() {
       return () => {
           cancelled = true;
       };
+  // normalizeGrades 依賴 getTestDateID，這裡保持最小觸發條件避免重複預載。
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, user, cachedClassData.length]);
 
-  const normalizeGrades = (grades, options = {}) => {
+  const normalizeGrades = useCallback((grades, options = {}) => {
       const withMeta = Boolean(options.withMeta);
       if (!grades || typeof grades !== 'object') {
           return withMeta ? { normalized: {}, removedInvalidDates: 0, changed: false } : {};
@@ -2224,11 +2373,19 @@ export default function App() {
           normalized[normalizedDate] = normalizedG;
       });
 
+      const weekendEntries = buildWeekendGradeEntryMap(normalized, getTestDateID);
+      const deduped = {};
+      Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
+          deduped[weekendID] = { ...entry.grade };
+          if (entry.sourceDate !== weekendID) changed = true;
+      });
+      if (Object.keys(deduped).length !== Object.keys(normalized).length) changed = true;
+
       if (withMeta) {
-          return { normalized, removedInvalidDates, changed };
+          return { normalized: deduped, removedInvalidDates, changed };
       }
-      return normalized;
-  };
+      return deduped;
+  }, [getTestDateID]);
 
   const loadStudentForTeacher = async (id) => {
     if (!user) return;
@@ -2243,7 +2400,7 @@ export default function App() {
         setCurrentStudentId(data.id); setStudentName(data.name);
         const normalizedResult = normalizeGrades(data.grades, { withMeta: true });
         let loadedGrades = { ...normalizedResult.normalized };
-        if (normalizedResult.removedInvalidDates > 0 && db) {
+        if (normalizedResult.changed && db) {
             setDoc(
                 doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${data.id}`),
                 { ...data, grades: normalizedResult.normalized, lastUpdated: new Date().toISOString() }
@@ -2349,10 +2506,10 @@ export default function App() {
     }
 
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
-        const bstr = evt.target.result;
-        const wb = window.XLSX.read(bstr, { type: 'binary' });
+        const arrayBuffer = evt.target.result;
+        const wb = window.XLSX.read(arrayBuffer, { type: 'array' });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const data = window.XLSX.utils.sheet_to_json(ws, { header: 1 });
           
@@ -2412,15 +2569,27 @@ export default function App() {
              colMap.id = 0; colMap.name = 1; colMap.date = 2; colMap.chi = 3; colMap.eng = 4; colMap.math = 5;
         }
 
-        // Default Class column to first column if not detected
-        if (colMap.class === -1) colMap.class = 0;
+        const validClassSet = new Set(CLASS_DEFS.map(({ id }) => id));
+        const parseImportedClass = (rawValue) => {
+            const rawClass = String(rawValue || '').trim().toUpperCase();
+            if (!rawClass) return '';
+            if (rawClass.includes('日') || rawClass.includes('SUN')) {
+                return rawClass.includes('B') ? '日B班' : '日A班';
+            }
+            if (rawClass.includes('C')) return 'C班';
+            if (rawClass.includes('B')) return 'B班';
+            if (rawClass.includes('A')) return 'A班';
+            return '';
+        };
 
         const newStudentsMap = allStudentsData.reduce((acc, s) => { acc[s.id] = { ...s, grades: { ...s.grades } }; return acc; }, {});
         const newDates = new Set(availableDates);
         const touchedStudentIds = new Set();
+        const importedWeekendIds = new Set();
         let importCount = 0;
         let lastImportedDate = '';
         let skippedInvalidDateCount = 0;
+        let tooManyDateAbort = false;
 
         for (let i = headerRowIndex + 1; i < data.length; i++) {
           const row = data[i];
@@ -2478,22 +2647,20 @@ export default function App() {
           const eng = getVal(colMap.eng);
           const math = getVal(colMap.math);
           
-          // --- Class Normalization ---
-          let rawClass = (colMap.class !== -1 && row[colMap.class]) ? String(row[colMap.class]).trim().toUpperCase() : 'A班';
-          let className = 'A班';
-
-          if (rawClass.includes('日') || rawClass.includes('SUN')) {
-               if (rawClass.includes('B')) className = '日B班';
-               else className = '日A班';
-          }
-          else if (rawClass.includes('C')) className = 'C班'; // Priority check for C
-          else if (rawClass.includes('B')) className = 'B班';
-          else if (rawClass.includes('A')) className = 'A班';
-          else className = 'A班'; 
-          // ---------------------------
+          const importedClassName = parseImportedClass(colMap.class !== -1 ? row[colMap.class] : '');
 
           // Excel 匯入時，使用新的連續日期邏輯，但需要考慮已存在的 availableDates
-          const weekendID = getWeekendID(normalizedImportDate, [...availableDates, ...Array.from(newDates)]);
+          const weekendDatePool = [...availableDates, ...Array.from(newDates)];
+          const weekendID = getWeekendID(normalizedImportDate, weekendDatePool);
+          if (!weekendID) {
+              skippedInvalidDateCount += 1;
+              continue;
+          }
+          importedWeekendIds.add(weekendID);
+          if (importedWeekendIds.size > 5) {
+              tooManyDateAbort = true;
+              break;
+          }
           if (!newDates.has(weekendID)) newDates.add(weekendID); 
           
           lastImportedDate = weekendID;
@@ -2505,6 +2672,21 @@ export default function App() {
           } else if (rawName) {
               student.name = rawName;
           }
+
+          const resolveFallbackClass = () => {
+              const exactClass = student?.grades?.[normalizedImportDate]?.class;
+              if (exactClass && validClassSet.has(exactClass)) return exactClass;
+              const sameWeekendClass = Object.entries(student?.grades || {}).find(([date, grade]) => {
+                  if (!grade?.class || !validClassSet.has(grade.class)) return false;
+                  const normalizedDate = normalizeDateToken(date);
+                  if (!normalizedDate) return false;
+                  return getWeekendID(normalizedDate, weekendDatePool) === weekendID;
+              })?.[1]?.class;
+              if (sameWeekendClass) return sameWeekendClass;
+              if (teacherClassFilter && validClassSet.has(teacherClassFilter)) return teacherClassFilter;
+              return 'A班';
+          };
+          const className = importedClassName || resolveFallbackClass();
           
           student.grades[normalizedImportDate] = {
               chi: chi, 
@@ -2517,6 +2699,12 @@ export default function App() {
           importCount++;
         }
 
+        if (tooManyDateAbort) {
+            setStatusMsg('匯入失敗：同一檔案包含超過 5 個不同測驗日期，已取消匯入');
+            setTimeout(() => setStatusMsg(''), 2600);
+            return;
+        }
+
         const sortedDates = Array.from(newDates).sort(customDateSort);
         setAvailableDates(sortedDates);
         writeLocalCache(LOCAL_CACHE_KEYS.dates, sortedDates);
@@ -2526,10 +2714,13 @@ export default function App() {
         if (lastImportedDate) {
              setBatchDate(lastImportedDate);
         } else if (sortedDates.length > 0 && !batchDate) {
-             setBatchDate(sortedDates[sortedDates.length - 1]);
+             const fallbackLatestWeekendID = getTestDateID(sortedDates[sortedDates.length - 1]) || sortedDates[sortedDates.length - 1];
+             setBatchDate(fallbackLatestWeekendID);
         }
         
-        if (db) setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: sortedDates }, { merge: true });
+        if (db) {
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: sortedDates }, { merge: true });
+        }
 
         const sortedStudents = Object.values(newStudentsMap).sort((a,b) => a.id.localeCompare(b.id));
         setAllStudentsData([...sortedStudents]);
@@ -2554,7 +2745,7 @@ export default function App() {
         setStatusMsg(`匯入 ${importCount} 筆資料${invalidDateSuffix} (最新日期: ${lastImportedDate})`);
       } catch (error) { console.error(error); setStatusMsg("匯入失敗: 格式錯誤"); }
     };
-    reader.readAsBinaryString(file);
+    reader.readAsArrayBuffer(file);
   };
 
   const handleGridKeyDown = useCallback((e, index, subject, type, totalItems) => {
@@ -2581,8 +2772,14 @@ export default function App() {
   }, []);
 
   const handleKeyDown = useCallback((e, studentIndex, subject) => handleGridKeyDown(e, studentIndex, subject, 'batch', allStudentsData.length), [allStudentsData.length, handleGridKeyDown]);
-  const handleSingleKeyDown = useCallback((e, dateIndex, subject) => handleGridKeyDown(e, dateIndex, subject, 'single', availableDates.length), [availableDates.length, handleGridKeyDown]);
-  const handleAvgKeyDown = useCallback((e, dateIndex, subject) => handleGridKeyDown(e, dateIndex, subject, 'avg', availableDates.length), [availableDates.length, handleGridKeyDown]);
+  const handleSingleKeyDown = useCallback(
+      (e, dateIndex, subject) => handleGridKeyDown(e, dateIndex, subject, 'single', singleViewDateEntries.length),
+      [singleViewDateEntries.length, handleGridKeyDown]
+  );
+  const handleAvgKeyDown = useCallback(
+      (e, dateIndex, subject) => handleGridKeyDown(e, dateIndex, subject, 'avg', avgSettingsDateKeysDesc.length),
+      [avgSettingsDateKeysDesc.length, handleGridKeyDown]
+  );
 
   const handlePaste = useCallback((e, startStudentIndex, startSubject) => {
       if (!canEditStudentGrades) {
@@ -2594,6 +2791,7 @@ export default function App() {
       const rows = pasteData.trim().split(/\r\n|\n|\r/);
       const subjects = ['chi', 'eng', 'math'];
       const startSubjectIndex = subjects.indexOf(startSubject);
+      const batchDateID = getTestDateID(batchDate);
       
       setAllStudentsData(prev => {
           const newData = [...prev];
@@ -2605,7 +2803,9 @@ export default function App() {
               const cols = row.split('\t');
               const student = { ...newData[studentIndex] };
               const currentGrades = student.grades || {};
-              const currentDateGrades = { ...(currentGrades[batchDate] || { chi: '', eng: '', math: '', total: '', class: 'A班' }) }; 
+              const existingKey = Object.keys(currentGrades).find((key) => getTestDateID(key) === batchDateID);
+              const targetDate = existingKey || batchDateID || batchDate;
+              const currentDateGrades = { ...(currentGrades[targetDate] || { chi: '', eng: '', math: '', total: '', class: 'A班' }) };
               let rowUpdated = false;
               cols.forEach((val, cIndex) => {
                   const subjectIndex = startSubjectIndex + cIndex;
@@ -2616,7 +2816,7 @@ export default function App() {
               });
               if (rowUpdated) {
                   currentDateGrades.total = calculateTotal(currentDateGrades.chi, currentDateGrades.eng, currentDateGrades.math);
-                  student.grades = { ...currentGrades, [batchDate]: currentDateGrades };
+                  student.grades = { ...currentGrades, [targetDate]: currentDateGrades };
                   newData[studentIndex] = student;
                   changedIds.add(student.id);
                   updated = true;
@@ -2630,7 +2830,7 @@ export default function App() {
           }
           return newData;
       });
-  }, [batchDate, canEditStudentGrades, notifyPermissionDenied]); // Added batchDate dependency
+  }, [batchDate, getTestDateID, canEditStudentGrades, notifyPermissionDenied]);
 
   const handleSinglePaste = (e, startDateIndex, startSubject) => {
       if (!canEditStudentGrades) {
@@ -2642,7 +2842,7 @@ export default function App() {
       const rows = pasteData.trim().split(/\r\n|\n|\r/); 
       const subjects = ['chi', 'eng', 'math'];
       const startSubjectIndex = subjects.indexOf(startSubject);
-      const reversedDates = sortedAvailableDatesDesc;
+      const reversedDates = singleViewDateKeys;
 
       setGrades(prev => {
           const newGrades = { ...prev };
@@ -2678,7 +2878,7 @@ export default function App() {
       const rows = pasteData.trim().split(/\r\n|\n|\r/);
       const subjects = ['chi', 'eng', 'math', 'total'];
       const startSubjectIndex = subjects.indexOf(startSubject);
-      const reversedDates = sortedAvailableDatesDesc;
+      const reversedDates = avgSettingsDateKeysDesc;
 
       setClassAverages(prev => {
           const newAvgs = { ...prev };
@@ -2717,8 +2917,19 @@ export default function App() {
       });
   };
 
-  const handleDeleteStudent = () => { if (currentStudentId) setStudentToDelete({ id: currentStudentId, name: studentName }); };
+  const handleDeleteStudent = () => {
+    if (!canEditStudentGrades) {
+        notifyPermissionDenied('2491212 權限無法刪除學生資料');
+        return;
+    }
+    if (currentStudentId) setStudentToDelete({ id: currentStudentId, name: studentName });
+  };
   const confirmDeleteStudent = async () => {
+    if (!canEditStudentGrades) {
+        notifyPermissionDenied('2491212 權限無法刪除學生資料');
+        setStudentToDelete(null);
+        return;
+    }
     if (!studentToDelete) return;
     try {
         if (db) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${studentToDelete.id}`));
@@ -2849,6 +3060,36 @@ export default function App() {
       return buildProbabilityContext(cachedClassData, sortedAvailableDatesAsc, getTestDateID);
   }, [cachedClassData, sortedAvailableDatesAsc, getTestDateID]);
 
+  const cachedParentDateSignature = useMemo(
+      () => sortedAvailableDatesAsc.join('|'),
+      [sortedAvailableDatesAsc]
+  );
+
+  const cachedParentClassSignature = useMemo(
+      () => buildClassContextSignature(cachedClassData, getTestDateID),
+      [cachedClassData, getTestDateID]
+  );
+
+  const cachedParentClassAverageSignature = useMemo(
+      () => buildClassAveragesSignature(sortedAvailableDatesAsc, classAverages, getTestDateID),
+      [sortedAvailableDatesAsc, classAverages, getTestDateID]
+  );
+
+  const cachedParentVersionBase = useMemo(
+      () => hashFingerprint([cachedParentDateSignature, cachedParentClassSignature, cachedParentClassAverageSignature].join('||')),
+      [cachedParentDateSignature, cachedParentClassSignature, cachedParentClassAverageSignature]
+  );
+
+  const cachedParentStudentSignatureById = useMemo(() => {
+      const signatureById = {};
+      cachedClassData.forEach((student) => {
+          const normalizedId = String(student?.id || '').toUpperCase().trim();
+          if (!normalizedId) return;
+          signatureById[normalizedId] = buildStudentGradesSignature(student, getTestDateID);
+      });
+      return signatureById;
+  }, [cachedClassData, getTestDateID]);
+
   const handleParentSearch = async () => {
     if (!searchId.trim()) return;
     if (!user) {
@@ -2903,7 +3144,7 @@ export default function App() {
               const rawData = docSnap.data();
               const normalizedResult = normalizeGrades(rawData.grades, { withMeta: true });
               data = { ...rawData, grades: normalizedResult.normalized };
-              if (normalizedResult.removedInvalidDates > 0 && rawData.id) {
+              if (normalizedResult.changed && rawData.id) {
                   void setDoc(
                       doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${rawData.id}`),
                       { ...rawData, grades: normalizedResult.normalized, lastUpdated: new Date().toISOString() }
@@ -2912,7 +3153,7 @@ export default function App() {
           }
       }
 
-      if (db && (!data || fullClassData.length === 0)) {
+      if (db && fullClassData.length === 0) {
           const cachedStudents = readLocalCache(LOCAL_CACHE_KEYS.students, STUDENT_CACHE_TTL_MS);
           if (Array.isArray(cachedStudents) && cachedStudents.length > 0) {
               fullClassData = cachedStudents;
@@ -2925,7 +3166,7 @@ export default function App() {
                   const rawData = d.data();
                   const normalizedResult = normalizeGrades(rawData.grades, { withMeta: true });
                   fullClassData.push({ ...rawData, grades: normalizedResult.normalized });
-                  if (normalizedResult.removedInvalidDates > 0 && rawData.id) {
+                  if (normalizedResult.changed && rawData.id) {
                       cleanupPayloads.push({
                           id: rawData.id,
                           payload: { ...rawData, grades: normalizedResult.normalized, lastUpdated: new Date().toISOString() }
@@ -2943,28 +3184,34 @@ export default function App() {
               writeLocalCache(LOCAL_CACHE_KEYS.students, fullClassData);
           }
 
-          if (!data) {
-              const matched = matchFromList(fullClassData);
-              if (matched.duplicateName) {
-                  setSearchError('同名學生超過 1 位，請改用學號查詢');
-                  setLoading(false);
-                  return;
-              }
-              data = matched.student;
+      }
+
+      if (!data && fullClassData.length > 0) {
+          const matched = matchFromList(fullClassData);
+          if (matched.duplicateName) {
+              setSearchError('同名學生超過 1 位，請改用學號查詢');
+              setLoading(false);
+              return;
           }
+          data = matched.student;
       }
       if (data) {
         const contextData = fullClassData.length > 0
             ? fullClassData
             : (cachedClassData.length > 0 ? cachedClassData : allStudentsData);
         const cacheStudentId = String(data.id || '').toUpperCase();
-        const parentQueryDataVersion = buildParentQueryDataVersion({
-            student: data,
-            classData: contextData,
-            dates: sortedDates,
-            classAveragesMap: classAverages,
-            getDateID: getSearchDateID
-        });
+        const shouldReuseCachedVersionBase =
+            contextData === cachedClassData
+            && sortedDates === sortedAvailableDatesAsc;
+        const parentQueryDataVersion = shouldReuseCachedVersionBase
+            ? hashFingerprint(`${cachedParentVersionBase}||${cachedParentStudentSignatureById[cacheStudentId] || buildStudentGradesSignature(data, getSearchDateID)}`)
+            : buildParentQueryDataVersion({
+                student: data,
+                classData: contextData,
+                dates: sortedDates,
+                classAveragesMap: classAverages,
+                getDateID: getSearchDateID
+            });
         const cachedView = readParentQueryCache(cacheStudentId, parentQueryDataVersion);
         if (cachedView) {
             setViewData(cachedView);
@@ -2978,12 +3225,13 @@ export default function App() {
         // 建立 availableDates 的 weekendID Set，用於快速查找（使用新的連續日期邏輯）
         const availableWeekendIDs = new Set(weekendOrder.keys());
         
-        // 遍歷學生所有成績，確保連續日期的成績也能被找到
+        // 遍歷學生所有成績（同考次去重），確保連續日期的成績也能被找到
         if (data.grades) {
-          Object.entries(data.grades).forEach(([gradeDate, weekData]) => {
+          const weekendGradeEntries = buildWeekendGradeEntryMap(data.grades, getSearchDateID);
+          Object.entries(weekendGradeEntries).forEach(([weekendID, entry]) => {
+            const weekData = entry.grade;
             if (!weekData || !weekData.total) return;
-            
-            const weekendID = getSearchDateID(gradeDate);
+
             // 只處理在 availableDates 範圍內的成績
             if (!availableWeekendIDs.has(weekendID)) return;
             
@@ -3043,8 +3291,9 @@ export default function App() {
             // Build simple grade map for target student
             const studentGradeMap = {};
             studentGradeMap[data.id] = {};
-            Object.entries(data.grades || {}).forEach(([date, g]) => {
-                studentGradeMap[data.id][getSearchDateID(date)] = g;
+            const weekendEntries = buildWeekendGradeEntryMap(data.grades, getSearchDateID);
+            Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
+                studentGradeMap[data.id][weekendID] = entry.grade;
             });
             
             studentProb = calculateProbLogic(
@@ -3086,8 +3335,9 @@ export default function App() {
       if (!cachedClassData.length) return buckets;
 
       cachedClassData.forEach((student) => {
-          Object.entries(student.grades || {}).forEach(([date, grade]) => {
-              const weekendID = getTestDateID(date);
+          const weekendEntries = buildWeekendGradeEntryMap(student.grades, getTestDateID);
+          Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
+              const grade = entry.grade;
               if (!weekendID) return;
               if (!buckets[weekendID]) {
                   buckets[weekendID] = { chi: [], eng: [], math: [] };
@@ -3177,8 +3427,9 @@ export default function App() {
       if (!shouldBuildParentAnalytics || !cachedClassData.length) return index;
 
       cachedClassData.forEach(student => {
-          Object.entries(student.grades || {}).forEach(([date, g]) => {
-              const weekendId = getTestDateID(date);
+          const weekendEntries = buildWeekendGradeEntryMap(student.grades, getTestDateID);
+          Object.entries(weekendEntries).forEach(([weekendId, entry]) => {
+              const g = entry.grade;
               if (!weekendId) return;
 
               const cls = g.class || 'A班';
@@ -4190,7 +4441,7 @@ export default function App() {
                     if (isAuthenticated) {
                       if (!user) return;
                       setMode('teacher');
-                      loadAllStudents();
+                      if (!allStudentsData.length) loadAllStudents();
                     } else {
                       setMode('teacher_login');
                     }
@@ -4234,7 +4485,7 @@ export default function App() {
                         if (isAuthenticated) {
                           if (!user) return;
                           setMode('teacher');
-                          loadAllStudents();
+                          if (!allStudentsData.length) loadAllStudents();
                         } else {
                           setMode('teacher_login');
                         }
@@ -4297,11 +4548,11 @@ export default function App() {
                                 管理日期
                             </div>
                             <p className={`mt-1 text-[11px] font-semibold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                                目前共 {sortedAvailableDatesDesc.length} 個考次
+                                目前共 {orderedWeekendIds.length} 個考次
                             </p>
                         </div>
                         <div className="flex gap-2 items-center">
-                            {teacherViewMode === 'batch' && latestAvailableDate && batchDate !== latestAvailableDate && (
+                            {teacherViewMode === 'batch' && latestAvailableDate && selectedBatchWeekendID !== latestAvailableDate && (
                                 <button
                                     type="button"
                                     onClick={() => setBatchDate(latestAvailableDate)}
@@ -4321,7 +4572,7 @@ export default function App() {
                         <div className="overflow-x-auto pb-1">
                             <div className="inline-flex gap-2.5 min-w-full">
                                 {teacherDateCards.map((item) => {
-                                    const { date, label, phaseId, phaseLabel, isLatest, isSelected } = item;
+                                    const { weekendID, label, phaseId, phaseLabel, isLatest, isSelected } = item;
                                     const phaseTagClass = phaseId === 'p1'
                                         ? (darkMode ? 'bg-cyan-500/15 text-cyan-200 border-cyan-300/25' : 'bg-cyan-50 text-cyan-700 border-cyan-200')
                                         : phaseId === 'mock'
@@ -4330,10 +4581,10 @@ export default function App() {
 
                                     return (
                                         <button
-                                            key={date}
+                                            key={weekendID}
                                             type="button"
                                             onClick={() => {
-                                                if (teacherViewMode === 'batch' && date !== batchDate) setBatchDate(date);
+                                                if (teacherViewMode === 'batch' && weekendID !== selectedBatchWeekendID) setBatchDate(weekendID);
                                             }}
                                             className={`text-left min-w-[126px] rounded-2xl border px-3 py-2.5 transition-all ${darkMode ? 'bg-slate-800/88 border-white/10 hover:border-emerald-300/30' : 'bg-white border-slate-200/80 shadow-[0_8px_18px_rgba(15,23,42,0.06)] hover:border-emerald-200'} ${isSelected ? (darkMode ? 'ring-1 ring-emerald-300/40 border-emerald-300/40' : 'ring-2 ring-emerald-100 border-emerald-300/60') : ''}`}
                                         >
@@ -4348,7 +4599,7 @@ export default function App() {
                                             </div>
                                             <div className="mt-2 flex justify-end">
                                                 {canDeleteDates ? (
-                                                    <button onClick={(e) => { e.stopPropagation(); handleDeleteDate(date); }} className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg transition-colors ${darkMode ? 'text-rose-300 hover:text-rose-200 bg-rose-500/10' : 'text-rose-600 hover:text-rose-700 bg-rose-50'}`} title="危險操作：刪除日期">
+                                                    <button onClick={(e) => { e.stopPropagation(); handleDeleteDate(weekendID); }} className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg transition-colors ${darkMode ? 'text-rose-300 hover:text-rose-200 bg-rose-500/10' : 'text-rose-600 hover:text-rose-700 bg-rose-50'}`} title="危險操作：刪除日期">
                                                         <X className="w-3 h-3"/> 刪除
                                                     </button>
                                                 ) : (
@@ -4424,8 +4675,16 @@ export default function App() {
                         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
                             <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-xs font-bold text-slate-500">日期</span>
-                                <select className={`border rounded-lg px-2 py-1.5 text-xs font-bold outline-none shadow-sm ${darkMode ? 'bg-[#020617]/50 border-white/10 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`} value={batchDate} onChange={(e) => setBatchDate(e.target.value)}>
-                                    {sortedAvailableDatesDesc.map(d => <option key={d} value={d}>{weekendLabelByDate[d] || getWeekendDisplayLabel(d)}</option>)}
+                                <select
+                                    className={`border rounded-lg px-2 py-1.5 text-xs font-bold outline-none shadow-sm ${darkMode ? 'bg-[#020617]/50 border-white/10 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}
+                                    value={selectedBatchWeekendID || ''}
+                                    onChange={(e) => setBatchDate(e.target.value)}
+                                >
+                                    {teacherDateCards.map((item) => (
+                                        <option key={item.weekendID} value={item.weekendID}>
+                                            {item.label}
+                                        </option>
+                                    ))}
                                 </select>
                                 <span className={`text-[11px] font-bold px-2 py-1 rounded-full ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
                                     共 {batchRowsForDisplay.length} 筆
@@ -5091,7 +5350,13 @@ export default function App() {
                       <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border mt-1 inline-block opacity-60 ${darkMode ? 'border-slate-600 text-slate-400' : 'border-slate-200 text-slate-400'}`}>{currentStudentId}</span>
                   </div>
                   <div className="flex gap-2">
-                    <button onClick={handleDeleteStudent} className="bg-red-500/10 text-red-500 p-2.5 rounded-xl hover:bg-red-500/20 transition-colors active:scale-95"><Trash2 className="w-5 h-5"/></button>
+                    {canEditStudentGrades ? (
+                      <button onClick={handleDeleteStudent} className="bg-red-500/10 text-red-500 p-2.5 rounded-xl hover:bg-red-500/20 transition-colors active:scale-95"><Trash2 className="w-5 h-5"/></button>
+                    ) : (
+                      <button type="button" disabled className="bg-slate-200 text-slate-400 p-2.5 rounded-xl cursor-not-allowed" title="2491212 權限不可刪除學生">
+                        <Trash2 className="w-5 h-5"/>
+                      </button>
+                    )}
                     <button
                       onClick={handleSaveGrades}
                       disabled={!canEditStudentGrades}
@@ -5114,16 +5379,16 @@ export default function App() {
                             </tr>
                         </thead>
                         <tbody className={`divide-y ${darkMode ? 'divide-white/5' : 'divide-slate-100'}`}>
-                            {sortedAvailableDatesDesc.map((date, dateIndex) => {
-                                const g = grades[date] || { chi: '', eng: '', math: '', total: '', class: 'A班' };
+                            {singleViewDateEntries.map((entry, dateIndex) => {
+                                const g = grades[entry.gradeKey] || { chi: '', eng: '', math: '', total: '', class: 'A班' };
                                 return (
-                                    <tr key={date} className={`${darkMode ? 'hover:bg-white/5' : 'hover:bg-slate-50/80'} transition-colors`}>
-                                            <td className="px-4 py-3 font-mono text-xs font-bold opacity-60">{weekendLabelByDate[date] || getWeekendDisplayLabel(date)}</td>
+                                    <tr key={entry.weekendID} className={`${darkMode ? 'hover:bg-white/5' : 'hover:bg-slate-50/80'} transition-colors`}>
+                                            <td className="px-4 py-3 font-mono text-xs font-bold opacity-60">{entry.label}</td>
                                             <td className="px-2 py-2 text-center">
                                                 <select 
                                                     value={g.class || 'A班'} 
                                                     disabled={!canEditStudentGrades}
-                                                    onChange={(e) => handleGradeChange(date, 'class', e.target.value)}
+                                                    onChange={(e) => handleGradeChange(entry.gradeKey, 'class', e.target.value)}
                                                     className={`w-full text-center p-2 rounded-lg bg-transparent border border-transparent outline-none text-base font-bold transition-all ${canEditStudentGrades ? 'cursor-pointer hover:bg-black/5 dark:hover:bg-white/5' : 'cursor-not-allowed opacity-70'} ${darkMode ? 'text-slate-200 focus:bg-slate-800' : 'text-slate-700 focus:bg-white'}`}
                                                 >
                                                     {CLASS_DEFS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
@@ -5131,7 +5396,7 @@ export default function App() {
                                             </td>
                                             {['chi', 'eng', 'math'].map(sub => (
                                                 <td key={sub} className="px-2 py-2 text-center">
-                                                    <input id={`single-${dateIndex}-${sub}`} type="text" disabled={!canEditStudentGrades} className={`w-full text-center p-2 rounded-lg bg-transparent border border-transparent outline-none text-base font-bold transition-all ${!canEditStudentGrades ? 'cursor-not-allowed opacity-70' : ''} ${darkMode ? 'focus:bg-slate-800 focus:border-blue-500/50 text-slate-200' : 'focus:bg-white focus:border-blue-200 text-slate-700'}`} value={g[sub]} onChange={(e) => handleGradeChange(date, sub, e.target.value)} onKeyDown={canEditStudentGrades ? (e) => handleSingleKeyDown(e, dateIndex, sub) : undefined} onPaste={canEditStudentGrades ? (e) => handleSinglePaste(e, dateIndex, sub) : undefined} placeholder="-" />
+                                                    <input id={`single-${dateIndex}-${sub}`} type="text" disabled={!canEditStudentGrades} className={`w-full text-center p-2 rounded-lg bg-transparent border border-transparent outline-none text-base font-bold transition-all ${!canEditStudentGrades ? 'cursor-not-allowed opacity-70' : ''} ${darkMode ? 'focus:bg-slate-800 focus:border-blue-500/50 text-slate-200' : 'focus:bg-white focus:border-blue-200 text-slate-700'}`} value={g[sub]} onChange={(e) => handleGradeChange(entry.gradeKey, sub, e.target.value)} onKeyDown={canEditStudentGrades ? (e) => handleSingleKeyDown(e, dateIndex, sub) : undefined} onPaste={canEditStudentGrades ? (e) => handleSinglePaste(e, dateIndex, sub) : undefined} placeholder="-" />
                                                 </td>
                                             ))}
                                             <td className="px-2 py-2 text-center"><div className="text-base font-bold text-blue-500 py-2">{g.total}</div></td>
@@ -5353,7 +5618,7 @@ export default function App() {
                               </tr>
                           </thead>
                           <tbody className={`divide-y ${darkMode ? 'divide-white/5' : 'divide-slate-100'}`}>
-                              {sortedAvailableDatesDesc.map((date, dateIndex) => {
+                              {avgSettingsDateKeysDesc.map((date, dateIndex) => {
                                   const dateData = classAverages[date] || {};
                                   const avg = dateData[avgSettingsClassFilter] || { chi: '', eng: '', math: '', total: '' };
                                   return (

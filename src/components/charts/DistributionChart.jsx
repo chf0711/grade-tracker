@@ -13,6 +13,10 @@ import {
 export default function DistributionChart({ data, highlightColor, isDarkMode }) {
   const safeData = Array.isArray(data) ? data : [];
   const maxCount = safeData.reduce((max, bucket) => Math.max(max, bucket.count || 0), 0);
+  const prefersReducedMotion = typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const shouldAnimate = !prefersReducedMotion && safeData.length > 0 && safeData.length <= 42;
 
   return (
     <div className={`h-72 md:h-80 w-full rounded-2xl border px-2 py-3 backdrop-blur-sm ${isDarkMode ? 'bg-slate-900/30 border-white/5' : 'bg-white/86 border-slate-200/85 shadow-[0_10px_24px_rgba(15,23,42,0.06)]'}`}>
@@ -42,7 +46,14 @@ export default function DistributionChart({ data, highlightColor, isDarkMode }) 
               boxShadow: isDarkMode ? '0 14px 32px rgba(2,6,23,0.45)' : '0 18px 36px rgba(15,23,42,0.15)'
             }}
           />
-          <Bar dataKey="count" name="人數" radius={[7, 7, 3, 3]} isAnimationActive={false}>
+          <Bar
+            dataKey="count"
+            name="人數"
+            radius={[7, 7, 3, 3]}
+            isAnimationActive={shouldAnimate}
+            animationDuration={440}
+            animationEasing="ease-out"
+          >
             {safeData.map((entry, index) => {
               if (entry.isMyRange) {
                 return <Cell key={`cell-${index}`} fill={highlightColor} fillOpacity={0.95} />;

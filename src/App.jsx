@@ -1010,8 +1010,14 @@ const DistributionChart = React.lazy(() => import('./components/charts/Distribut
 const ParentAbilityRadar = React.lazy(() => import('./components/charts/ParentAbilityRadar'));
 
 const ChartFallback = ({ heightClass = 'h-60' }) => (
-    <div className={`${heightClass} rounded-2xl border border-slate-200/80 bg-white flex items-center justify-center text-xs font-bold text-slate-400`}>
-        載入圖表中...
+    <div className={`${heightClass} rounded-2xl border border-white/85 brand-skeleton flex flex-col justify-end px-4 py-3 text-xs font-bold text-slate-500`}>
+        <div className="brand-skeleton__shine" />
+        <div className="grid grid-cols-7 gap-1.5 h-20 items-end relative z-[1]">
+            {[32, 64, 44, 78, 53, 70, 38].map((h, idx) => (
+                <div key={`skeleton-col-${idx}`} className="rounded-md bg-emerald-200/75" style={{ height: `${h}%` }} />
+            ))}
+        </div>
+        <div className="mt-2 text-[11px] tracking-wide relative z-[1]">載入圖表中...</div>
     </div>
 );
 
@@ -1053,7 +1059,7 @@ const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, 
             <td className="w-[4rem] px-1 py-1 text-center"><div className="text-xs font-bold text-blue-500">{dateGrades.total}</div></td>
             <td className="w-[3.1rem] px-1 py-1 text-center"><div className={`text-xs font-bold ${darkMode ? 'text-indigo-300' : 'text-indigo-600'}`}>{prValue !== '-' ? prValue : ''}</div></td>
             <td className="w-[5.2rem] px-1 py-1 text-center">
-                <div className="text-[11px] leading-none font-black inline-block px-1.5 py-1 rounded-full min-w-[52px] text-center" style={probVisual ? probVisual.badgeStyle : undefined}>
+                <div className="prob-chip-smooth text-[11px] leading-none font-black inline-block px-1.5 py-1 rounded-full min-w-[52px] text-center" style={probVisual ? probVisual.badgeStyle : undefined}>
                     {probValue !== '-' ? `${probValue}%` : ''}
                 </div>
             </td>
@@ -1189,6 +1195,8 @@ export default function App() {
 
   const [statsModalData, setStatsModalData] = useState(null);
   const [statsActiveTab, setStatsActiveTab] = useState('total');
+  const [isHeaderScrolled, setIsHeaderScrolled] = useState(false);
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
 
   // --- OPTIMIZATION: State for probabilities to debounce updates ---
   const [admissionProbabilities, setAdmissionProbabilities] = useState({});
@@ -1425,6 +1433,35 @@ export default function App() {
       if (mode !== 'teacher') return;
       ensureXlsxReady().catch(() => {});
   }, [mode, ensureXlsxReady]);
+
+  useEffect(() => {
+      if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined;
+      const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+      const updateMotionPreference = () => setPrefersReducedMotion(media.matches);
+      updateMotionPreference();
+      media.addEventListener?.('change', updateMotionPreference);
+      return () => media.removeEventListener?.('change', updateMotionPreference);
+  }, []);
+
+  useEffect(() => {
+      if (typeof window === 'undefined') return undefined;
+      let rafId = null;
+      const syncScroll = () => {
+          const next = window.scrollY > 8;
+          setIsHeaderScrolled((prev) => (prev === next ? prev : next));
+          rafId = null;
+      };
+      const onScroll = () => {
+          if (rafId !== null) return;
+          rafId = window.requestAnimationFrame(syncScroll);
+      };
+      syncScroll();
+      window.addEventListener('scroll', onScroll, { passive: true });
+      return () => {
+          if (rafId !== null) window.cancelAnimationFrame(rafId);
+          window.removeEventListener('scroll', onScroll);
+      };
+  }, []);
 
   // 預先載入圖表 chunk，降低第一次打開分析視圖的等待感
   useEffect(() => {
@@ -4400,6 +4437,7 @@ export default function App() {
           : mode === 'parent'
               ? 0.74
               : 0.72;
+  const shouldElevateHeader = isHeaderScrolled || !isLandingMode;
 
   if (!db) return <div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400 text-sm font-mono tracking-widest uppercase">Initializing...</div>;
 
@@ -4421,7 +4459,7 @@ export default function App() {
       )}
 
       {/* Header */}
-      <header className={`fixed top-0 w-full backdrop-blur-xl z-30 border-b transition-all duration-300 ${darkMode ? 'bg-[#121a17]/88 border-emerald-200/10 shadow-lg shadow-black/25' : 'bg-[linear-gradient(108deg,rgba(255,255,255,0.78)_0%,rgba(244,252,248,0.84)_52%,rgba(241,247,255,0.8)_100%)] border-white/75 shadow-[0_14px_36px_rgba(15,23,42,0.12)]'}`}>
+      <header className={`header-glass fixed top-0 w-full backdrop-blur-xl z-30 border-b transition-all duration-300 ${shouldElevateHeader ? 'header-glass--scrolled' : ''} ${darkMode ? 'bg-[#121a17]/88 border-emerald-200/10 shadow-lg shadow-black/25' : 'bg-[linear-gradient(108deg,rgba(255,255,255,0.78)_0%,rgba(244,252,248,0.84)_52%,rgba(241,247,255,0.8)_100%)] border-white/75 shadow-[0_14px_36px_rgba(15,23,42,0.12)]'}`}>
         <div className="max-w-5xl mx-auto px-6 h-16 flex justify-between items-center relative z-10">
           <div
             className="flex items-center gap-3 cursor-pointer group"
@@ -4446,7 +4484,7 @@ export default function App() {
                       setMode('teacher_login');
                     }
                   })}
-                  className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : 'text-slate-600 hover:text-slate-800 bg-white/60 border border-white/70 hover:bg-white/85'}`}
+                  className={`btn-sheen px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : 'text-slate-600 hover:text-slate-800 bg-white/60 border border-white/70 hover:bg-white/85'}`}
                 >
                   {isAuthenticated ? '後台' : '老師'}
                 </button>
@@ -4456,7 +4494,7 @@ export default function App() {
                     setSearchError('');
                     setMode('parent');
                   })}
-                  className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : 'text-slate-600 hover:text-slate-800 bg-white/60 border border-white/70 hover:bg-white/85'}`}
+                  className={`btn-sheen px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : 'text-slate-600 hover:text-slate-800 bg-white/60 border border-white/70 hover:bg-white/85'}`}
                 >
                   家長
                 </button>
@@ -4472,14 +4510,16 @@ export default function App() {
           <div className="h-[calc(100dvh-64px)] min-h-[calc(100svh-64px)] flex items-center justify-center">
             <div className="w-full max-w-4xl h-full">
               <div className="relative z-10 h-full flex flex-col items-center justify-center px-[clamp(0.9rem,3.6vw,1.55rem)] py-[clamp(0.8rem,2.8vh,1.45rem)]">
-                <div className="px-4 py-1.5 rounded-full mb-[clamp(0.55rem,1.9vh,1.25rem)] border border-white/95 bg-white/92 text-[10px] tracking-[0.22em] font-black uppercase text-slate-600 shadow-[0_8px_24px_rgba(15,23,42,0.08)]">
+                <div className="hero-reveal px-4 py-1.5 rounded-full mb-[clamp(0.55rem,1.9vh,1.25rem)] border border-white/95 bg-white/92 text-[10px] tracking-[0.22em] font-black uppercase text-slate-600 shadow-[0_8px_24px_rgba(15,23,42,0.08)]" style={{ '--stagger-index': 0 }}>
                     HSINRU CENTRAL
                 </div>
-                <h2 className="w-full px-[clamp(0.2rem,1vw,0.7rem)] whitespace-nowrap text-[clamp(1.2rem,5.35vw,2.9rem)] sm:text-[clamp(1.8rem,4.4vw,2.9rem)] font-black font-serif tracking-[-0.016em] sm:tracking-tight mb-[clamp(0.35rem,1.2vh,0.9rem)] text-center leading-[1.18] bg-clip-text text-transparent bg-[linear-gradient(104deg,#047857_0%,#0f766e_24%,#0891b2_56%,#1d4ed8_100%)] drop-shadow-[0_1px_0_rgba(255,255,255,0.45)]">Make Progress Visible</h2>
-                <p className="text-[clamp(10px,2.35vw,11px)] font-bold tracking-[0.2em] mb-[clamp(0.7rem,2.4vh,1.6rem)] uppercase text-slate-600">2025-2026 Learning Journey</p>
-                <ExamCountdown isDarkMode={darkMode} />
+                <h2 className="hero-reveal w-full px-[clamp(0.2rem,1vw,0.7rem)] whitespace-nowrap text-[clamp(1.2rem,5.35vw,2.9rem)] sm:text-[clamp(1.8rem,4.4vw,2.9rem)] font-black font-serif tracking-[-0.016em] sm:tracking-tight mb-[clamp(0.35rem,1.2vh,0.9rem)] text-center leading-[1.18] bg-clip-text text-transparent bg-[linear-gradient(104deg,#047857_0%,#0f766e_24%,#0891b2_56%,#1d4ed8_100%)] drop-shadow-[0_1px_0_rgba(255,255,255,0.45)]" style={{ '--stagger-index': 1 }}>Make Progress Visible</h2>
+                <p className="hero-reveal text-[clamp(10px,2.35vw,11px)] font-bold tracking-[0.2em] mb-[clamp(0.7rem,2.4vh,1.6rem)] uppercase text-slate-600" style={{ '--stagger-index': 2 }}>2025-2026 Learning Journey</p>
+                <div className="hero-reveal" style={{ '--stagger-index': 3 }}>
+                  <ExamCountdown isDarkMode={darkMode} />
+                </div>
                   
-                <div className="w-full max-w-xl grid grid-cols-1 md:grid-cols-2 gap-3 mt-[clamp(0.9rem,2.7vh,1.6rem)]">
+                <div className="hero-reveal w-full max-w-xl grid grid-cols-1 md:grid-cols-2 gap-3 mt-[clamp(0.9rem,2.7vh,1.6rem)]" style={{ '--stagger-index': 4 }}>
                    <button
                       onClick={() => runWithBatchDiscardGuard(() => {
                         if (isAuthenticated) {
@@ -4490,7 +4530,7 @@ export default function App() {
                           setMode('teacher_login');
                         }
                       })}
-                      className="group w-full p-5 rounded-[1.45rem] border flex items-center gap-4 transition-all duration-200 backdrop-blur-xl bg-white/94 border-white/95 shadow-[0_14px_32px_rgba(15,23,42,0.09)] hover:bg-white hover:border-sky-200/90 hover:-translate-y-0.5"
+                      className="btn-sheen group w-full p-5 rounded-[1.45rem] border flex items-center gap-4 transition-all duration-200 backdrop-blur-xl bg-white/94 border-white/95 shadow-[0_14px_32px_rgba(15,23,42,0.09)] hover:bg-white hover:border-sky-200/90 hover:-translate-y-0.5"
                     >
                       <div className="w-11 h-11 rounded-2xl flex items-center justify-center transition-colors bg-gradient-to-br from-indigo-100 to-sky-100 text-indigo-700"><LayoutDashboard className="w-5 h-5" /></div>
                       <div className="text-left flex-1"><h3 className="text-base font-black text-slate-800">老師通道</h3><p className="text-[11px] text-slate-500 mt-0.5">管理成績與設定</p></div>
@@ -4502,7 +4542,7 @@ export default function App() {
                         setSearchError('');
                         setMode('parent');
                       })}
-                      className="group w-full p-5 rounded-[1.45rem] border flex items-center gap-4 transition-all duration-200 backdrop-blur-xl bg-white/94 border-white/95 shadow-[0_14px_32px_rgba(15,23,42,0.09)] hover:bg-white hover:border-emerald-200/90 hover:-translate-y-0.5"
+                      className="btn-sheen group w-full p-5 rounded-[1.45rem] border flex items-center gap-4 transition-all duration-200 backdrop-blur-xl bg-white/94 border-white/95 shadow-[0_14px_32px_rgba(15,23,42,0.09)] hover:bg-white hover:border-emerald-200/90 hover:-translate-y-0.5"
                     >
                       <div className="w-11 h-11 rounded-2xl flex items-center justify-center transition-colors bg-gradient-to-br from-sky-100 to-emerald-100 text-sky-700"><BarChart3 className="w-5 h-5" /></div>
                       <div className="text-left flex-1"><h3 className="text-base font-black text-slate-800">家長查詢</h3><p className="text-[11px] text-slate-500 mt-0.5">輸入學號或姓名查看分析</p></div>
@@ -4510,7 +4550,7 @@ export default function App() {
                    </button>
                 </div>
 
-                <p className="mt-[clamp(0.9rem,3vh,1.8rem)] text-[11px] font-serif font-semibold tracking-[0.14em] text-slate-500/90">
+                <p className="hero-reveal mt-[clamp(0.9rem,3vh,1.8rem)] text-[11px] font-serif font-semibold tracking-[0.14em] text-slate-500/90" style={{ '--stagger-index': 5 }}>
                   Created by CH Fan
                 </p>
               </div>
@@ -4526,14 +4566,14 @@ export default function App() {
                     <h2 className={`text-xl font-black mb-6 tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>身份驗證</h2>
                     <input type="password" value={passwordInput} onChange={(e) => { setPasswordInput(e.target.value); setLoginError(false); }} onKeyDown={(e) => e.key === 'Enter' && handleLoginSubmit()} className={`w-full p-4 rounded-2xl text-center text-xl font-bold tracking-widest outline-none transition-all mb-6 placeholder:text-base placeholder:tracking-normal placeholder:font-medium border shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5 text-white focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 placeholder:text-slate-500' : 'bg-slate-50 border-slate-200/60 text-slate-800 focus:bg-white focus:ring-2 focus:ring-blue-100 placeholder:text-slate-400'}`} placeholder="輸入密碼" autoFocus />
                     {loginError && <p className="text-red-500 text-xs font-bold mb-4">密碼錯誤</p>}
-                    <button onClick={handleLoginSubmit} className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3.5 rounded-2xl font-bold shadow-lg shadow-blue-500/30 active:scale-[0.98] transition-all">登入</button>
+                    <button onClick={handleLoginSubmit} className="btn-sheen w-full bg-blue-600 hover:bg-blue-500 text-white py-3.5 rounded-2xl font-bold shadow-lg shadow-blue-500/30 active:scale-[0.98] transition-all">登入</button>
                 </div>
             </div>
         )}
 
         {mode === 'teacher' && (
           <div className="space-y-7">
-            <div className={`p-6 rounded-[2rem] border backdrop-blur-2xl relative overflow-hidden ${darkMode ? 'bg-[#0f172a]/70 border-white/10 shadow-xl shadow-black/20 ring-1 ring-white/5' : 'bg-white border-white shadow-[0_24px_52px_rgba(15,23,42,0.1)]'}`}>
+            <div className={`panel-fade-in p-6 rounded-[2rem] border backdrop-blur-2xl relative overflow-hidden ${darkMode ? 'bg-[#0f172a]/70 border-white/10 shadow-xl shadow-black/20 ring-1 ring-white/5' : 'bg-white border-white shadow-[0_24px_52px_rgba(15,23,42,0.1)]'}`}>
                 <div className={`absolute inset-x-0 top-0 h-1 ${darkMode ? 'bg-emerald-300/35' : 'bg-gradient-to-r from-sky-500 via-emerald-500 to-indigo-500'}`} />
                 {isLimitedTeacherRole && (
                     <div className={`mb-4 mt-1 inline-flex items-center gap-2 text-[10px] font-black tracking-widest uppercase px-3 py-1.5 rounded-full border ${darkMode ? 'bg-amber-500/10 border-amber-300/25 text-amber-200' : 'bg-amber-50 border-amber-200 text-amber-700'}`}>
@@ -4556,7 +4596,7 @@ export default function App() {
                                 <button
                                     type="button"
                                     onClick={() => setBatchDate(latestAvailableDate)}
-                                    className={`px-3 py-2 rounded-xl text-[11px] font-bold transition-colors border shadow-sm ${darkMode ? 'bg-slate-800 text-slate-200 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+                                    className={`btn-sheen px-3 py-2 rounded-xl text-[11px] font-bold transition-colors border shadow-sm ${darkMode ? 'bg-slate-800 text-slate-200 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
                                 >
                                     切到最新
                                 </button>
@@ -4570,7 +4610,7 @@ export default function App() {
 
                     <div className={`mt-3.5 rounded-2xl border p-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-white/85 border-slate-200/80'}`}>
                         <div className="overflow-x-auto pb-1">
-                            <div className="inline-flex gap-2.5 min-w-full">
+                            <div className={`inline-flex gap-2.5 min-w-full ${prefersReducedMotion ? '' : 'list-fade-in'}`}>
                                 {teacherDateCards.map((item) => {
                                     const { weekendID, label, phaseId, phaseLabel, isLatest, isSelected } = item;
                                     const phaseTagClass = phaseId === 'p1'
@@ -4586,7 +4626,7 @@ export default function App() {
                                             onClick={() => {
                                                 if (teacherViewMode === 'batch' && weekendID !== selectedBatchWeekendID) setBatchDate(weekendID);
                                             }}
-                                            className={`text-left min-w-[126px] rounded-2xl border px-3 py-2.5 transition-all ${darkMode ? 'bg-slate-800/88 border-white/10 hover:border-emerald-300/30' : 'bg-white border-slate-200/80 shadow-[0_8px_18px_rgba(15,23,42,0.06)] hover:border-emerald-200'} ${isSelected ? (darkMode ? 'ring-1 ring-emerald-300/40 border-emerald-300/40' : 'ring-2 ring-emerald-100 border-emerald-300/60') : ''}`}
+                                            className={`btn-sheen text-left min-w-[126px] rounded-2xl border px-3 py-2.5 transition-all ${darkMode ? 'bg-slate-800/88 border-white/10 hover:border-emerald-300/30' : 'bg-white border-slate-200/80 shadow-[0_8px_18px_rgba(15,23,42,0.06)] hover:border-emerald-200'} ${isSelected ? (darkMode ? 'ring-1 ring-emerald-300/40 border-emerald-300/40' : 'ring-2 ring-emerald-100 border-emerald-300/60') : ''}`}
                                         >
                                             <div className="flex items-start justify-between gap-2">
                                                 <span className={`text-[9px] font-black px-2 py-0.5 rounded-full border tracking-wide ${phaseTagClass}`}>{phaseLabel}</span>
@@ -4654,9 +4694,9 @@ export default function App() {
                             </button>
                         </div>
                         <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
-                            <button onClick={() => setShowAddStudentModal(true)} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all whitespace-nowrap"><UserPlus className="w-4 h-4"/> 新增學生</button>
+                            <button onClick={() => setShowAddStudentModal(true)} className="btn-sheen bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all whitespace-nowrap"><UserPlus className="w-4 h-4"/> 新增學生</button>
                             {canImportExcel ? (
-                                <label className="cursor-pointer bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all whitespace-nowrap">
+                                <label className="btn-sheen cursor-pointer bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all whitespace-nowrap">
                                     <FileSpreadsheet className="w-4 h-4" /> 匯入 Excel
                                     <input type="file" accept=".xlsx, .xls" className="hidden" onChange={handleExcelUpload} />
                                 </label>
@@ -4691,19 +4731,19 @@ export default function App() {
                                 </span>
                             </div>
                             <div className="flex gap-2 flex-wrap items-center">
-                                <button onClick={() => { setSortByPR((prev) => !prev); setSortByProb(false); }} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByPR ? 'bg-indigo-600 text-white shadow-indigo-500/30' : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
+                                <button onClick={() => { setSortByPR((prev) => !prev); setSortByProb(false); }} className={`btn-sheen px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByPR ? 'bg-indigo-600 text-white shadow-indigo-500/30' : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
                                     <ArrowDownWideNarrow className="w-3.5 h-3.5" /> PR排序
                                 </button>
-                                <button onClick={() => { setSortByProb((prev) => !prev); setSortByPR(false); }} className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByProb ? (darkMode ? 'bg-emerald-700 text-white shadow-emerald-900/45 ring-1 ring-emerald-200/30' : 'bg-emerald-600 text-white shadow-emerald-600/25') : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
+                                <button onClick={() => { setSortByProb((prev) => !prev); setSortByPR(false); }} className={`btn-sheen px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByProb ? (darkMode ? 'bg-emerald-700 text-white shadow-emerald-900/45 ring-1 ring-emerald-200/30' : 'bg-emerald-600 text-white shadow-emerald-600/25') : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
                                     <Percent className="w-3.5 h-3.5" /> 機率排序
                                 </button>
-                                <button onClick={handleExportBatchExcel} className={`px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1 border ${darkMode ? 'bg-slate-800 text-slate-300 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
+                                <button onClick={handleExportBatchExcel} className={`btn-sheen px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1 border ${darkMode ? 'bg-slate-800 text-slate-300 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
                                     <FileSpreadsheet className="w-3.5 h-3.5" /> 下載 Excel
                                 </button>
                                 <button
                                   onClick={handleSaveBatchGrades}
                                   disabled={!canEditStudentGrades}
-                                  className={`text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-md transition-all active:scale-[0.98] flex items-center gap-1 ${
+                                  className={`btn-sheen text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-md transition-all active:scale-[0.98] flex items-center gap-1 ${
                                     !canEditStudentGrades
                                       ? 'bg-slate-400 cursor-not-allowed shadow-none'
                                       : isBatchDirty
@@ -4754,7 +4794,10 @@ export default function App() {
                         </div>
 
                         {batchInsightTab === 'grades' && (
-                            <div className={`overflow-x-auto rounded-xl border shadow-inner ${darkMode ? 'border-white/5 bg-[#020617]/30' : 'border-slate-200 bg-white'}`}>
+                            <div
+                                key={`batch-grades-${selectedBatchWeekendID || 'none'}-${teacherClassFilter}-${sortByPR ? 'pr' : 'none'}-${sortByProb ? 'prob' : 'none'}`}
+                                className={`overflow-x-auto rounded-xl border shadow-inner ${prefersReducedMotion ? '' : 'list-fade-in'} ${darkMode ? 'border-white/5 bg-[#020617]/30' : 'border-slate-200 bg-white'}`}
+                            >
                                 <table className="w-full text-sm text-left min-w-[660px] table-fixed">
                                     <colgroup>
                                         <col className="w-8" />
@@ -5343,7 +5386,7 @@ export default function App() {
               
             {/* ... Single View ... */}
             {teacherViewMode === 'single' && currentStudentId && !loading && (
-              <div className={`rounded-[2rem] shadow-2xl border overflow-hidden backdrop-blur-md ${darkMode ? 'bg-[#0f172a]/70 border-white/10 ring-1 ring-white/5' : 'bg-white border-white shadow-[0_20px_52px_rgba(15,23,42,0.12)]'}`}>
+              <div className={`panel-fade-in rounded-[2rem] shadow-2xl border overflow-hidden backdrop-blur-md ${darkMode ? 'bg-[#0f172a]/70 border-white/10 ring-1 ring-white/5' : 'bg-white border-white shadow-[0_20px_52px_rgba(15,23,42,0.12)]'}`}>
                 <div className={`p-6 border-b flex justify-between items-center ${darkMode ? 'border-white/5 bg-[#0f172a]/50' : 'border-slate-200/60 bg-white'}`}>
                   <div className="flex-1 mr-4">
                       <input type="text" value={studentName} onChange={(e) => setStudentName(e.target.value)} className={`text-2xl font-bold bg-transparent border-none outline-none w-full transition-all tracking-tight ${darkMode ? 'text-white placeholder:text-slate-700' : 'text-slate-800 placeholder:text-slate-200'}`} placeholder="學生姓名"/>
@@ -5360,7 +5403,7 @@ export default function App() {
                     <button
                       onClick={handleSaveGrades}
                       disabled={!canEditStudentGrades}
-                      className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 ${canEditStudentGrades ? 'bg-blue-600 text-white hover:bg-blue-500 shadow-lg shadow-blue-500/30 active:scale-95' : 'bg-slate-300 text-white cursor-not-allowed'}`}
+                      className={`btn-sheen px-5 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 ${canEditStudentGrades ? 'bg-blue-600 text-white hover:bg-blue-500 shadow-lg shadow-blue-500/30 active:scale-95' : 'bg-slate-300 text-white cursor-not-allowed'}`}
                     >
                       <Save className="w-4 h-4"/> {canEditStudentGrades ? '儲存' : '唯讀鎖定'}
                     </button>
@@ -5415,19 +5458,19 @@ export default function App() {
         {mode === 'parent' && (
           <div className={`${viewData ? 'max-w-5xl' : 'max-w-md'} mx-auto space-y-6 pt-10 transition-all duration-300`}> 
             {!viewData && (
-            <div className={`backdrop-blur-[26px] p-8 rounded-[2.5rem] shadow-2xl border text-center relative overflow-hidden ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/15 shadow-black/30' : 'bg-white/78 border-white/85 ring-1 ring-white/55 shadow-[0_24px_55px_rgba(15,23,42,0.12)]'}`}>
+            <div className={`panel-fade-in backdrop-blur-[26px] p-8 rounded-[2.5rem] shadow-2xl border text-center relative overflow-hidden ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/15 shadow-black/30' : 'bg-white/78 border-white/85 ring-1 ring-white/55 shadow-[0_24px_55px_rgba(15,23,42,0.12)]'}`}>
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-sky-500 via-emerald-500 to-indigo-500"></div>
               <h2 className={`text-2xl font-black mb-8 tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>查詢成績</h2>
               <div className={`w-full p-2 rounded-2xl border transition-all mb-6 shadow-inner ${darkMode ? 'bg-[#08120d]/70 border-emerald-200/15 focus-within:ring-2 focus-within:ring-emerald-500/20' : 'bg-white/75 border-white/85 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100'}`}>
                 <input type="text" placeholder="請輸入學號或姓名" className={`w-full bg-transparent border-none px-4 py-3 outline-none text-xl font-bold text-center tracking-widest placeholder:text-base placeholder:tracking-normal placeholder:font-medium ${darkMode ? 'text-white placeholder:text-slate-600' : 'text-slate-800 placeholder:text-slate-400'}`} value={searchId} onChange={(e) => setSearchId(e.target.value)} />
               </div>
-              <button onClick={handleParentSearch} disabled={loading || !user} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-2xl font-bold text-lg shadow-sm transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 tracking-wide">{loading ? '查詢中...' : (!user ? '連線中...' : '開始查詢')}</button>
+              <button onClick={handleParentSearch} disabled={loading || !user} className="btn-sheen w-full bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-2xl font-bold text-lg shadow-sm transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 tracking-wide">{loading ? '查詢中...' : (!user ? '連線中...' : '開始查詢')}</button>
               {searchError && <p className="mt-6 text-red-500 text-xs font-bold bg-red-500/10 inline-block px-4 py-2 rounded-full animate-pulse">{searchError}</p>}
             </div>
             )}
 
             {viewData && (
-              <div className={`rounded-[2.5rem] shadow-2xl overflow-hidden border backdrop-blur-[28px] ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/15 shadow-black/30' : 'bg-white/74 border-white/85 ring-1 ring-white/55 shadow-[0_26px_60px_rgba(15,23,42,0.13)]'}`}>
+              <div className={`panel-fade-in rounded-[2.5rem] shadow-2xl overflow-hidden border backdrop-blur-[28px] ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/15 shadow-black/30' : 'bg-white/74 border-white/85 ring-1 ring-white/55 shadow-[0_26px_60px_rgba(15,23,42,0.13)]'}`}>
                 <div className={`p-8 pb-6 relative overflow-hidden ${darkMode ? 'bg-[#0d1712] text-white border-b border-emerald-200/10' : 'bg-[linear-gradient(112deg,rgba(236,253,245,0.93)_0%,rgba(224,242,254,0.9)_54%,rgba(255,255,255,0.92)_100%)] text-slate-800 border-b border-white/70'}`}>
                    <div className={`absolute top-0 right-0 w-64 h-64 rounded-full -mr-20 -mt-20 blur-3xl ${darkMode ? 'bg-emerald-500 opacity-20' : 'bg-emerald-300 opacity-25'}`}></div>
                    
@@ -5518,7 +5561,7 @@ export default function App() {
                                             <span className="text-sm font-bold text-slate-400 font-mono">{d.date}</span>
                                             {d.class && <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold opacity-60 ${darkMode ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-600'}`}>{d.class}</span>}
                                         </div>
-                                        <button onClick={() => openStatsModal(dateForRank, { total: d.total, chi: d.chi, eng: d.eng, math: d.math }, d.class)} className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-95 shadow-sm backdrop-blur-md ${darkMode ? 'bg-slate-800/85 text-emerald-100 hover:bg-slate-700/88 border border-emerald-200/20 shadow-black/25' : 'bg-white/88 text-slate-700 hover:bg-white border border-white/90 ring-1 ring-white/60 shadow-[0_8px_20px_rgba(15,23,42,0.08)]'}`}>
+                                        <button onClick={() => openStatsModal(dateForRank, { total: d.total, chi: d.chi, eng: d.eng, math: d.math }, d.class)} className={`btn-sheen px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-95 shadow-sm backdrop-blur-md ${darkMode ? 'bg-slate-800/85 text-emerald-100 hover:bg-slate-700/88 border border-emerald-200/20 shadow-black/25' : 'bg-white/88 text-slate-700 hover:bg-white border border-white/90 ring-1 ring-white/60 shadow-[0_8px_20px_rgba(15,23,42,0.08)]'}`}>
                                             <BarChart2 className="w-3.5 h-3.5" /> 
                                             查看落點分析
                                             <ChevronRight className="w-3 h-3 opacity-80" />
@@ -5563,8 +5606,8 @@ export default function App() {
         )}
 
         {showAddStudentModal && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowAddStudentModal(false)}>
-              <div className={`rounded-[2.2rem] p-7 w-full max-w-sm ${darkMode ? 'bg-slate-800 border border-white/10' : 'bg-white shadow-2xl'}`} onClick={e => e.stopPropagation()}>
+          <div className="modal-backdrop-animate fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowAddStudentModal(false)}>
+              <div className={`modal-panel-animate rounded-[2.2rem] p-7 w-full max-w-sm ${darkMode ? 'bg-slate-800 border border-white/10' : 'bg-white shadow-2xl'}`} onClick={e => e.stopPropagation()}>
                   <h3 className={`text-lg font-black mb-4 ${darkMode ? 'text-white' : 'text-slate-800'}`}>新增學生</h3>
                   <p className={`text-xs mb-4 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>輸入學號後可建立新學生，或載入既有資料。</p>
                   <input
@@ -5589,8 +5632,8 @@ export default function App() {
         )}
 
         {showAvgModal && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowAvgModal(false)}>
-              <div className={`rounded-[2.5rem] w-full max-w-2xl max-h-[85vh] flex flex-col ${darkMode ? 'bg-slate-800 border border-white/10' : 'bg-white shadow-2xl'}`} onClick={e => e.stopPropagation()}>
+          <div className="modal-backdrop-animate fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowAvgModal(false)}>
+              <div className={`modal-panel-animate rounded-[2.5rem] w-full max-w-2xl max-h-[85vh] flex flex-col ${darkMode ? 'bg-slate-800 border border-white/10' : 'bg-white shadow-2xl'}`} onClick={e => e.stopPropagation()}>
                   <div className={`p-6 border-b flex justify-between items-center ${darkMode ? 'border-white/5' : 'border-slate-100'}`}>
                       <h3 className={`text-xl font-bold flex items-center gap-3 ${darkMode ? 'text-white' : 'text-slate-800'}`}><Edit3 className="w-5 h-5 text-indigo-500"/> 設定班級平均</h3>
                       <button onClick={() => setShowAvgModal(false)} className={`p-2 rounded-full transition ${darkMode ? 'bg-white/5 hover:bg-white/10 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-500'}`}><X className="w-5 h-5"/></button>
@@ -5644,8 +5687,8 @@ export default function App() {
         )}
 
         {statsModalData && (
-            <div className="fixed inset-0 bg-black/62 backdrop-blur-sm flex items-start sm:items-center justify-center z-[70] px-4 pb-4 pt-[calc(5rem+env(safe-area-inset-top))] sm:p-4" onClick={() => setStatsModalData(null)}>
-                <div className={`rounded-[2.2rem] w-full max-w-2xl overflow-hidden flex flex-col max-h-[calc(100svh-6rem-env(safe-area-inset-top))] sm:max-h-[92vh] border ${darkMode ? 'bg-slate-800 border-white/10' : 'bg-white/95 border-slate-200/95 shadow-[0_30px_70px_rgba(15,23,42,0.22)]'}`} onClick={e => e.stopPropagation()}>
+            <div className="modal-backdrop-animate fixed inset-0 bg-black/62 backdrop-blur-sm flex items-start sm:items-center justify-center z-[70] px-4 pb-4 pt-[calc(5rem+env(safe-area-inset-top))] sm:p-4" onClick={() => setStatsModalData(null)}>
+                <div className={`modal-panel-animate rounded-[2.2rem] w-full max-w-2xl overflow-hidden flex flex-col max-h-[calc(100svh-6rem-env(safe-area-inset-top))] sm:max-h-[92vh] border ${darkMode ? 'bg-slate-800 border-white/10' : 'bg-white/95 border-slate-200/95 shadow-[0_30px_70px_rgba(15,23,42,0.22)]'}`} onClick={e => e.stopPropagation()}>
                     <div className={`p-6 sm:p-7 border-b relative ${darkMode ? 'border-white/5 bg-slate-800/75' : 'border-slate-200/95 bg-[linear-gradient(112deg,rgba(224,242,254,0.96)_0%,rgba(255,255,255,0.98)_46%,rgba(236,253,245,0.96)_100%)]'}`}>
                         <button onClick={() => setStatsModalData(null)} className={`absolute top-5 right-5 p-2 rounded-full transition ${darkMode ? 'bg-white/5 hover:bg-white/10 text-white' : 'bg-white hover:bg-slate-50 text-slate-500 border border-slate-200'}`}><X className="w-5 h-5"/></button>
                         <div className="pr-12">
@@ -5744,8 +5787,8 @@ export default function App() {
         )}
 
         {showSecurityModal && (
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[60] p-6 animate-in fade-in duration-200" onClick={closeSecurityModal}>
-                <div className={`p-8 rounded-[2rem] shadow-2xl max-w-xs w-full text-center transform transition-all scale-100 border ${darkMode ? 'bg-slate-800 border-white/10' : 'bg-white border-white/50'}`} onClick={e => e.stopPropagation()}>
+            <div className="modal-backdrop-animate fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[60] p-6" onClick={closeSecurityModal}>
+                <div className={`modal-panel-animate p-8 rounded-[2rem] shadow-2xl max-w-xs w-full text-center transform transition-all scale-100 border ${darkMode ? 'bg-slate-800 border-white/10' : 'bg-white border-white/50'}`} onClick={e => e.stopPropagation()}>
                     <div className={`mx-auto mb-6 p-4 rounded-full inline-block shadow-inner ${darkMode ? 'bg-blue-500/10 text-blue-400' : 'bg-blue-50 text-blue-600'}`}>
                         <ShieldCheck className="w-8 h-8" />
                     </div>

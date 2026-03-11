@@ -23,6 +23,10 @@ export default function ParentAbilityRadar({
   phaseName = ''
 }) {
   if (!data || !data.length) return null;
+  const prefersReducedMotion = typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const shouldAnimate = !prefersReducedMotion && data.length <= 8;
 
   const wrapperClass = `mt-3 mb-7 rounded-3xl border px-4 pt-4 pb-3 backdrop-blur-md ${isDarkMode ? 'bg-[#0f1914]/75 border-emerald-200/18' : 'bg-white/82 border-white/80 ring-1 ring-white/55 shadow-[0_12px_30px_rgba(15,23,42,0.08)]'}`;
   const subjectRows = data.map((item) => {
@@ -76,8 +80,29 @@ export default function ParentAbilityRadar({
                 fontWeight: 600
               }}
             />
-            <Radar name="個人平均" dataKey="student" stroke="#22c55e" fill="#22c55e" fillOpacity={isDarkMode ? 0.36 : 0.22} strokeWidth={2.2} isAnimationActive={false} />
-            <Radar name="全體中位數" dataKey="classAvg" stroke="#94a3b8" fill="#94a3b8" fillOpacity={isDarkMode ? 0.2 : 0.1} strokeWidth={2} isAnimationActive={false} />
+            <Radar
+              name="個人平均"
+              dataKey="student"
+              stroke="#22c55e"
+              fill="#22c55e"
+              fillOpacity={isDarkMode ? 0.36 : 0.22}
+              strokeWidth={2.2}
+              isAnimationActive={shouldAnimate}
+              animationDuration={460}
+              animationEasing="ease-out"
+            />
+            <Radar
+              name="全體中位數"
+              dataKey="classAvg"
+              stroke="#94a3b8"
+              fill="#94a3b8"
+              fillOpacity={isDarkMode ? 0.2 : 0.1}
+              strokeWidth={2}
+              isAnimationActive={shouldAnimate}
+              animationBegin={70}
+              animationDuration={480}
+              animationEasing="ease-out"
+            />
           </RadarChart>
         </ResponsiveContainer>
       </div>

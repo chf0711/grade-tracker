@@ -1374,8 +1374,9 @@ export default function App() {
   const [_xlsxLoaded, setXlsxLoaded] = useState(false);
   const [autoThemeCoords, setAutoThemeCoords] = useState(null);
   const [themePreference, setThemePreference] = useState('auto');
-  const [darkMode, setDarkMode] = useState(false);
+  const [backgroundDarkMode, setBackgroundDarkMode] = useState(false);
   const xlsxLoadingPromiseRef = useRef(null);
+  const darkMode = false;
   const isLimitedTeacherRole = teacherAuthRole === TEACHER_ROLE.LIMITED;
   const canEditStudentGrades = !isLimitedTeacherRole;
   const canImportExcel = canEditStudentGrades || isLimitedTeacherRole;
@@ -1440,8 +1441,8 @@ export default function App() {
   }, []);
 
   const handleThemeToggle = useCallback(() => {
-      updateThemePreference(darkMode ? 'light' : 'dark');
-  }, [darkMode, updateThemePreference]);
+      updateThemePreference(backgroundDarkMode ? 'light' : 'dark');
+  }, [backgroundDarkMode, updateThemePreference]);
 
   const ensureXlsxReady = useCallback(async () => {
       if (typeof window === 'undefined') return false;
@@ -1758,17 +1759,17 @@ export default function App() {
   useEffect(() => {
       if (typeof window === 'undefined') return undefined;
       if (themePreference === 'dark') {
-          setDarkMode((prev) => (prev ? prev : true));
+          setBackgroundDarkMode((prev) => (prev ? prev : true));
           return undefined;
       }
       if (themePreference === 'light') {
-          setDarkMode((prev) => (prev ? false : prev));
+          setBackgroundDarkMode((prev) => (prev ? false : prev));
           return undefined;
       }
 
       const syncTheme = () => {
           const nextDarkMode = getAutoDarkModeValue(new Date(), autoThemeCoords);
-          setDarkMode((prev) => (prev === nextDarkMode ? prev : nextDarkMode));
+          setBackgroundDarkMode((prev) => (prev === nextDarkMode ? prev : nextDarkMode));
       };
       syncTheme();
       const timer = window.setInterval(syncTheme, 60 * 1000);
@@ -5315,10 +5316,10 @@ export default function App() {
   const shouldElevateHeader = isHeaderScrolled || !isLandingMode;
   const sharedBackgroundStyle = useMemo(() => ({
       opacity: sharedBackgroundOpacity,
-      backgroundImage: darkMode
-          ? 'repeating-linear-gradient(0deg, rgba(148,163,184,0.08) 0px, rgba(148,163,184,0.08) 1px, transparent 1px, transparent 24px), repeating-linear-gradient(90deg, rgba(148,163,184,0.06) 0px, rgba(148,163,184,0.06) 1px, transparent 1px, transparent 24px), radial-gradient(circle at 14% 15%, rgba(16,185,129,0.26) 0%, transparent 40%), radial-gradient(circle at 88% 14%, rgba(56,189,248,0.24) 0%, transparent 40%), radial-gradient(circle at 78% 86%, rgba(59,130,246,0.18) 0%, transparent 34%), linear-gradient(138deg, #030712 0%, #052e2b 45%, #0b1f2f 100%)'
+      backgroundImage: backgroundDarkMode
+          ? 'repeating-linear-gradient(0deg, rgba(148,163,184,0.08) 0px, rgba(148,163,184,0.08) 1px, transparent 1px, transparent 24px), repeating-linear-gradient(90deg, rgba(148,163,184,0.06) 0px, rgba(148,163,184,0.06) 1px, transparent 1px, transparent 24px), radial-gradient(circle at 16% 18%, rgba(148,163,184,0.16) 0%, transparent 44%), radial-gradient(circle at 84% 16%, rgba(100,116,139,0.15) 0%, transparent 42%), radial-gradient(circle at 80% 84%, rgba(71,85,105,0.14) 0%, transparent 38%), linear-gradient(138deg, #0a0d12 0%, #12161d 44%, #1b212a 100%)'
           : 'repeating-linear-gradient(0deg, rgba(148,163,184,0.1) 0px, rgba(148,163,184,0.1) 1px, transparent 1px, transparent 24px), repeating-linear-gradient(90deg, rgba(148,163,184,0.08) 0px, rgba(148,163,184,0.08) 1px, transparent 1px, transparent 24px), radial-gradient(circle at 12% 15%, rgba(99,102,241,0.22) 0%, transparent 40%), radial-gradient(circle at 86% 12%, rgba(14,165,233,0.22) 0%, transparent 40%), radial-gradient(circle at 80% 84%, rgba(236,72,153,0.16) 0%, transparent 36%), linear-gradient(138deg, #f8fafc 0%, #f3f7ff 46%, #eefcf5 100%)'
-  }), [sharedBackgroundOpacity, darkMode]);
+  }), [sharedBackgroundOpacity, backgroundDarkMode]);
 
   if (!db) return <div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400 text-sm font-mono tracking-widest uppercase">Initializing...</div>;
 
@@ -5329,7 +5330,7 @@ export default function App() {
         className="fixed inset-0 pointer-events-none z-0 transition-opacity duration-500"
         style={sharedBackgroundStyle}
       />
-      <div aria-hidden="true" className={`ambient-layer transition-opacity duration-700 ${isLandingMode ? 'opacity-95' : 'opacity-75'} ${darkMode ? 'ambient-layer--dark' : ''}`}>
+      <div aria-hidden="true" className={`ambient-layer transition-opacity duration-700 ${isLandingMode ? 'opacity-95' : 'opacity-75'} ${backgroundDarkMode ? 'ambient-layer--dark' : ''}`}>
         <div className="ambient-dot ambient-dot--a" />
         <div className="ambient-dot ambient-dot--b" />
         <div className="ambient-dot ambient-dot--c" />
@@ -5383,11 +5384,11 @@ export default function App() {
                 </button>
                 <button
                   onClick={handleThemeToggle}
-                  className={`btn-sheen shrink-0 p-2 rounded-full transition-all duration-300 border ${darkMode ? 'text-amber-200 bg-slate-900/55 border-emerald-200/25 hover:bg-slate-900/75' : 'text-slate-600 bg-white/80 border-white/85 hover:bg-white'}`}
-                  title={darkMode ? '切換淺色模式' : '切換深色模式'}
-                  aria-label={darkMode ? '切換淺色模式' : '切換深色模式'}
+                  className={`btn-sheen shrink-0 p-2 rounded-full transition-all duration-300 border ${backgroundDarkMode ? 'text-amber-200 bg-slate-900/55 border-slate-300/35 hover:bg-slate-900/75' : 'text-slate-600 bg-white/80 border-white/85 hover:bg-white'}`}
+                  title={backgroundDarkMode ? '切換淺色模式' : '切換深色模式'}
+                  aria-label={backgroundDarkMode ? '切換淺色模式' : '切換深色模式'}
                 >
-                  {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                  {backgroundDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
                 </button>
             {isAuthenticated && (
                 <button onClick={handleLogout} className="ml-1 p-2 text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-full transition-colors" title="登出"><LogOut className="w-5 h-5"/></button>

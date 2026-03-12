@@ -5211,7 +5211,7 @@ export default function App() {
         {mode === 'landing' && (
           <div className="h-[calc(100dvh-4rem-env(safe-area-inset-top))] min-h-[calc(100svh-4rem-env(safe-area-inset-top))] flex items-center justify-center">
             <div className="w-full max-w-4xl h-full">
-              <div className="relative z-10 h-full flex flex-col items-center justify-center px-[clamp(0.9rem,3.6vw,1.55rem)] py-[clamp(0.8rem,2.8vh,1.45rem)] -translate-y-[clamp(0.9rem,3.2vh,1.9rem)] sm:-translate-y-[clamp(1.1rem,3.5vh,2.2rem)]">
+              <div className="relative z-10 h-full flex flex-col items-center justify-center px-[clamp(0.9rem,3.6vw,1.55rem)] py-[clamp(0.8rem,2.8vh,1.45rem)] -translate-y-[clamp(1.25rem,4.1vh,2.55rem)] sm:-translate-y-[clamp(1.55rem,4.6vh,3rem)]">
                 <div className={`hero-reveal px-4 py-1.5 rounded-full mb-[clamp(0.55rem,1.9vh,1.25rem)] border text-[10px] tracking-[0.22em] font-black uppercase shadow-[0_8px_24px_rgba(15,23,42,0.08)] ${darkMode ? 'border-emerald-200/30 bg-[#071a16]/82 text-emerald-100 shadow-black/25' : 'border-white/95 bg-white/92 text-slate-600'}`} style={{ '--stagger-index': 0 }}>
                     HSINRU CENTRAL
                 </div>

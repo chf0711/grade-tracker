@@ -1,5 +1,5 @@
 import React, { Suspense, useState, useEffect, useMemo, useRef, useCallback, useDeferredValue, startTransition } from 'react';
-import { Search, Save, Plus, Check, BarChart3, X, Lock, LayoutDashboard, GraduationCap, Calendar, Clipboard, LogOut, AlertTriangle, UserPlus, Sparkles, Edit3, Trash2, Trophy, Target, FileSpreadsheet, ChevronRight, ArrowLeft, PieChart, Users, BarChart2, ShieldCheck, ArrowDownWideNarrow, Percent, Info, Sun, Moon } from 'lucide-react';
+import { Search, Save, Plus, Check, BarChart3, X, Lock, LayoutDashboard, GraduationCap, Calendar, Clipboard, LogOut, AlertTriangle, UserPlus, Sparkles, Edit3, Trash2, Trophy, Target, FileSpreadsheet, ChevronRight, ArrowLeft, PieChart, Users, BarChart2, ShieldCheck, ArrowDownWideNarrow, Percent, Info } from 'lucide-react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc } from 'firebase/firestore';
@@ -44,8 +44,6 @@ const MAX_OPERATION_LOG_ENTRIES = 220;
 const MAX_LOCAL_SNAPSHOTS = 4;
 const MAX_IMPORT_PREVIEW_ROWS = 12;
 const MAX_QUALITY_DETAIL_ITEMS = 120;
-const AUTO_THEME_COORDS_TTL_MS = 45 * 24 * 60 * 60 * 1000;
-const THEME_PREFERENCE_STORAGE_KEY = 'grade_tracker_theme_preference_v1';
 const SCORE_KEYS = ['chi', 'eng', 'math'];
 const LOCAL_CACHE_KEYS = Object.freeze({
     dates: 'grade_tracker_cache_dates_v1',
@@ -54,8 +52,7 @@ const LOCAL_CACHE_KEYS = Object.freeze({
     queryStats: 'grade_tracker_cache_query_stats_v1',
     parentQueryResults: 'grade_tracker_cache_parent_query_results_v1',
     operationLog: 'grade_tracker_cache_operation_log_v1',
-    snapshots: 'grade_tracker_cache_snapshots_v1',
-    autoThemeGeo: 'grade_tracker_cache_theme_geo_v1'
+    snapshots: 'grade_tracker_cache_snapshots_v1'
 });
 const STUDENTS_SESSION_SYNC_KEY = 'grade_tracker_students_session_synced_v1';
 
@@ -253,100 +250,6 @@ const findStudentByIdOrName = (students, keyword) => {
 };
 
 // --- Helpers ---
-const isValidGeoCoord = (lat, lng) => (
-    Number.isFinite(lat)
-    && Number.isFinite(lng)
-    && Math.abs(lat) <= 90
-    && Math.abs(lng) <= 180
-);
-
-const toRadians = (value) => (value * Math.PI) / 180;
-const toDegrees = (value) => (value * 180) / Math.PI;
-const normalizeDegrees = (value) => ((value % 360) + 360) % 360;
-const normalizeHours = (value) => ((value % 24) + 24) % 24;
-
-const getDayOfYear = (dateObj) => {
-    if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return 0;
-    const start = new Date(dateObj.getFullYear(), 0, 0);
-    const diff = dateObj - start + ((start.getTimezoneOffset() - dateObj.getTimezoneOffset()) * 60 * 1000);
-    return Math.floor(diff / (1000 * 60 * 60 * 24));
-};
-
-const computeSunEventTime = (dateObj, latitude, longitude, isSunrise) => {
-    if (
-        !(dateObj instanceof Date)
-        || Number.isNaN(dateObj.getTime())
-        || !isValidGeoCoord(latitude, longitude)
-    ) {
-        return null;
-    }
-
-    const dayOfYear = getDayOfYear(dateObj);
-    if (!dayOfYear) return null;
-    const lngHour = longitude / 15;
-    const t = dayOfYear + (((isSunrise ? 6 : 18) - lngHour) / 24);
-    const meanAnomaly = (0.9856 * t) - 3.289;
-
-    const trueLongitude = normalizeDegrees(
-        meanAnomaly
-        + (1.916 * Math.sin(toRadians(meanAnomaly)))
-        + (0.02 * Math.sin(toRadians(2 * meanAnomaly)))
-        + 282.634
-    );
-
-    let rightAscension = normalizeDegrees(toDegrees(Math.atan(0.91764 * Math.tan(toRadians(trueLongitude)))));
-    const longitudeQuadrant = Math.floor(trueLongitude / 90) * 90;
-    const ascensionQuadrant = Math.floor(rightAscension / 90) * 90;
-    rightAscension = (rightAscension + (longitudeQuadrant - ascensionQuadrant)) / 15;
-
-    const sinDeclination = 0.39782 * Math.sin(toRadians(trueLongitude));
-    const cosDeclination = Math.cos(Math.asin(sinDeclination));
-    const latRad = toRadians(latitude);
-    const cosHourAngle = (
-        Math.cos(toRadians(90.833))
-        - (sinDeclination * Math.sin(latRad))
-    ) / (cosDeclination * Math.cos(latRad));
-
-    if (cosHourAngle > 1 || cosHourAngle < -1) return null;
-
-    let hourAngle = isSunrise
-        ? 360 - toDegrees(Math.acos(cosHourAngle))
-        : toDegrees(Math.acos(cosHourAngle));
-    hourAngle /= 15;
-
-    const localMeanTime = hourAngle + rightAscension - (0.06571 * t) - 6.622;
-    const utcHour = normalizeHours(localMeanTime - lngHour);
-    const utcBase = Date.UTC(
-        dateObj.getFullYear(),
-        dateObj.getMonth(),
-        dateObj.getDate(),
-        0,
-        0,
-        0,
-        0
-    );
-    return new Date(utcBase + (utcHour * 60 * 60 * 1000));
-};
-
-const getSunriseSunsetTimes = (dateObj, coords) => {
-    if (!coords || !isValidGeoCoord(coords.lat, coords.lng)) {
-        return { sunrise: null, sunset: null };
-    }
-    const sunrise = computeSunEventTime(dateObj, coords.lat, coords.lng, true);
-    const sunset = computeSunEventTime(dateObj, coords.lat, coords.lng, false);
-    return { sunrise, sunset };
-};
-
-const getAutoDarkModeValue = (dateObj, coords) => {
-    if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return false;
-    const { sunrise, sunset } = getSunriseSunsetTimes(dateObj, coords);
-    if (sunrise instanceof Date && sunset instanceof Date) {
-        return dateObj < sunrise || dateObj >= sunset;
-    }
-    const hour = dateObj.getHours();
-    return hour >= 18 || hour < 6;
-};
-
 const customDateSort = (a, b) => {
     try {
         const normalizedA = normalizeDateToken(a);
@@ -1372,9 +1275,6 @@ export default function App() {
   const [admissionProbabilities, setAdmissionProbabilities] = useState({});
 
   const [_xlsxLoaded, setXlsxLoaded] = useState(false);
-  const [autoThemeCoords, setAutoThemeCoords] = useState(null);
-  const [themePreference, setThemePreference] = useState('auto');
-  const [backgroundDarkMode, setBackgroundDarkMode] = useState(false);
   const xlsxLoadingPromiseRef = useRef(null);
   const darkMode = false;
   const isLimitedTeacherRole = teacherAuthRole === TEACHER_ROLE.LIMITED;
@@ -1426,23 +1326,6 @@ export default function App() {
           latestMs
       });
   }, []);
-
-  const updateThemePreference = useCallback((nextPreference) => {
-      const safePreference = nextPreference === 'dark' || nextPreference === 'light'
-          ? nextPreference
-          : 'auto';
-      setThemePreference(safePreference);
-      if (typeof window === 'undefined') return;
-      if (safePreference === 'auto') {
-          localStorage.removeItem(THEME_PREFERENCE_STORAGE_KEY);
-          return;
-      }
-      localStorage.setItem(THEME_PREFERENCE_STORAGE_KEY, safePreference);
-  }, []);
-
-  const handleThemeToggle = useCallback(() => {
-      updateThemePreference(backgroundDarkMode ? 'light' : 'dark');
-  }, [backgroundDarkMode, updateThemePreference]);
 
   const ensureXlsxReady = useCallback(async () => {
       if (typeof window === 'undefined') return false;
@@ -1587,20 +1470,15 @@ export default function App() {
       [orderedWeekendIds]
   );
 
+  const shouldBuildBatchAnalytics =
+      mode === 'teacher' && teacherViewMode === 'batch' && Boolean(batchDate);
+
   useEffect(() => {
       const storedAuth = localStorage.getItem('teacher_auth');
       const storedRole = localStorage.getItem('teacher_role');
       if (storedAuth === 'true') {
           setIsAuthenticated(true);
           setTeacherAuthRole(storedRole === TEACHER_ROLE.LIMITED ? TEACHER_ROLE.LIMITED : TEACHER_ROLE.FULL);
-      }
-  }, []);
-
-  useEffect(() => {
-      if (typeof window === 'undefined') return;
-      const storedTheme = localStorage.getItem(THEME_PREFERENCE_STORAGE_KEY);
-      if (storedTheme === 'dark' || storedTheme === 'light') {
-          setThemePreference(storedTheme);
       }
   }, []);
 
@@ -1719,65 +1597,6 @@ export default function App() {
 
   useEffect(() => {
       if (typeof window === 'undefined') return undefined;
-      const cachedCoords = readLocalCache(LOCAL_CACHE_KEYS.autoThemeGeo, AUTO_THEME_COORDS_TTL_MS);
-      const hasCachedCoords = Boolean(cachedCoords && isValidGeoCoord(cachedCoords.lat, cachedCoords.lng));
-      if (cachedCoords && isValidGeoCoord(cachedCoords.lat, cachedCoords.lng)) {
-          setAutoThemeCoords({
-              lat: Number(cachedCoords.lat),
-              lng: Number(cachedCoords.lng)
-          });
-      }
-
-      if (
-          typeof navigator === 'undefined'
-          || !navigator.geolocation
-          || hasCachedCoords
-      ) {
-          return undefined;
-      }
-
-      let cancelled = false;
-      navigator.geolocation.getCurrentPosition(
-          (position) => {
-              if (cancelled) return;
-              const lat = Number(position?.coords?.latitude);
-              const lng = Number(position?.coords?.longitude);
-              if (!isValidGeoCoord(lat, lng)) return;
-              const nextCoords = { lat, lng };
-              setAutoThemeCoords(nextCoords);
-              writeLocalCache(LOCAL_CACHE_KEYS.autoThemeGeo, nextCoords);
-          },
-          () => {},
-          { enableHighAccuracy: false, timeout: 5000, maximumAge: 12 * 60 * 60 * 1000 }
-      );
-
-      return () => {
-          cancelled = true;
-      };
-  }, []);
-
-  useEffect(() => {
-      if (typeof window === 'undefined') return undefined;
-      if (themePreference === 'dark') {
-          setBackgroundDarkMode((prev) => (prev ? prev : true));
-          return undefined;
-      }
-      if (themePreference === 'light') {
-          setBackgroundDarkMode((prev) => (prev ? false : prev));
-          return undefined;
-      }
-
-      const syncTheme = () => {
-          const nextDarkMode = getAutoDarkModeValue(new Date(), autoThemeCoords);
-          setBackgroundDarkMode((prev) => (prev === nextDarkMode ? prev : nextDarkMode));
-      };
-      syncTheme();
-      const timer = window.setInterval(syncTheme, 60 * 1000);
-      return () => window.clearInterval(timer);
-  }, [autoThemeCoords, themePreference]);
-
-  useEffect(() => {
-      if (typeof window === 'undefined') return undefined;
       let rafId = null;
       const syncScroll = () => {
           const next = window.scrollY > 8;
@@ -1868,7 +1687,7 @@ export default function App() {
   }, [mode, orderedWeekendIds]);
 
   useEffect(() => {
-      if (mode !== 'teacher' || loading) return;
+      if (mode !== 'teacher' || loading || isBatchDirty) return;
       if (!availableDates.length || !allStudentsData.length) return;
 
       const hasScoreValue = (value) => {
@@ -1878,10 +1697,8 @@ export default function App() {
       };
 
       const usedWeekendIds = new Set();
-      allStudentsData.forEach((student) => {
-          const weekendEntries = buildWeekendGradeEntryMap(student.grades, getTestDateID);
-          Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
-              const grade = entry?.grade || {};
+      Object.values(studentGradeMapsByStudentId).forEach((weekendGrades) => {
+          Object.entries(weekendGrades || {}).forEach(([weekendID, grade]) => {
               const hasAnyScore = ['chi', 'eng', 'math', 'total'].some((key) => hasScoreValue(grade[key]));
               if (hasAnyScore) usedWeekendIds.add(weekendID);
           });
@@ -1903,7 +1720,7 @@ export default function App() {
       setStatusMsg(`已自動刪除 ${removedCount} 個無學生資料日期`);
       const timer = setTimeout(() => setStatusMsg(''), 2200);
       return () => clearTimeout(timer);
-  }, [mode, loading, availableDates, allStudentsData, getTestDateID, user]);
+  }, [mode, loading, isBatchDirty, availableDates, allStudentsData.length, studentGradeMapsByStudentId, getTestDateID, user]);
 
   const hasPendingBatchChanges = mode === 'teacher' && teacherViewMode === 'batch' && isBatchDirty;
 
@@ -4011,7 +3828,7 @@ export default function App() {
 
   const allSubjectScoresByWeekend = useMemo(() => {
       const buckets = {};
-      if (!cachedClassData.length) return buckets;
+      if (!shouldBuildParentAnalytics || !cachedClassData.length) return buckets;
 
       cachedClassData.forEach((student) => {
           const weekendEntries = buildWeekendGradeEntryMap(student.grades, getTestDateID);
@@ -4036,7 +3853,7 @@ export default function App() {
       });
 
       return buckets;
-  }, [cachedClassData, getTestDateID]);
+  }, [shouldBuildParentAnalytics, cachedClassData, getTestDateID]);
 
   const parentRadarData = useMemo(() => {
       if (!parentPhaseData.length) return [];
@@ -4270,6 +4087,7 @@ export default function App() {
   };
 
   const globalPRByStudentAndWeekend = useMemo(() => {
+      if (!shouldBuildBatchAnalytics) return {};
       const totalsByWeekend = {};
       Object.entries(studentGradeMapsByStudentId).forEach(([studentId, weekendGrades]) => {
           Object.entries(weekendGrades || {}).forEach(([weekendID, grade]) => {
@@ -4294,10 +4112,10 @@ export default function App() {
       });
 
       return prByStudent;
-  }, [studentGradeMapsByStudentId]);
+  }, [studentGradeMapsByStudentId, shouldBuildBatchAnalytics]);
 
   const batchRowsForDisplay = useMemo(() => {
-      if (mode !== 'teacher' || teacherViewMode !== 'batch' || !batchDate) return [];
+      if (!shouldBuildBatchAnalytics) return [];
 
       const weekendID = getTestDateID(batchDate);
       const rows = [];
@@ -4337,8 +4155,7 @@ export default function App() {
 
       return computedRows;
   }, [
-      mode,
-      teacherViewMode,
+      shouldBuildBatchAnalytics,
       allStudentsData,
       batchDate,
       teacherClassFilter,
@@ -4350,12 +4167,14 @@ export default function App() {
       globalPRByStudentAndWeekend
   ]);
 
+  const deferredBatchRowsForDisplay = useDeferredValue(batchRowsForDisplay);
+
   const batchRiskAlerts = useMemo(() => {
-      if (mode !== 'teacher' || teacherViewMode !== 'batch' || !batchDate || !batchRowsForDisplay.length) return [];
+      if (!shouldBuildBatchAnalytics || !deferredBatchRowsForDisplay.length) return [];
 
       const selectedWeekendID = getTestDateID(batchDate);
       const selectedIndex = orderedWeekendIds.indexOf(selectedWeekendID);
-      const alerts = batchRowsForDisplay.map((row) => {
+      const alerts = deferredBatchRowsForDisplay.map((row) => {
           const prob = toNumberOrNull(row.probValue);
           const currentPR = toNumberOrNull(globalPRByStudentAndWeekend[row.student.id]?.[selectedWeekendID]);
           const pr = currentPR;
@@ -4439,10 +4258,9 @@ export default function App() {
           })
           .slice(0, 12);
   }, [
-      mode,
-      teacherViewMode,
+      shouldBuildBatchAnalytics,
       batchDate,
-      batchRowsForDisplay,
+      deferredBatchRowsForDisplay,
       getTestDateID,
       orderedWeekendIds,
       globalPRByStudentAndWeekend,
@@ -4450,8 +4268,11 @@ export default function App() {
       queryStatsById
   ]);
 
+  const shouldBuildHeatmapRows =
+      shouldBuildBatchAnalytics && batchInsightTab === 'heatmap';
+
   const batchHeatmapRows = useMemo(() => {
-      if (mode !== 'teacher' || teacherViewMode !== 'batch' || !batchDate || !batchRowsForDisplay.length) return [];
+      if (!shouldBuildHeatmapRows || !deferredBatchRowsForDisplay.length) return [];
 
       const fallbackMaxByMetric = {
           chi: getMaxScore(batchDate, 'chi', sortedAvailableDatesAsc),
@@ -4463,7 +4284,7 @@ export default function App() {
       };
 
       const metricKeys = ['chi', 'eng', 'math', 'total', 'pr', 'prob'];
-      const rawRows = batchRowsForDisplay.map((row) => ({
+      const rawRows = deferredBatchRowsForDisplay.map((row) => ({
           id: row.student.id,
           name: row.student.name || '',
           values: {
@@ -4517,10 +4338,9 @@ export default function App() {
           }
       }));
   }, [
-      mode,
-      teacherViewMode,
+      shouldBuildHeatmapRows,
       batchDate,
-      batchRowsForDisplay,
+      deferredBatchRowsForDisplay,
       sortedAvailableDatesAsc,
       batchRiskAlerts
   ]);
@@ -4641,7 +4461,7 @@ export default function App() {
 
   const queryClassCoverageRows = useMemo(() => {
       if (!shouldBuildQueryInsights) return [];
-      const rows = batchRowsForDisplay.map((row) => {
+      const rows = deferredBatchRowsForDisplay.map((row) => {
           const id = String(row.student.id || '').toUpperCase();
           const count = Number(queryStatsById[id] || 0);
           const latestTs = Number(latestQueryTsById[id]) || 0;
@@ -4662,7 +4482,7 @@ export default function App() {
           if (b.count !== a.count) return b.count - a.count;
           return b.latestTs - a.latestTs;
       });
-  }, [batchRowsForDisplay, queryStatsById, latestQueryTsById, shouldBuildQueryInsights]);
+  }, [deferredBatchRowsForDisplay, queryStatsById, latestQueryTsById, shouldBuildQueryInsights]);
 
   const queryClassStudentIdSet = useMemo(() => {
       if (!shouldBuildQueryInsights) return new Set();
@@ -5316,10 +5136,8 @@ export default function App() {
   const shouldElevateHeader = isHeaderScrolled || !isLandingMode;
   const sharedBackgroundStyle = useMemo(() => ({
       opacity: sharedBackgroundOpacity,
-      backgroundImage: backgroundDarkMode
-          ? 'repeating-linear-gradient(0deg, rgba(148,163,184,0.1) 0px, rgba(148,163,184,0.1) 1px, transparent 1px, transparent 24px), repeating-linear-gradient(90deg, rgba(148,163,184,0.08) 0px, rgba(148,163,184,0.08) 1px, transparent 1px, transparent 24px), radial-gradient(circle at 12% 15%, rgba(99,102,241,0.16) 0%, transparent 40%), radial-gradient(circle at 86% 12%, rgba(14,165,233,0.15) 0%, transparent 40%), radial-gradient(circle at 80% 84%, rgba(236,72,153,0.1) 0%, transparent 36%), linear-gradient(138deg, rgba(15,23,42,0.22) 0%, rgba(30,41,59,0.28) 100%), linear-gradient(138deg, #f8fafc 0%, #f3f7ff 46%, #eefcf5 100%)'
-          : 'repeating-linear-gradient(0deg, rgba(148,163,184,0.1) 0px, rgba(148,163,184,0.1) 1px, transparent 1px, transparent 24px), repeating-linear-gradient(90deg, rgba(148,163,184,0.08) 0px, rgba(148,163,184,0.08) 1px, transparent 1px, transparent 24px), radial-gradient(circle at 12% 15%, rgba(99,102,241,0.22) 0%, transparent 40%), radial-gradient(circle at 86% 12%, rgba(14,165,233,0.22) 0%, transparent 40%), radial-gradient(circle at 80% 84%, rgba(236,72,153,0.16) 0%, transparent 36%), linear-gradient(138deg, #f8fafc 0%, #f3f7ff 46%, #eefcf5 100%)'
-  }), [sharedBackgroundOpacity, backgroundDarkMode]);
+      backgroundImage: 'repeating-linear-gradient(0deg, rgba(148,163,184,0.1) 0px, rgba(148,163,184,0.1) 1px, transparent 1px, transparent 24px), repeating-linear-gradient(90deg, rgba(148,163,184,0.08) 0px, rgba(148,163,184,0.08) 1px, transparent 1px, transparent 24px), radial-gradient(circle at 12% 15%, rgba(99,102,241,0.22) 0%, transparent 40%), radial-gradient(circle at 86% 12%, rgba(14,165,233,0.22) 0%, transparent 40%), radial-gradient(circle at 80% 84%, rgba(236,72,153,0.16) 0%, transparent 36%), linear-gradient(138deg, #f8fafc 0%, #f3f7ff 46%, #eefcf5 100%)'
+  }), [sharedBackgroundOpacity]);
 
   if (!db) return <div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400 text-sm font-mono tracking-widest uppercase">Initializing...</div>;
 
@@ -5330,7 +5148,7 @@ export default function App() {
         className="fixed inset-0 pointer-events-none z-0 transition-opacity duration-500"
         style={sharedBackgroundStyle}
       />
-      <div aria-hidden="true" className={`ambient-layer transition-opacity duration-700 ${isLandingMode ? 'opacity-95' : 'opacity-75'} ${backgroundDarkMode ? 'ambient-layer--dark' : ''}`}>
+      <div aria-hidden="true" className={`ambient-layer transition-opacity duration-700 ${isLandingMode ? 'opacity-95' : 'opacity-75'}`}>
         <div className="ambient-dot ambient-dot--a" />
         <div className="ambient-dot ambient-dot--b" />
         <div className="ambient-dot ambient-dot--c" />
@@ -5381,14 +5199,6 @@ export default function App() {
                   className={`btn-sheen shrink-0 px-3 sm:px-4 py-1.5 rounded-full text-[11px] sm:text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : (darkMode ? 'text-slate-200 hover:text-white bg-slate-900/45 border border-emerald-200/20 hover:bg-slate-900/70' : 'text-slate-600 hover:text-slate-800 bg-white/60 border border-white/70 hover:bg-white/85')}`}
                 >
                   家長
-                </button>
-                <button
-                  onClick={handleThemeToggle}
-                  className={`btn-sheen shrink-0 p-2 rounded-full transition-all duration-300 border ${backgroundDarkMode ? 'text-amber-200 bg-slate-900/55 border-slate-300/35 hover:bg-slate-900/75' : 'text-slate-600 bg-white/80 border-white/85 hover:bg-white'}`}
-                  title={backgroundDarkMode ? '切換淺色模式' : '切換深色模式'}
-                  aria-label={backgroundDarkMode ? '切換淺色模式' : '切換深色模式'}
-                >
-                  {backgroundDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
                 </button>
             {isAuthenticated && (
                 <button onClick={handleLogout} className="ml-1 p-2 text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-full transition-colors" title="登出"><LogOut className="w-5 h-5"/></button>

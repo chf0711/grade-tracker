@@ -237,18 +237,6 @@
   background: radial-gradient(circle, rgba(21, 128, 61, 0.18) 0%, rgba(21, 128, 61, 0) 74%);
 }
 
-.ambient-layer.ambient-layer--dark .ambient-dot--a {
-  background: radial-gradient(circle, rgba(148, 163, 184, 0.26) 0%, rgba(148, 163, 184, 0) 72%);
-}
-
-.ambient-layer.ambient-layer--dark .ambient-dot--b {
-  background: radial-gradient(circle, rgba(100, 116, 139, 0.24) 0%, rgba(100, 116, 139, 0) 74%);
-}
-
-.ambient-layer.ambient-layer--dark .ambient-dot--c {
-  background: radial-gradient(circle, rgba(71, 85, 105, 0.22) 0%, rgba(71, 85, 105, 0) 76%);
-}
-
 .status-toast-enter {
   animation: gt-toast-pop var(--motion-fast) var(--ease-spring);
 }

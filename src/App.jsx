@@ -43,6 +43,7 @@ const SNAPSHOT_TTL_MS = 120 * 24 * 60 * 60 * 1000;
 const MAX_OPERATION_LOG_ENTRIES = 220;
 const MAX_LOCAL_SNAPSHOTS = 4;
 const MAX_IMPORT_PREVIEW_ROWS = 12;
+const MAX_QUALITY_DETAIL_ITEMS = 120;
 const SCORE_KEYS = ['chi', 'eng', 'math'];
 const LOCAL_CACHE_KEYS = Object.freeze({
     dates: 'grade_tracker_cache_dates_v1',
@@ -1215,6 +1216,8 @@ export default function App() {
   const [cachedClassData, setCachedClassData] = useState([]); 
   const [sortByPR, setSortByPR] = useState(false);
   const [sortByProb, setSortByProb] = useState(false);
+  const [isOperationLogExpanded, setIsOperationLogExpanded] = useState(false);
+  const [activeQualityIssueType, setActiveQualityIssueType] = useState('');
   const [queryStatsById, setQueryStatsById] = useState({});
   const [queryEvents, setQueryEvents] = useState([]);
   const [queryStatsLastResetAt, setQueryStatsLastResetAt] = useState('');
@@ -4786,24 +4789,51 @@ export default function App() {
       return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   }, [queryStatsLastResetAt]);
 
-  const dataQualitySummary = useMemo(() => {
+  const dataQualityReport = useMemo(() => {
+      const emptySummary = {
+          totalStudents: 0,
+          missingNameCount: 0,
+          duplicateNameCount: 0,
+          invalidDateKeyCount: 0,
+          outOfRangeScoreCount: 0,
+          invalidClassCount: 0,
+          orphanDateCount: 0,
+          emptyGradeStudentCount: 0,
+          issueCount: 0
+      };
+      const emptyDetails = {
+          missingName: [],
+          duplicateName: [],
+          invalidDateKey: [],
+          outOfRangeScore: [],
+          invalidClass: [],
+          orphanDate: [],
+          emptyGradeStudent: []
+      };
+
       if (!shouldBuildQueryInsights) {
-          return {
-              totalStudents: 0,
-              missingNameCount: 0,
-              duplicateNameCount: 0,
-              invalidDateKeyCount: 0,
-              outOfRangeScoreCount: 0,
-              invalidClassCount: 0,
-              orphanDateCount: 0,
-              emptyGradeStudentCount: 0,
-              issueCount: 0
-          };
+          return { summary: emptySummary, details: emptyDetails };
       }
 
       const validClassSet = new Set(CLASS_DEFS.map((item) => item.id));
       const duplicateNameMap = {};
       const usedWeekendIds = new Set();
+      const details = {
+          missingName: [],
+          duplicateName: [],
+          invalidDateKey: [],
+          outOfRangeScore: [],
+          invalidClass: [],
+          orphanDate: [],
+          emptyGradeStudent: []
+      };
+      const pushDetail = (type, item) => {
+          const list = details[type];
+          if (!Array.isArray(list)) return;
+          if (list.length >= MAX_QUALITY_DETAIL_ITEMS) return;
+          list.push(item);
+      };
+
       let invalidDateKeyCount = 0;
       let outOfRangeScoreCount = 0;
       let missingNameCount = 0;
@@ -4811,12 +4841,21 @@ export default function App() {
       let emptyGradeStudentCount = 0;
 
       allStudentsData.forEach((student) => {
+          const studentId = String(student?.id || '').toUpperCase().trim() || '未填學號';
           const studentName = String(student?.name || '').trim();
-          if (!studentName) missingNameCount += 1;
-          else {
+          const displayName = studentName || '未命名';
+          if (!studentName) {
+              missingNameCount += 1;
+              pushDetail('missingName', {
+                  key: `missing-${studentId}`,
+                  primary: studentId,
+                  secondary: '姓名欄位空白'
+              });
+          } else {
               const normalizedName = normalizeSearchText(studentName);
               if (normalizedName) {
-                  duplicateNameMap[normalizedName] = (duplicateNameMap[normalizedName] || 0) + 1;
+                  if (!duplicateNameMap[normalizedName]) duplicateNameMap[normalizedName] = [];
+                  duplicateNameMap[normalizedName].push({ id: studentId, name: studentName });
               }
           }
 
@@ -4826,12 +4865,25 @@ export default function App() {
               const normalizedDate = normalizeDateToken(rawDate);
               if (!normalizedDate) {
                   invalidDateKeyCount += 1;
+                  pushDetail('invalidDateKey', {
+                      key: `invalid-date-${studentId}-${rawDate}`,
+                      primary: `${studentId} ${displayName}`,
+                      secondary: `不合理日期鍵：${String(rawDate)}`
+                  });
                   return;
               }
               const weekendID = getTestDateID(normalizedDate);
               if (!weekendID) return;
+              const weekendLabel = getWeekendDisplayLabel(weekendID);
               const className = String(grade?.class || '').trim();
-              if (className && !validClassSet.has(className)) invalidClassCount += 1;
+              if (className && !validClassSet.has(className)) {
+                  invalidClassCount += 1;
+                  pushDetail('invalidClass', {
+                      key: `invalid-class-${studentId}-${weekendID}-${className}`,
+                      primary: `${studentId} ${displayName}`,
+                      secondary: `${weekendLabel} 班級欄位異常：${className}`
+                  });
+              }
 
               SCORE_KEYS.forEach((subject) => {
                   const score = toNumberOrNull(grade?.[subject]);
@@ -4839,6 +4891,11 @@ export default function App() {
                   const maxScore = getMaxScore(weekendID, subject, availableDates);
                   if (score < 0 || score > maxScore) {
                       outOfRangeScoreCount += 1;
+                      pushDetail('outOfRangeScore', {
+                          key: `oor-${studentId}-${weekendID}-${subject}-${score}`,
+                          primary: `${studentId} ${displayName}`,
+                          secondary: `${weekendLabel} ${COLORS[subject]?.label || subject}=${score}（合理上限 ${maxScore}）`
+                      });
                       return;
                   }
                   studentHasScore = true;
@@ -4846,19 +4903,43 @@ export default function App() {
               });
           });
 
-          if (!studentHasScore) emptyGradeStudentCount += 1;
+          if (!studentHasScore) {
+              emptyGradeStudentCount += 1;
+              pushDetail('emptyGradeStudent', {
+                  key: `empty-grade-${studentId}`,
+                  primary: `${studentId} ${displayName}`,
+                  secondary: '目前沒有任何有效科目分數'
+              });
+          }
       });
 
-      const duplicateNameCount = Object.values(duplicateNameMap).reduce((sum, count) => (
-          count > 1 ? sum + count : sum
-      ), 0);
+      let duplicateNameCount = 0;
+      Object.entries(duplicateNameMap).forEach(([normalized, students]) => {
+          if (!Array.isArray(students) || students.length <= 1) return;
+          duplicateNameCount += students.length;
+          const displayName = students[0]?.name || normalized;
+          pushDetail('duplicateName', {
+              key: `duplicate-${normalized}`,
+              primary: displayName,
+              secondary: `重複學號：${students.map((item) => item.id).join('、')}`
+          });
+      });
 
-      const orphanDateCount = sanitizeDateList(availableDates).reduce((sum, date) => {
+      const orphanWeekendIds = new Set();
+      sanitizeDateList(availableDates).forEach((date) => {
           const weekendID = getTestDateID(date);
-          if (!weekendID) return sum + 1;
-          if (usedWeekendIds.has(weekendID)) return sum;
-          return sum + 1;
-      }, 0);
+          if (!weekendID) return;
+          if (usedWeekendIds.has(weekendID)) return;
+          orphanWeekendIds.add(weekendID);
+      });
+      const orphanDateCount = orphanWeekendIds.size;
+      Array.from(orphanWeekendIds).sort(customDateSort).forEach((weekendID) => {
+          pushDetail('orphanDate', {
+              key: `orphan-${weekendID}`,
+              primary: getWeekendDisplayLabel(weekendID),
+              secondary: '此考次目前沒有任何有效分數'
+          });
+      });
 
       const issueCount =
           invalidDateKeyCount +
@@ -4869,17 +4950,73 @@ export default function App() {
           orphanDateCount;
 
       return {
-          totalStudents: allStudentsData.length,
-          missingNameCount,
-          duplicateNameCount,
-          invalidDateKeyCount,
-          outOfRangeScoreCount,
-          invalidClassCount,
-          orphanDateCount,
-          emptyGradeStudentCount,
-          issueCount
+          summary: {
+              totalStudents: allStudentsData.length,
+              missingNameCount,
+              duplicateNameCount,
+              invalidDateKeyCount,
+              outOfRangeScoreCount,
+              invalidClassCount,
+              orphanDateCount,
+              emptyGradeStudentCount,
+              issueCount
+          },
+          details
       };
   }, [allStudentsData, availableDates, getTestDateID, shouldBuildQueryInsights]);
+
+  const dataQualitySummary = dataQualityReport.summary;
+  const dataQualityDetails = dataQualityReport.details;
+
+  const qualityIssueCountByType = useMemo(() => ({
+      missingName: dataQualitySummary.missingNameCount,
+      duplicateName: dataQualitySummary.duplicateNameCount,
+      invalidDateKey: dataQualitySummary.invalidDateKeyCount,
+      outOfRangeScore: dataQualitySummary.outOfRangeScoreCount,
+      invalidClass: dataQualitySummary.invalidClassCount,
+      orphanDate: dataQualitySummary.orphanDateCount,
+      emptyGradeStudent: dataQualitySummary.emptyGradeStudentCount
+  }), [dataQualitySummary]);
+
+  const qualityMetricCards = useMemo(() => ([
+      { type: 'missingName', label: '缺姓名', count: dataQualitySummary.missingNameCount, tone: 'rose' },
+      { type: 'duplicateName', label: '重複姓名', count: dataQualitySummary.duplicateNameCount, tone: 'amber' },
+      { type: 'emptyGradeStudent', label: '空成績檔', count: dataQualitySummary.emptyGradeStudentCount, tone: 'amber' },
+      { type: 'invalidDateKey', label: '無效日期鍵', count: dataQualitySummary.invalidDateKeyCount, tone: 'rose' },
+      { type: 'outOfRangeScore', label: '異常分數', count: dataQualitySummary.outOfRangeScoreCount, tone: 'rose' },
+      { type: 'invalidClass', label: '無效班級', count: dataQualitySummary.invalidClassCount, tone: 'amber' },
+      { type: 'orphanDate', label: '空白考次', count: dataQualitySummary.orphanDateCount, tone: 'amber' }
+  ]), [dataQualitySummary]);
+
+  const activeQualityIssueTitle = useMemo(() => {
+      const titleMap = {
+          missingName: '缺姓名學生',
+          duplicateName: '重複姓名名單',
+          invalidDateKey: '無效日期鍵',
+          outOfRangeScore: '異常分數明細',
+          invalidClass: '無效班級資料',
+          orphanDate: '空白考次',
+          emptyGradeStudent: '空成績檔學生'
+      };
+      return titleMap[activeQualityIssueType] || '';
+  }, [activeQualityIssueType]);
+
+  const activeQualityIssueItems = useMemo(
+      () => (activeQualityIssueType ? (dataQualityDetails[activeQualityIssueType] || []) : []),
+      [activeQualityIssueType, dataQualityDetails]
+  );
+
+  useEffect(() => {
+      if (shouldBuildQueryInsights) return;
+      if (!activeQualityIssueType) return;
+      setActiveQualityIssueType('');
+  }, [shouldBuildQueryInsights, activeQualityIssueType]);
+
+  useEffect(() => {
+      if (!activeQualityIssueType) return;
+      if ((qualityIssueCountByType[activeQualityIssueType] || 0) > 0) return;
+      setActiveQualityIssueType('');
+  }, [activeQualityIssueType, qualityIssueCountByType]);
 
   const operationLogPreview = useMemo(
       () => operationLogs.slice(0, 36),
@@ -5701,8 +5838,9 @@ export default function App() {
 
                                 <div className="grid grid-cols-3 lg:grid-cols-6 gap-1.5">
                                     <div className={`rounded-xl border px-2.5 py-1.5 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
-                                        <div className={`text-[9px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>篩選後查詢</div>
-                                        <div className={`text-base font-black ${darkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>{queryFilteredSummary.totalQueries}</div>
+                                        <div className={`text-[9px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>總查詢數</div>
+                                        <div className={`text-base font-black ${darkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>{queryEventTimeline.length}</div>
+                                        <div className={`text-[9px] font-semibold ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>累積</div>
                                     </div>
                                     <div className={`rounded-xl border px-2.5 py-1.5 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
                                         <div className={`text-[9px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>有查詢學號數</div>
@@ -5955,36 +6093,73 @@ export default function App() {
                                             <div className={`rounded-lg border px-2 py-1.5 ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-slate-50'}`}>
                                                 <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>總學生數</div>
                                                 <div className={`text-[13px] font-black ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>{dataQualitySummary.totalStudents}</div>
+                                                <div className={`mt-0.5 text-[9px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>資料母體</div>
                                             </div>
-                                            <div className={`rounded-lg border px-2 py-1.5 ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-slate-50'}`}>
-                                                <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>缺姓名</div>
-                                                <div className={`text-[13px] font-black ${dataQualitySummary.missingNameCount > 0 ? 'text-rose-500' : (darkMode ? 'text-slate-100' : 'text-slate-700')}`}>{dataQualitySummary.missingNameCount}</div>
-                                            </div>
-                                            <div className={`rounded-lg border px-2 py-1.5 ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-slate-50'}`}>
-                                                <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>重複姓名</div>
-                                                <div className={`text-[13px] font-black ${dataQualitySummary.duplicateNameCount > 0 ? 'text-amber-500' : (darkMode ? 'text-slate-100' : 'text-slate-700')}`}>{dataQualitySummary.duplicateNameCount}</div>
-                                            </div>
-                                            <div className={`rounded-lg border px-2 py-1.5 ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-slate-50'}`}>
-                                                <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>空成績檔</div>
-                                                <div className={`text-[13px] font-black ${dataQualitySummary.emptyGradeStudentCount > 0 ? 'text-amber-500' : (darkMode ? 'text-slate-100' : 'text-slate-700')}`}>{dataQualitySummary.emptyGradeStudentCount}</div>
-                                            </div>
-                                            <div className={`rounded-lg border px-2 py-1.5 ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-slate-50'}`}>
-                                                <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>無效日期鍵</div>
-                                                <div className={`text-[13px] font-black ${dataQualitySummary.invalidDateKeyCount > 0 ? 'text-rose-500' : (darkMode ? 'text-slate-100' : 'text-slate-700')}`}>{dataQualitySummary.invalidDateKeyCount}</div>
-                                            </div>
-                                            <div className={`rounded-lg border px-2 py-1.5 ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-slate-50'}`}>
-                                                <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>異常分數</div>
-                                                <div className={`text-[13px] font-black ${dataQualitySummary.outOfRangeScoreCount > 0 ? 'text-rose-500' : (darkMode ? 'text-slate-100' : 'text-slate-700')}`}>{dataQualitySummary.outOfRangeScoreCount}</div>
-                                            </div>
-                                            <div className={`rounded-lg border px-2 py-1.5 ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-slate-50'}`}>
-                                                <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>無效班級</div>
-                                                <div className={`text-[13px] font-black ${dataQualitySummary.invalidClassCount > 0 ? 'text-amber-500' : (darkMode ? 'text-slate-100' : 'text-slate-700')}`}>{dataQualitySummary.invalidClassCount}</div>
-                                            </div>
-                                            <div className={`rounded-lg border px-2 py-1.5 ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-slate-50'}`}>
-                                                <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>空白考次</div>
-                                                <div className={`text-[13px] font-black ${dataQualitySummary.orphanDateCount > 0 ? 'text-amber-500' : (darkMode ? 'text-slate-100' : 'text-slate-700')}`}>{dataQualitySummary.orphanDateCount}</div>
-                                            </div>
+                                            {qualityMetricCards.map((metric) => {
+                                                const hasIssue = metric.count > 0;
+                                                const isActive = activeQualityIssueType === metric.type;
+                                                const countClass = metric.tone === 'rose'
+                                                    ? (hasIssue ? 'text-rose-500' : (darkMode ? 'text-slate-100' : 'text-slate-700'))
+                                                    : (hasIssue ? 'text-amber-500' : (darkMode ? 'text-slate-100' : 'text-slate-700'));
+                                                return (
+                                                    <button
+                                                      key={metric.type}
+                                                      type="button"
+                                                      disabled={!hasIssue}
+                                                      onClick={() => setActiveQualityIssueType((prev) => (prev === metric.type ? '' : metric.type))}
+                                                      className={`rounded-lg border px-2 py-1.5 text-left transition-all ${
+                                                          darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-slate-50'
+                                                      } ${
+                                                          hasIssue ? 'cursor-pointer hover:-translate-y-[1px] hover:shadow-sm' : 'cursor-default opacity-85'
+                                                      } ${
+                                                          isActive ? (darkMode ? 'ring-1 ring-sky-300/50 border-sky-300/50' : 'ring-2 ring-sky-100 border-sky-300/65') : ''
+                                                      }`}
+                                                    >
+                                                        <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>{metric.label}</div>
+                                                        <div className={`text-[13px] font-black ${countClass}`}>{metric.count}</div>
+                                                        <div className={`mt-0.5 text-[9px] font-bold ${hasIssue ? (darkMode ? 'text-sky-300' : 'text-sky-600') : (darkMode ? 'text-slate-500' : 'text-slate-400')}`}>
+                                                            {hasIssue ? '點擊查看明細' : '-'}
+                                                        </div>
+                                                    </button>
+                                                );
+                                            })}
                                         </div>
+                                        {activeQualityIssueType && (
+                                            <div className={`rounded-lg border p-2 space-y-1.5 ${darkMode ? 'border-sky-300/30 bg-slate-900/55' : 'border-sky-200 bg-sky-50/60'}`}>
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <div className={`text-[10px] font-black tracking-widest uppercase ${darkMode ? 'text-sky-200' : 'text-sky-700'}`}>
+                                                        {activeQualityIssueTitle || '問題明細'}
+                                                    </div>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => setActiveQualityIssueType('')}
+                                                      className={`text-[10px] font-black px-2 py-0.5 rounded-md transition-colors ${darkMode ? 'bg-slate-800 text-slate-200 hover:bg-slate-700' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'}`}
+                                                    >
+                                                      收起
+                                                    </button>
+                                                </div>
+                                                <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
+                                                    {activeQualityIssueItems.map((item) => (
+                                                        <div key={item.key} className={`rounded-lg border px-2 py-1 ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-white'}`}>
+                                                            <div className={`text-[10px] font-black ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>{item.primary}</div>
+                                                            {item.secondary && (
+                                                                <div className={`text-[10px] mt-0.5 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>{item.secondary}</div>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                    {!activeQualityIssueItems.length && (
+                                                        <div className={`text-[10px] font-semibold text-center py-1.5 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                            目前沒有可顯示的問題明細
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                {(qualityIssueCountByType[activeQualityIssueType] || 0) > activeQualityIssueItems.length && (
+                                                    <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                        僅顯示前 {activeQualityIssueItems.length} 筆，請先逐步清理後再查看其餘資料
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
                                         <div className={`rounded-lg border px-2.5 py-1.5 ${darkMode ? 'border-white/10 bg-slate-900/55 text-slate-300' : 'border-slate-200 bg-slate-50 text-slate-600'} text-[10px] font-semibold`}>
                                             家長查詢效能：快取命中 <span className="font-black text-emerald-600">{parentQueryPerf.cacheHit}</span> / 未命中 <span className="font-black text-sky-600">{parentQueryPerf.cacheMiss}</span>，平均 <span className="font-black">{parentQueryPerf.avgMs}ms</span>，P95 <span className="font-black">{parentQueryPerf.p95Ms}ms</span>，最近一次 <span className="font-black">{parentQueryPerf.latestMs}ms</span>。
                                         </div>
@@ -6034,25 +6209,40 @@ export default function App() {
                                         </div>
 
                                         <div className={`rounded-lg border p-2 ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-slate-50'}`}>
-                                            <div className={`text-[10px] font-black tracking-widest uppercase mb-2 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>最近操作</div>
-                                            <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
-                                                {operationLogPreview.map((log) => (
-                                                    <div key={log.id} className={`rounded-lg border px-2 py-1 ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-white'}`}>
-                                                        <div className="flex items-center justify-between gap-2">
-                                                            <span className={`text-[10px] font-black ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>{log.title}</span>
-                                                            <span className={`text-[10px] font-mono ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>{formatMonitorTimeLabel(log.ts, false)}</span>
-                                                        </div>
-                                                        {log.detail && (
-                                                            <div className={`text-[10px] mt-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>{log.detail}</div>
-                                                        )}
-                                                    </div>
-                                                ))}
-                                                {!operationLogPreview.length && (
-                                                    <div className={`text-[11px] font-semibold text-center py-2 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                                                        目前沒有操作紀錄
-                                                    </div>
-                                                )}
+                                            <div className="flex items-center justify-between gap-2 mb-1.5">
+                                                <div className={`text-[10px] font-black tracking-widest uppercase ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>最近操作</div>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => setIsOperationLogExpanded((prev) => !prev)}
+                                                  className={`text-[10px] font-black px-2 py-0.5 rounded-md transition-colors ${darkMode ? 'bg-slate-800 text-slate-200 hover:bg-slate-700' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'}`}
+                                                >
+                                                  {isOperationLogExpanded ? '收起' : '展開'}
+                                                </button>
                                             </div>
+                                            {isOperationLogExpanded ? (
+                                                <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
+                                                    {operationLogPreview.map((log) => (
+                                                        <div key={log.id} className={`rounded-lg border px-2 py-1 ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-white'}`}>
+                                                            <div className="flex items-center justify-between gap-2">
+                                                                <span className={`text-[10px] font-black ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>{log.title}</span>
+                                                                <span className={`text-[10px] font-mono ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>{formatMonitorTimeLabel(log.ts, false)}</span>
+                                                            </div>
+                                                            {log.detail && (
+                                                                <div className={`text-[10px] mt-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>{log.detail}</div>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                    {!operationLogPreview.length && (
+                                                        <div className={`text-[11px] font-semibold text-center py-2 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                            目前沒有操作紀錄
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <div className={`text-[10px] font-semibold px-1 py-1 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                    已收合，點擊「展開」查看 {operationLogPreview.length} 筆操作紀錄
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 </div>

@@ -5188,8 +5188,7 @@ export default function App() {
                   })}
                   className={`btn-sheen shrink-0 px-2.5 sm:px-4 py-1.5 rounded-full text-[10px] sm:text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : (darkMode ? 'text-slate-200 hover:text-white bg-slate-900/45 border border-emerald-200/20 hover:bg-slate-900/70' : 'text-slate-600 hover:text-slate-800 bg-white/70 border border-white/80 hover:bg-white/95')}`}
                 >
-                  <span className="sm:hidden">{isAuthenticated ? '後台' : '師'}</span>
-                  <span className="hidden sm:inline">{isAuthenticated ? '後台' : '老師'}</span>
+                  {isAuthenticated ? '後台' : '老師'}
                 </button>
                 <button
                   onClick={() => runWithBatchDiscardGuard(() => {
@@ -5199,8 +5198,7 @@ export default function App() {
                   })}
                   className={`btn-sheen shrink-0 px-2.5 sm:px-4 py-1.5 rounded-full text-[10px] sm:text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : (darkMode ? 'text-slate-200 hover:text-white bg-slate-900/45 border border-emerald-200/20 hover:bg-slate-900/70' : 'text-slate-600 hover:text-slate-800 bg-white/70 border border-white/80 hover:bg-white/95')}`}
                 >
-                  <span className="sm:hidden">家</span>
-                  <span className="hidden sm:inline">家長</span>
+                  家長
                 </button>
             {isAuthenticated && (
                 <button onClick={handleLogout} className="ml-0.5 p-1.5 sm:p-2 text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-full transition-colors" title="登出"><LogOut className="w-4 h-4 sm:w-5 sm:h-5"/></button>
@@ -5212,8 +5210,8 @@ export default function App() {
       <main className={`${isLandingMode ? 'pt-[calc(4rem+env(safe-area-inset-top))]' : 'pt-[calc(7rem+env(safe-area-inset-top))]'} px-4 max-w-5xl mx-auto relative`}>
         {mode === 'landing' && (
           <div className="h-[calc(100dvh-4rem-env(safe-area-inset-top))] min-h-[calc(100svh-4rem-env(safe-area-inset-top))] flex items-center justify-center">
-            <div className="w-full max-w-4xl h-full">
-              <div className="relative z-10 h-full flex flex-col items-center justify-center px-[clamp(0.9rem,3.6vw,1.55rem)] py-[clamp(0.8rem,2.8vh,1.45rem)]">
+            <div className="w-full max-w-4xl h-full mx-auto flex items-center justify-center">
+              <div className="relative z-10 w-full flex flex-col items-center justify-center px-[clamp(0.9rem,3.6vw,1.55rem)] py-[clamp(0.8rem,2.8vh,1.45rem)]">
                 <div className={`hero-reveal px-4 py-1.5 rounded-full mb-[clamp(0.55rem,1.9vh,1.25rem)] border text-[10px] tracking-[0.22em] font-black uppercase shadow-[0_8px_24px_rgba(15,23,42,0.08)] ${darkMode ? 'border-emerald-200/30 bg-[#071a16]/82 text-emerald-100 shadow-black/25' : 'border-white/95 bg-white/92 text-slate-600'}`} style={{ '--stagger-index': 0 }}>
                     HSINRU CENTRAL
                 </div>

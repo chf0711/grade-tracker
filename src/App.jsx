@@ -6359,28 +6359,26 @@ export default function App() {
                    <div className="relative z-10 mb-6">
                        <button onClick={() => setViewData(null)} className={`absolute top-0 right-0 p-2 rounded-full backdrop-blur-md transition-colors ${darkMode ? 'text-slate-400 hover:text-white bg-white/5' : 'text-slate-500 hover:text-slate-700 bg-white border border-slate-200'}`}><LogOut className="w-4 h-4"/></button>
 
-                       <div className="pr-10">
-                           <div className={`text-[9px] font-bold uppercase tracking-widest border inline-block px-2 py-1 rounded ${darkMode ? 'text-emerald-300 border-emerald-300/25' : 'text-emerald-700 border-emerald-200'}`}>Student Profile</div>
-                           <div className="mt-2 flex items-start justify-between gap-3 sm:gap-4">
-                               <div className="min-w-0 flex-1">
-                                   <h3 className={`text-2xl sm:text-3xl font-bold tracking-tighter break-words ${darkMode ? 'text-white' : 'text-slate-800'}`}>{viewData.name}</h3>
-                                   <p className="font-mono text-xs mt-1 font-bold text-slate-500">{viewData.id}</p>
+                       {viewData.prob && viewData.prob !== '-' && (
+                           <div className="absolute right-0 top-10 text-right">
+                               <div className={`text-[10px] font-bold uppercase tracking-widest ${darkMode ? 'text-emerald-300/85' : 'text-emerald-700/85'}`}>錄取機率</div>
+                               <div className="mt-0.5 flex items-end justify-end gap-1 leading-none">
+                                   <span className="text-[2.15rem] sm:text-[2.7rem] font-black tracking-tight tabular-nums" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>{viewData.prob}</span>
+                                   <span className="text-base sm:text-lg font-black mb-[0.22rem]" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>%</span>
                                </div>
+                           </div>
+                       )}
 
-                               {viewData.prob && viewData.prob !== '-' && (
-                                   <div className={`shrink-0 min-w-[5.8rem] rounded-2xl border px-3 py-2 sm:px-4 sm:py-2.5 text-right backdrop-blur-md ${darkMode ? 'bg-white/6 border-emerald-200/20' : 'bg-white/88 border-white/90 shadow-[0_10px_22px_rgba(15,23,42,0.08)]'}`}>
-                                       <div className={`text-[10px] font-bold uppercase tracking-widest ${darkMode ? 'text-emerald-300/85' : 'text-emerald-700/85'}`}>錄取機率</div>
-                                       <div className="mt-0.5 flex items-end justify-end gap-1 leading-none">
-                                           <span className="text-[1.7rem] sm:text-[2rem] font-black tracking-tight" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>{viewData.prob}</span>
-                                           <span className="text-sm sm:text-base font-bold mb-[0.14rem]" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>%</span>
-                                       </div>
-                                   </div>
-                               )}
+                       <div className="pr-[7.1rem] sm:pr-[9rem]">
+                           <div className={`text-[9px] font-bold uppercase tracking-widest border inline-block px-2 py-1 rounded ${darkMode ? 'text-emerald-300 border-emerald-300/25' : 'text-emerald-700 border-emerald-200'}`}>Student Profile</div>
+                           <div className="mt-2">
+                               <h3 className={`text-2xl sm:text-3xl font-bold tracking-tighter break-words ${darkMode ? 'text-white' : 'text-slate-800'}`}>{viewData.name}</h3>
+                               <p className="font-mono text-xs mt-1 font-bold text-slate-500">{viewData.id}</p>
                            </div>
                        </div>
 
                        {viewData.prob && viewData.prob !== '-' && (
-                           <div className="mt-2 pr-10 flex items-center justify-end gap-1.5 opacity-55">
+                           <div className="mt-2 flex items-center justify-end gap-1.5 opacity-55">
                                 <p className={`text-[9px] font-medium ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
                                     系統綜合歷史成績運算，<span className={`${darkMode ? 'text-white/90 border-white/20' : 'text-slate-700 border-slate-300'} border-b pb-0.5`}>僅供參考</span>
                                 </p>

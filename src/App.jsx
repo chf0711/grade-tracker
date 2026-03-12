@@ -1,5 +1,5 @@
 import React, { Suspense, useState, useEffect, useMemo, useRef, useCallback, useDeferredValue, startTransition } from 'react';
-import { Search, Save, Plus, Check, BarChart3, X, Lock, LayoutDashboard, GraduationCap, Calendar, Clipboard, LogOut, AlertTriangle, UserPlus, Sparkles, Edit3, Trash2, Trophy, Target, FileSpreadsheet, ChevronRight, ArrowLeft, PieChart, Users, BarChart2, ShieldCheck, ArrowDownWideNarrow, Percent, Info } from 'lucide-react';
+import { Search, Save, Plus, Check, BarChart3, X, Lock, LayoutDashboard, GraduationCap, Calendar, Clipboard, LogOut, AlertTriangle, UserPlus, Sparkles, Edit3, Trash2, Trophy, Target, FileSpreadsheet, ChevronRight, ArrowLeft, PieChart, Users, BarChart2, ShieldCheck, ArrowDownWideNarrow, Percent, Info, Sun, Moon } from 'lucide-react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc } from 'firebase/firestore';
@@ -45,6 +45,7 @@ const MAX_LOCAL_SNAPSHOTS = 4;
 const MAX_IMPORT_PREVIEW_ROWS = 12;
 const MAX_QUALITY_DETAIL_ITEMS = 120;
 const AUTO_THEME_COORDS_TTL_MS = 45 * 24 * 60 * 60 * 1000;
+const THEME_PREFERENCE_STORAGE_KEY = 'grade_tracker_theme_preference_v1';
 const SCORE_KEYS = ['chi', 'eng', 'math'];
 const LOCAL_CACHE_KEYS = Object.freeze({
     dates: 'grade_tracker_cache_dates_v1',
@@ -1372,6 +1373,7 @@ export default function App() {
 
   const [_xlsxLoaded, setXlsxLoaded] = useState(false);
   const [autoThemeCoords, setAutoThemeCoords] = useState(null);
+  const [themePreference, setThemePreference] = useState('auto');
   const [darkMode, setDarkMode] = useState(false);
   const xlsxLoadingPromiseRef = useRef(null);
   const isLimitedTeacherRole = teacherAuthRole === TEACHER_ROLE.LIMITED;
@@ -1423,6 +1425,23 @@ export default function App() {
           latestMs
       });
   }, []);
+
+  const updateThemePreference = useCallback((nextPreference) => {
+      const safePreference = nextPreference === 'dark' || nextPreference === 'light'
+          ? nextPreference
+          : 'auto';
+      setThemePreference(safePreference);
+      if (typeof window === 'undefined') return;
+      if (safePreference === 'auto') {
+          localStorage.removeItem(THEME_PREFERENCE_STORAGE_KEY);
+          return;
+      }
+      localStorage.setItem(THEME_PREFERENCE_STORAGE_KEY, safePreference);
+  }, []);
+
+  const handleThemeToggle = useCallback(() => {
+      updateThemePreference(darkMode ? 'light' : 'dark');
+  }, [darkMode, updateThemePreference]);
 
   const ensureXlsxReady = useCallback(async () => {
       if (typeof window === 'undefined') return false;
@@ -1573,6 +1592,14 @@ export default function App() {
       if (storedAuth === 'true') {
           setIsAuthenticated(true);
           setTeacherAuthRole(storedRole === TEACHER_ROLE.LIMITED ? TEACHER_ROLE.LIMITED : TEACHER_ROLE.FULL);
+      }
+  }, []);
+
+  useEffect(() => {
+      if (typeof window === 'undefined') return;
+      const storedTheme = localStorage.getItem(THEME_PREFERENCE_STORAGE_KEY);
+      if (storedTheme === 'dark' || storedTheme === 'light') {
+          setThemePreference(storedTheme);
       }
   }, []);
 
@@ -1730,6 +1757,15 @@ export default function App() {
 
   useEffect(() => {
       if (typeof window === 'undefined') return undefined;
+      if (themePreference === 'dark') {
+          setDarkMode((prev) => (prev ? prev : true));
+          return undefined;
+      }
+      if (themePreference === 'light') {
+          setDarkMode((prev) => (prev ? false : prev));
+          return undefined;
+      }
+
       const syncTheme = () => {
           const nextDarkMode = getAutoDarkModeValue(new Date(), autoThemeCoords);
           setDarkMode((prev) => (prev === nextDarkMode ? prev : nextDarkMode));
@@ -1737,7 +1773,7 @@ export default function App() {
       syncTheme();
       const timer = window.setInterval(syncTheme, 60 * 1000);
       return () => window.clearInterval(timer);
-  }, [autoThemeCoords]);
+  }, [autoThemeCoords, themePreference]);
 
   useEffect(() => {
       if (typeof window === 'undefined') return undefined;
@@ -5344,6 +5380,14 @@ export default function App() {
                   className={`btn-sheen shrink-0 px-3 sm:px-4 py-1.5 rounded-full text-[11px] sm:text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : (darkMode ? 'text-slate-200 hover:text-white bg-slate-900/45 border border-emerald-200/20 hover:bg-slate-900/70' : 'text-slate-600 hover:text-slate-800 bg-white/60 border border-white/70 hover:bg-white/85')}`}
                 >
                   家長
+                </button>
+                <button
+                  onClick={handleThemeToggle}
+                  className={`btn-sheen shrink-0 p-2 rounded-full transition-all duration-300 border ${darkMode ? 'text-amber-200 bg-slate-900/55 border-emerald-200/25 hover:bg-slate-900/75' : 'text-slate-600 bg-white/80 border-white/85 hover:bg-white'}`}
+                  title={darkMode ? '切換淺色模式' : '切換深色模式'}
+                  aria-label={darkMode ? '切換淺色模式' : '切換深色模式'}
+                >
+                  {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
                 </button>
             {isAuthenticated && (
                 <button onClick={handleLogout} className="ml-1 p-2 text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-full transition-colors" title="登出"><LogOut className="w-5 h-5"/></button>

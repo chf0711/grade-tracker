@@ -5207,7 +5207,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className={`${isLandingMode ? 'pt-[calc(4rem+env(safe-area-inset-top))]' : 'pt-[calc(7rem+env(safe-area-inset-top))]'} px-4 max-w-5xl mx-auto relative`}>
+      <main className={`${isLandingMode ? 'pt-[calc(4rem+env(safe-area-inset-top))]' : 'pt-[calc(6.2rem+env(safe-area-inset-top))]'} px-4 max-w-5xl mx-auto relative`}>
         {mode === 'landing' && (
           <div className="h-[calc(100dvh-4rem-env(safe-area-inset-top))] min-h-[calc(100svh-4rem-env(safe-area-inset-top))] flex items-center justify-center">
             <div className="w-full max-w-4xl h-full">
@@ -6338,7 +6338,7 @@ export default function App() {
 
         {/* ... Parent View ... */}
         {mode === 'parent' && (
-          <div className={`${viewData ? 'max-w-5xl' : 'max-w-md'} mx-auto space-y-6 pt-10 transition-all duration-300`}> 
+          <div className={`${viewData ? 'max-w-5xl' : 'max-w-md'} mx-auto space-y-6 pt-6 transition-all duration-300`}> 
             {!viewData && (
             <div className={`panel-fade-in backdrop-blur-[26px] p-8 rounded-[2.5rem] shadow-2xl border text-center relative overflow-hidden ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/15 shadow-black/30' : 'bg-white/78 border-white/85 ring-1 ring-white/55 shadow-[0_24px_55px_rgba(15,23,42,0.12)]'}`}>
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-sky-500 via-emerald-500 to-indigo-500"></div>
@@ -6353,14 +6353,14 @@ export default function App() {
 
             {viewData && (
               <div className={`panel-fade-in rounded-[2.5rem] shadow-2xl overflow-hidden border backdrop-blur-[28px] ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/15 shadow-black/30' : 'bg-white/74 border-white/85 ring-1 ring-white/55 shadow-[0_26px_60px_rgba(15,23,42,0.13)]'}`}>
-                <div className={`px-8 pt-6 pb-6 relative overflow-hidden ${darkMode ? 'bg-[#0d1712] text-white border-b border-emerald-200/10' : 'bg-[linear-gradient(112deg,rgba(236,253,245,0.93)_0%,rgba(224,242,254,0.9)_54%,rgba(255,255,255,0.92)_100%)] text-slate-800 border-b border-white/70'}`}>
+                <div className={`p-8 pb-6 relative overflow-hidden ${darkMode ? 'bg-[#0d1712] text-white border-b border-emerald-200/10' : 'bg-[linear-gradient(112deg,rgba(236,253,245,0.93)_0%,rgba(224,242,254,0.9)_54%,rgba(255,255,255,0.92)_100%)] text-slate-800 border-b border-white/70'}`}>
                    <div className={`absolute top-0 right-0 w-64 h-64 rounded-full -mr-20 -mt-20 blur-3xl ${darkMode ? 'bg-emerald-500 opacity-20' : 'bg-emerald-300 opacity-25'}`}></div>
                    
                    <div className="relative z-10 mb-6">
                        <button onClick={() => setViewData(null)} className={`absolute top-0 right-0 p-2 rounded-full backdrop-blur-md transition-colors ${darkMode ? 'text-slate-400 hover:text-white bg-white/5' : 'text-slate-500 hover:text-slate-700 bg-white border border-slate-200'}`}><LogOut className="w-4 h-4"/></button>
 
                        {viewData.prob && viewData.prob !== '-' && (
-                           <div className="absolute right-0 top-8 text-right">
+                           <div className="absolute right-0 top-10 text-right">
                                <div className={`text-[10px] font-bold uppercase tracking-widest ${darkMode ? 'text-emerald-300/85' : 'text-emerald-700/85'}`}>錄取機率</div>
                                <div className="mt-0.5 flex items-end justify-end gap-1 leading-none">
                                    <span className="text-[2.15rem] sm:text-[2.7rem] font-black tracking-tight tabular-nums" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>{viewData.prob}</span>

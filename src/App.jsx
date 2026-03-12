@@ -5210,8 +5210,8 @@ export default function App() {
       <main className={`${isLandingMode ? 'pt-[calc(4rem+env(safe-area-inset-top))]' : 'pt-[calc(7rem+env(safe-area-inset-top))]'} px-4 max-w-5xl mx-auto relative`}>
         {mode === 'landing' && (
           <div className="h-[calc(100dvh-4rem-env(safe-area-inset-top))] min-h-[calc(100svh-4rem-env(safe-area-inset-top))] flex items-center justify-center">
-            <div className="w-full max-w-4xl h-full mx-auto flex items-center justify-center">
-              <div className="relative z-10 w-full flex flex-col items-center justify-center px-[clamp(0.9rem,3.6vw,1.55rem)] py-[clamp(0.8rem,2.8vh,1.45rem)]">
+            <div className="w-full max-w-4xl h-full">
+              <div className="relative z-10 h-full flex flex-col items-center justify-center px-[clamp(0.9rem,3.6vw,1.55rem)] py-[clamp(0.8rem,2.8vh,1.45rem)] -translate-y-[clamp(0.2rem,1.2vh,0.7rem)] sm:-translate-y-[clamp(0.35rem,1.6vh,1rem)]">
                 <div className={`hero-reveal px-4 py-1.5 rounded-full mb-[clamp(0.55rem,1.9vh,1.25rem)] border text-[10px] tracking-[0.22em] font-black uppercase shadow-[0_8px_24px_rgba(15,23,42,0.08)] ${darkMode ? 'border-emerald-200/30 bg-[#071a16]/82 text-emerald-100 shadow-black/25' : 'border-white/95 bg-white/92 text-slate-600'}`} style={{ '--stagger-index': 0 }}>
                     HSINRU CENTRAL
                 </div>
@@ -6356,38 +6356,32 @@ export default function App() {
                 <div className={`p-8 pb-6 relative overflow-hidden ${darkMode ? 'bg-[#0d1712] text-white border-b border-emerald-200/10' : 'bg-[linear-gradient(112deg,rgba(236,253,245,0.93)_0%,rgba(224,242,254,0.9)_54%,rgba(255,255,255,0.92)_100%)] text-slate-800 border-b border-white/70'}`}>
                    <div className={`absolute top-0 right-0 w-64 h-64 rounded-full -mr-20 -mt-20 blur-3xl ${darkMode ? 'bg-emerald-500 opacity-20' : 'bg-emerald-300 opacity-25'}`}></div>
                    
-                   <div className="relative z-10 mb-6">
-                       <button
-                         onClick={() => setViewData(null)}
-                         className={`absolute top-0 right-0 p-2 rounded-full backdrop-blur-md transition-colors ${darkMode ? 'text-slate-400 hover:text-white bg-white/5' : 'text-slate-500 hover:text-slate-700 bg-white border border-slate-200'}`}
-                       >
-                         <LogOut className="w-4 h-4"/>
-                       </button>
+                   <div className="relative z-10 flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4 mb-6">
+                       {/* Left Side: Name & ID */}
+                       <div className="min-w-0">
+                           <div className={`text-[9px] font-bold uppercase tracking-widest mb-2 border inline-block px-2 py-1 rounded ${darkMode ? 'text-emerald-300 border-emerald-300/25' : 'text-emerald-700 border-emerald-200'}`}>Student Profile</div>
+                           <h3 className={`text-2xl sm:text-3xl font-bold tracking-tighter break-words ${darkMode ? 'text-white' : 'text-slate-800'}`}>{viewData.name}</h3>
+                           <p className="font-mono text-xs mt-1 font-bold text-slate-500">{viewData.id}</p>
+                       </div>
 
-                       <div className="flex items-start justify-between gap-3 pr-11">
-                           <div className="min-w-0 flex-1">
-                               <div className={`text-[9px] font-bold uppercase tracking-widest mb-2 border inline-block px-2 py-1 rounded ${darkMode ? 'text-emerald-300 border-emerald-300/25' : 'text-emerald-700 border-emerald-200'}`}>Student Profile</div>
-                               <h3 className={`text-[clamp(1.25rem,5.2vw,2rem)] sm:text-3xl font-bold tracking-tighter break-words ${darkMode ? 'text-white' : 'text-slate-800'}`}>{viewData.name}</h3>
-                               <p className="font-mono text-xs mt-1 font-bold text-slate-500">{viewData.id}</p>
-                           </div>
-
+                       {/* Right Side: Logout & Prob */}
+                       <div className="flex flex-col items-start sm:items-end gap-4 w-full sm:w-auto">
+                           <button onClick={() => setViewData(null)} className={`p-2 rounded-full backdrop-blur-md transition-colors ${darkMode ? 'text-slate-400 hover:text-white bg-white/5' : 'text-slate-500 hover:text-slate-700 bg-white border border-slate-200'}`}><LogOut className="w-4 h-4"/></button>
+                           
                            {viewData.prob && viewData.prob !== '-' && (
-                               <div className="shrink-0 text-right pt-0.5">
+                               <div className="text-left sm:text-right mt-2">
                                    <div className={`text-[10px] font-bold uppercase tracking-widest mb-0.5 ${darkMode ? 'text-emerald-300/80' : 'text-emerald-700/80'}`}>錄取機率</div>
-                                   <div className="text-2xl sm:text-4xl font-black flex items-baseline justify-end gap-1" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>
-                                       {viewData.prob}<span className="text-base sm:text-lg font-bold" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>%</span>
+                                   <div className="text-3xl sm:text-4xl font-black flex items-baseline justify-start sm:justify-end gap-1" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>
+                                       {viewData.prob}<span className="text-lg font-bold" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>%</span>
+                                   </div>
+                                   <div className="mt-1 flex items-center justify-start sm:justify-end gap-1.5 opacity-50">
+                                        <p className={`text-[9px] font-medium ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
+                                            系統綜合歷史成績運算，<span className={`${darkMode ? 'text-white/90 border-white/20' : 'text-slate-700 border-slate-300'} border-b pb-0.5`}>僅供參考</span>
+                                        </p>
                                    </div>
                                </div>
                            )}
                        </div>
-
-                       {viewData.prob && viewData.prob !== '-' && (
-                           <div className="mt-2 flex items-center justify-end gap-1.5 opacity-50">
-                                <p className={`text-[9px] font-medium ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
-                                    系統綜合歷史成績運算，<span className={`${darkMode ? 'text-white/90 border-white/20' : 'text-slate-700 border-slate-300'} border-b pb-0.5`}>僅供參考</span>
-                                </p>
-                           </div>
-                       )}
                    </div>
                 </div>
 

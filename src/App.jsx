@@ -2,7 +2,16 @@ import React, { Suspense, useState, useEffect, useMemo, useRef, useCallback, use
 import { Search, Save, Plus, Check, BarChart3, X, Lock, LayoutDashboard, GraduationCap, Calendar, Clipboard, LogOut, AlertTriangle, UserPlus, Sparkles, Edit3, Trash2, Trophy, Target, FileSpreadsheet, ChevronRight, ArrowLeft, PieChart, Users, BarChart2, ShieldCheck, ArrowDownWideNarrow, Percent, Info } from 'lucide-react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
-import { getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc } from 'firebase/firestore';
+import { getFirestore, collection, doc, setDoc, getDoc, getDocs, deleteDoc } from 'firebase/firestore/lite';
+import {
+    customDateSort,
+    normalizeDateToken,
+    sanitizeDateList,
+    getWeekendID,
+    getSundayDate,
+    getWeekendDisplayLabel,
+    resolvePhaseByDate
+} from './lib/academicDate';
 
 // --- Global Constants ---
 const DEFAULT_EXAM_STARTS = [
@@ -34,6 +43,7 @@ const MAX_QUERY_EVENTS = 3000;
 const TEACHER_MESSAGE_DOC_ID = 'teacher_parent_message_v1';
 const SETTINGS_CACHE_TTL_MS = 10 * 60 * 1000;
 const STUDENT_CACHE_TTL_MS = 20 * 60 * 1000;
+const TEACHER_MESSAGE_CACHE_TTL_MS = 10 * 60 * 1000;
 const PARENT_QUERY_CACHE_TTL_MS = 20 * 60 * 1000;
 const MAX_PARENT_QUERY_CACHE_ENTRIES = 40;
 const QUERY_STATS_CACHE_TTL_MS = 2 * 60 * 1000;
@@ -49,6 +59,7 @@ const LOCAL_CACHE_KEYS = Object.freeze({
     dates: 'grade_tracker_cache_dates_v1',
     classAverages: 'grade_tracker_cache_class_averages_v18',
     students: 'grade_tracker_cache_students_v1',
+    teacherMessage: 'grade_tracker_cache_teacher_message_v1',
     queryStats: 'grade_tracker_cache_query_stats_v1',
     parentQueryResults: 'grade_tracker_cache_parent_query_results_v1',
     operationLog: 'grade_tracker_cache_operation_log_v1',
@@ -247,215 +258,6 @@ const findStudentByIdOrName = (students, keyword) => {
     }
 
     return { student: null, duplicateName: false };
-};
-
-// --- Helpers ---
-const customDateSort = (a, b) => {
-    try {
-        const normalizedA = normalizeDateToken(a);
-        const normalizedB = normalizeDateToken(b);
-        if (!normalizedA && !normalizedB) return 0;
-        if (!normalizedA) return 1;
-        if (!normalizedB) return -1;
-        const [m1, d1] = normalizedA.split('/').map(Number);
-        const [m2, d2] = normalizedB.split('/').map(Number);
-        if (Number.isNaN(m1) || Number.isNaN(d1) || Number.isNaN(m2) || Number.isNaN(d2)) return 0;
-        const m1Adj = m1 < 4 ? m1 + 12 : m1;
-        const m2Adj = m2 < 4 ? m2 + 12 : m2;
-        if (m1Adj !== m2Adj) return m1Adj - m2Adj;
-        return d1 - d2;
-    } catch { return 0; }
-};
-
-const normalizeDateToken = (dateStr) => {
-    if (!dateStr) return '';
-    const clean = String(dateStr)
-        .trim()
-        .replace(/\./g, '/')
-        .replace(/-/g, '/')
-        .replace(/[^0-9/]/g, '')
-        .replace(/\/+/g, '/');
-    if (!clean.includes('/')) return '';
-    const parts = clean.split('/').filter(Boolean);
-    if (parts.length !== 2) return '';
-    const [mStr, dStr] = parts;
-    const m = parseInt(mStr, 10);
-    const d = parseInt(dStr, 10);
-    if (Number.isNaN(m) || Number.isNaN(d)) return '';
-    if (m < 1 || m > 12 || d < 1 || d > 31) return '';
-    const y = m >= 4 ? 2025 : 2026;
-    const validatedDate = new Date(y, m - 1, d);
-    if (
-        validatedDate.getFullYear() !== y ||
-        validatedDate.getMonth() !== (m - 1) ||
-        validatedDate.getDate() !== d
-    ) {
-        return '';
-    }
-    return `${String(m).padStart(2, '0')}/${String(d).padStart(2, '0')}`;
-};
-
-const sanitizeDateList = (rawDates) => {
-    const unique = new Set();
-    (Array.isArray(rawDates) ? rawDates : []).forEach((rawDate) => {
-        const normalized = normalizeDateToken(rawDate);
-        if (normalized) unique.add(normalized);
-    });
-    return Array.from(unique).sort(customDateSort);
-};
-
-const getAcademicSortValue = (dateStr) => {
-    const normalized = normalizeDateToken(dateStr);
-    if (!normalized) return Number.NaN;
-    const [mStr, dStr] = normalized.split('/');
-    const month = parseInt(mStr, 10);
-    const day = parseInt(dStr, 10);
-    if (Number.isNaN(month) || Number.isNaN(day)) return Number.NaN;
-    const academicMonth = month < 4 ? month + 12 : month;
-    return academicMonth * 100 + day;
-};
-
-const PHASE_BOUNDARIES = {
-    p1Start: '04/19',
-    p1End: '08/02',
-    p2Start: '08/09',
-    p2End: '12/20',
-    mockStart: '12/27',
-    mockEnd: '03/15'
-};
-
-const resolvePhaseByDate = (dateStr, allDates = null) => {
-    const weekendID = getWeekendID(dateStr, allDates);
-    const normalized = normalizeDateToken(weekendID);
-    if (!normalized) return 'p2';
-
-    const dateValue = getAcademicSortValue(normalized);
-    const p1StartValue = getAcademicSortValue(PHASE_BOUNDARIES.p1Start);
-    const p1EndValue = getAcademicSortValue(PHASE_BOUNDARIES.p1End);
-    const p2StartValue = getAcademicSortValue(PHASE_BOUNDARIES.p2Start);
-    const p2EndValue = getAcademicSortValue(PHASE_BOUNDARIES.p2End);
-    const mockStartValue = getAcademicSortValue(PHASE_BOUNDARIES.mockStart);
-    const mockEndValue = getAcademicSortValue(PHASE_BOUNDARIES.mockEnd);
-    if (
-        Number.isNaN(dateValue) ||
-        Number.isNaN(p1StartValue) ||
-        Number.isNaN(p1EndValue) ||
-        Number.isNaN(p2StartValue) ||
-        Number.isNaN(p2EndValue) ||
-        Number.isNaN(mockStartValue) ||
-        Number.isNaN(mockEndValue)
-    ) {
-        return 'p2';
-    }
-
-    if (dateValue >= p1StartValue && dateValue <= p1EndValue) return 'p1';
-    if (dateValue >= p2StartValue && dateValue <= p2EndValue) return 'p2';
-    if (dateValue >= mockStartValue && dateValue <= mockEndValue) return 'mock';
-
-    // 補齊沒有考試的空窗日期，維持最接近下一階段的歸類。
-    if (dateValue < p2StartValue) return 'p1';
-    if (dateValue < mockStartValue) return 'p2';
-    if (dateValue > mockEndValue) return 'mock';
-    return 'p2';
-};
-
-// 將日期字串轉換為 Date 物件（處理跨年）
-const parseDateStr = (dateStr) => {
-    const normalized = normalizeDateToken(dateStr);
-    if (!normalized) return null;
-    try {
-        const [mStr, dStr] = normalized.split('/');
-        const m = parseInt(mStr, 10);
-        const d = parseInt(dStr, 10);
-        const y = m >= 4 ? 2025 : 2026;
-        return new Date(y, m - 1, d);
-    } catch { return null; }
-};
-
-// 將 Date 物件轉換為日期字串
-const formatDateStr = (dateObj) => {
-    if (!dateObj) return '';
-    return `${String(dateObj.getMonth() + 1).padStart(2, '0')}/${String(dateObj.getDate()).padStart(2, '0')}`;
-};
-
-// 檢查兩個日期是否連續（相差一天）
-const isConsecutiveDate = (date1, date2) => {
-    if (!date1 || !date2) return false;
-    const diff = Math.abs((date1.getTime() - date2.getTime()) / (1000 * 60 * 60 * 24));
-    return diff === 1;
-};
-
-// 取得測驗日期 ID：如果日期與 availableDates 中某個日期連續，則返回較早的日期作為統一 ID
-// 如果沒有提供 availableDates，則使用舊的週末邏輯（向後兼容）
-const getWeekendID = (dateStr, availableDates = null) => {
-    if (!dateStr || !String(dateStr).includes('/')) return '';
-    
-    try {
-        const currentDate = parseDateStr(dateStr);
-        if (!currentDate) return '';
-        
-        // 如果提供了 availableDates，檢查是否有連續日期
-        if (availableDates && Array.isArray(availableDates)) {
-            let earliestDate = currentDate;
-            let foundConsecutive = false;
-            
-            // 檢查 availableDates 中是否有與當前日期連續的日期
-            for (const availableDateStr of availableDates) {
-                const availableDate = parseDateStr(availableDateStr);
-                if (!availableDate) continue;
-                
-                if (isConsecutiveDate(currentDate, availableDate)) {
-                    foundConsecutive = true;
-                    // 取較早的日期作為統一 ID
-                    if (availableDate < earliestDate) {
-                        earliestDate = availableDate;
-                    }
-                }
-            }
-            
-            if (foundConsecutive) {
-                return formatDateStr(earliestDate);
-            }
-        }
-        
-        // 如果沒有找到連續日期，使用舊的週末邏輯（向後兼容）
-        const dayOfWeek = currentDate.getDay();
-        if (dayOfWeek === 0) { 
-            const satDate = new Date(currentDate);
-            satDate.setDate(currentDate.getDate() - 1);
-            return formatDateStr(satDate);
-        }
-        
-        return normalizeDateToken(dateStr);
-    } catch { return ''; }
-};
-
-const getSundayDate = (satDateStr) => {
-    try {
-        const [mStr, dStr] = satDateStr.split('/');
-        const m = parseInt(mStr, 10);
-        const d = parseInt(dStr, 10);
-        const y = m >= 4 ? 2025 : 2026;
-        const dateObj = new Date(y, m - 1, d);
-        dateObj.setDate(dateObj.getDate() + 1); 
-        return `${String(dateObj.getMonth() + 1).padStart(2, '0')}/${String(dateObj.getDate()).padStart(2, '0')}`;
-    } catch { return satDateStr; }
-}
-
-const getWeekendDisplayLabel = (dateStr) => {
-    const satID = getWeekendID(dateStr); 
-    if (!satID || !satID.includes('/')) return dateStr;
-    try {
-        const [mStr, dStr] = satID.split('/');
-        const m = parseInt(mStr, 10);
-        const d = parseInt(dStr, 10);
-        const y = m >= 4 ? 2025 : 2026;
-        const dateObj = new Date(y, m - 1, d);
-        const sunDate = new Date(dateObj);
-        sunDate.setDate(dateObj.getDate() + 1);
-        const sunD = String(sunDate.getDate()).padStart(2, '0');
-        return `${String(m).padStart(2,'0')}/${String(d).padStart(2,'0')}-${sunD}`;
-    } catch { return dateStr; }
 };
 
 const PHASES = [
@@ -1250,6 +1052,8 @@ export default function App() {
   const queryFlushTimerRef = useRef(null);
   const queryFlushInFlightRef = useRef(false);
   const shouldSnapTeacherEntryRef = useRef(false);
+  const datesLoadPromiseRef = useRef(null);
+  const classAveragesLoadPromiseRef = useRef(null);
   const pendingImportPayloadRef = useRef(null);
   const parentQueryPerfRef = useRef({
       cacheHit: 0,
@@ -1367,18 +1171,31 @@ export default function App() {
       [sortedAvailableDatesAsc]
   );
 
+  const testDateIdLookup = useMemo(() => {
+      const lookup = new Map();
+      sanitizeDateList(availableDates).forEach((date) => {
+          lookup.set(date, getWeekendID(date, availableDates));
+      });
+      return lookup;
+  }, [availableDates]);
+
   // 包裝 getWeekendID，自動傳入 availableDates，讓連續兩天的日期可以歸類為同一次測驗
   const getTestDateID = useCallback((dateStr) => {
+      const normalized = normalizeDateToken(dateStr);
+      if (normalized && testDateIdLookup.has(normalized)) {
+          return testDateIdLookup.get(normalized) || normalized;
+      }
       return getWeekendID(dateStr, availableDates);
-  }, [availableDates]);
+  }, [availableDates, testDateIdLookup]);
 
   const weekendLabelByDate = useMemo(() => {
       const labels = {};
       sortedAvailableDatesDesc.forEach((date) => {
-          labels[date] = getWeekendDisplayLabel(date);
+          const weekendID = getTestDateID(date) || date;
+          labels[date] = getWeekendDisplayLabel(weekendID);
       });
       return labels;
-  }, [sortedAvailableDatesDesc]);
+  }, [sortedAvailableDatesDesc, getTestDateID]);
 
   // 單人檢視改為以「考次(weekendID)」去重，避免同一週末出現兩列（例如 03/08 與 03/09）
   const singleViewDateEntries = useMemo(() => {
@@ -1450,6 +1267,10 @@ export default function App() {
       });
       return ids;
   }, [sortedAvailableDatesAsc, getTestDateID]);
+
+  // Defer heavy derived calculations to keep typing/edit interactions smooth.
+  const deferredStudentsForDerived = useDeferredValue(allStudentsData);
+  const deferredDatesForDerived = useDeferredValue(availableDates);
 
   // 將每位學生的日期成績先依週末 ID 正規化，避免在多個流程中重複掃描 grades 物件
   const studentGradeMapsByStudentId = useMemo(() => {
@@ -1751,51 +1572,64 @@ export default function App() {
       return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [hasPendingBatchChanges]);
 
-  const loadDates = async () => {
-      const fallbackDates = sanitizeDateList(DEFAULT_EXAM_STARTS);
-      const cachedDates = sanitizeDateList(readLocalCache(LOCAL_CACHE_KEYS.dates) || []);
-      if (cachedDates.length) {
-          if (cachedDates.join('|') !== availableDates.join('|')) {
-              setAvailableDates(cachedDates);
+  const loadDates = useCallback(async (options = {}) => {
+      const force = Boolean(options && options.force);
+      if (!force && datesLoadPromiseRef.current) return datesLoadPromiseRef.current;
+
+      const runner = async () => {
+          const fallbackDates = sanitizeDateList(DEFAULT_EXAM_STARTS);
+          const cachedDates = sanitizeDateList(readLocalCache(LOCAL_CACHE_KEYS.dates) || []);
+          if (cachedDates.length && !force) {
+              if (cachedDates.join('|') !== availableDates.join('|')) {
+                  setAvailableDates(cachedDates);
+              }
+              return cachedDates;
           }
-          return cachedDates;
-      }
-      if (!db) {
-          const cleanedLocalDates = sanitizeDateList(availableDates);
-          const nextDates = cleanedLocalDates.length ? cleanedLocalDates : fallbackDates;
-          if (nextDates.join('|') !== availableDates.join('|')) {
+          if (!db) {
+              const cleanedLocalDates = sanitizeDateList(availableDates);
+              const nextDates = cleanedLocalDates.length ? cleanedLocalDates : fallbackDates;
+              if (nextDates.join('|') !== availableDates.join('|')) {
+                  setAvailableDates(nextDates);
+              }
+              writeLocalCache(LOCAL_CACHE_KEYS.dates, nextDates);
+              return nextDates;
+          }
+          try {
+              const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates');
+              const docSnap = await getDoc(docRef);
+              const rawList = docSnap.exists() && Array.isArray(docSnap.data().list)
+                  ? docSnap.data().list
+                  : DEFAULT_EXAM_STARTS;
+              const cleanedDates = sanitizeDateList(rawList);
+              const nextDates = cleanedDates.length ? cleanedDates : fallbackDates;
+
               setAvailableDates(nextDates);
-          }
-          writeLocalCache(LOCAL_CACHE_KEYS.dates, nextDates);
-          return nextDates;
-      }
-      try {
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates');
-          const docSnap = await getDoc(docRef);
-          const rawList = docSnap.exists() && Array.isArray(docSnap.data().list)
-              ? docSnap.data().list
-              : DEFAULT_EXAM_STARTS;
-          const cleanedDates = sanitizeDateList(rawList);
-          const nextDates = cleanedDates.length ? cleanedDates : fallbackDates;
+              writeLocalCache(LOCAL_CACHE_KEYS.dates, nextDates);
 
-          setAvailableDates(nextDates);
-          writeLocalCache(LOCAL_CACHE_KEYS.dates, nextDates);
-
-          const rawFingerprint = (Array.isArray(rawList) ? rawList : []).map((date) => String(date || '')).join('|');
-          const cleanedFingerprint = nextDates.join('|');
-          if (cleanedFingerprint !== rawFingerprint) {
-              await setDoc(docRef, { list: nextDates }, { merge: true });
+              const rawFingerprint = (Array.isArray(rawList) ? rawList : []).map((date) => String(date || '')).join('|');
+              const cleanedFingerprint = nextDates.join('|');
+              if (cleanedFingerprint !== rawFingerprint) {
+                  await setDoc(docRef, { list: nextDates }, { merge: true });
+              }
+              return nextDates;
+          } catch (e) {
+              console.error('Error loading dates:', e);
+              const cleanedFallback = sanitizeDateList(availableDates);
+              const nextDates = cleanedFallback.length ? cleanedFallback : fallbackDates;
+              setAvailableDates(nextDates);
+              writeLocalCache(LOCAL_CACHE_KEYS.dates, nextDates);
+              return nextDates;
           }
-          return nextDates;
-      } catch(e) {
-          console.error("Error loading dates:", e);
-          const cleanedFallback = sanitizeDateList(availableDates);
-          const nextDates = cleanedFallback.length ? cleanedFallback : fallbackDates;
-          setAvailableDates(nextDates);
-          writeLocalCache(LOCAL_CACHE_KEYS.dates, nextDates);
-          return nextDates;
-      }
-  };
+      };
+
+      const promise = runner().finally(() => {
+          if (datesLoadPromiseRef.current === promise) {
+              datesLoadPromiseRef.current = null;
+          }
+      });
+      datesLoadPromiseRef.current = promise;
+      return promise;
+  }, [availableDates]);
 
   const shouldResetQueryStats = useCallback((lastResetAt) => {
       if (!lastResetAt) return true;
@@ -1948,7 +1782,25 @@ export default function App() {
       }
   }, [shouldResetQueryStats, applyPendingQueryStats]);
 
-  const loadTeacherMessage = useCallback(async () => {
+  const loadTeacherMessage = useCallback(async (options = {}) => {
+      const force = Boolean(options && options.force);
+      const hydrateMessageState = (raw) => {
+          const nextGlobalMessage = String(raw?.globalMessage ?? raw?.message ?? '').trim();
+          const nextByStudentMessages = normalizeTeacherStudentMessages(raw?.byStudent);
+          setTeacherGlobalMessage(nextGlobalMessage);
+          setTeacherGlobalMessageDraft(nextGlobalMessage);
+          setTeacherStudentMessages(nextByStudentMessages);
+          setTeacherStudentMessageDrafts(nextByStudentMessages);
+      };
+
+      if (!force) {
+          const cachedMessage = readLocalCache(LOCAL_CACHE_KEYS.teacherMessage, TEACHER_MESSAGE_CACHE_TTL_MS);
+          if (cachedMessage && typeof cachedMessage === 'object') {
+              hydrateMessageState(cachedMessage);
+              return;
+          }
+      }
+
       if (!db) {
           setTeacherGlobalMessage('');
           setTeacherGlobalMessageDraft('');
@@ -1962,13 +1814,12 @@ export default function App() {
           const messageDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', TEACHER_MESSAGE_DOC_ID);
           const docSnap = await getDoc(messageDocRef);
           const raw = docSnap.exists() ? docSnap.data() : {};
-          const nextGlobalMessage = String(raw?.globalMessage ?? raw?.message ?? '').trim();
-          const nextByStudentMessages = normalizeTeacherStudentMessages(raw?.byStudent);
-
-          setTeacherGlobalMessage(nextGlobalMessage);
-          setTeacherGlobalMessageDraft(nextGlobalMessage);
-          setTeacherStudentMessages(nextByStudentMessages);
-          setTeacherStudentMessageDrafts(nextByStudentMessages);
+          const payload = {
+              globalMessage: String(raw?.globalMessage ?? raw?.message ?? '').trim(),
+              byStudent: normalizeTeacherStudentMessages(raw?.byStudent)
+          };
+          hydrateMessageState(payload);
+          writeLocalCache(LOCAL_CACHE_KEYS.teacherMessage, payload);
       } catch (e) {
           console.error('Load teacher message error:', e);
       } finally {
@@ -2167,7 +2018,7 @@ export default function App() {
 
       const groupsByWeekendID = {};
 
-      availableDates.forEach(date => {
+      deferredDatesForDerived.forEach(date => {
           const weekendID = getTestDateID(date);
           if (!weekendID) return;
           if (!groupsByWeekendID[weekendID]) {
@@ -2175,7 +2026,7 @@ export default function App() {
           }
       });
 
-      allStudentsData.forEach(student => {
+      deferredStudentsForDerived.forEach(student => {
           const weekendEntries = buildWeekendGradeEntryMap(student.grades, getTestDateID);
           Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
               const grade = entry.grade;
@@ -2225,45 +2076,64 @@ export default function App() {
           });
       });
       return avgs;
-  }, [availableDates, allStudentsData, getTestDateID]);
+  }, [deferredDatesForDerived, deferredStudentsForDerived, getTestDateID]);
 
-  const loadClassAverages = async () => {
-      const cachedAverages = readLocalCache(LOCAL_CACHE_KEYS.classAverages);
-      if (cachedAverages && typeof cachedAverages === 'object') {
-          const normalizedCache = normalizeClassAveragesByWeekend(cachedAverages, getTestDateID);
-          const mergedAverages = { ...localComputedAverages, ...normalizedCache };
-          setClassAverages(mergedAverages);
-          writeLocalCache(LOCAL_CACHE_KEYS.classAverages, mergedAverages);
-          return;
-      }
-      if (!db) {
-          setClassAverages(localComputedAverages);
-          writeLocalCache(LOCAL_CACHE_KEYS.classAverages, localComputedAverages);
-          return;
-      }
-      try {
-          const docSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'class_averages_v18'));
-          let dbAverages = {};
-          if (docSnap.exists()) dbAverages = normalizeClassAveragesByWeekend(docSnap.data().averages || {}, getTestDateID);
-          const mergedAverages = { ...localComputedAverages, ...dbAverages };
-          setClassAverages(mergedAverages);
-          writeLocalCache(LOCAL_CACHE_KEYS.classAverages, mergedAverages);
-      } catch (e) {
-          console.error('Load class averages error:', e);
-          setClassAverages(localComputedAverages);
-          writeLocalCache(LOCAL_CACHE_KEYS.classAverages, localComputedAverages);
-      }
-  };
+  const loadClassAverages = useCallback(async (options = {}) => {
+      const force = Boolean(options && options.force);
+      if (!force && classAveragesLoadPromiseRef.current) return classAveragesLoadPromiseRef.current;
+
+      const runner = async () => {
+          const cachedAverages = readLocalCache(LOCAL_CACHE_KEYS.classAverages);
+          if (cachedAverages && typeof cachedAverages === 'object' && !force) {
+              const normalizedCache = normalizeClassAveragesByWeekend(cachedAverages, getTestDateID);
+              const mergedAverages = { ...localComputedAverages, ...normalizedCache };
+              setClassAverages(mergedAverages);
+              writeLocalCache(LOCAL_CACHE_KEYS.classAverages, mergedAverages);
+              return mergedAverages;
+          }
+          if (!db) {
+              setClassAverages(localComputedAverages);
+              writeLocalCache(LOCAL_CACHE_KEYS.classAverages, localComputedAverages);
+              return localComputedAverages;
+          }
+          try {
+              const docSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'class_averages_v18'));
+              let dbAverages = {};
+              if (docSnap.exists()) dbAverages = normalizeClassAveragesByWeekend(docSnap.data().averages || {}, getTestDateID);
+              const mergedAverages = { ...localComputedAverages, ...dbAverages };
+              setClassAverages(mergedAverages);
+              writeLocalCache(LOCAL_CACHE_KEYS.classAverages, mergedAverages);
+              return mergedAverages;
+          } catch (e) {
+              console.error('Load class averages error:', e);
+              setClassAverages(localComputedAverages);
+              writeLocalCache(LOCAL_CACHE_KEYS.classAverages, localComputedAverages);
+              return localComputedAverages;
+          }
+      };
+
+      const promise = runner().finally(() => {
+          if (classAveragesLoadPromiseRef.current === promise) {
+              classAveragesLoadPromiseRef.current = null;
+          }
+      });
+      classAveragesLoadPromiseRef.current = promise;
+      return promise;
+  }, [getTestDateID, localComputedAverages]);
 
   useEffect(() => {
-      if (allStudentsData.length > 0) {
-          setClassAverages(prev => {
-              const next = normalizeClassAveragesByWeekend({ ...prev, ...localComputedAverages }, getTestDateID);
-              writeLocalCache(LOCAL_CACHE_KEYS.classAverages, next);
-              return next;
+      if (deferredStudentsForDerived.length === 0) return undefined;
+      const timer = window.setTimeout(() => {
+          startTransition(() => {
+              setClassAverages(prev => {
+                  const next = normalizeClassAveragesByWeekend({ ...prev, ...localComputedAverages }, getTestDateID);
+                  writeLocalCache(LOCAL_CACHE_KEYS.classAverages, next);
+                  return next;
+              });
           });
-      }
-  }, [localComputedAverages, allStudentsData.length, getTestDateID]);
+      }, 220);
+      return () => window.clearTimeout(timer);
+  }, [localComputedAverages, deferredStudentsForDerived.length, getTestDateID]);
 
   const handleManualAverageChange = (date, classId, subject, value) => {
       const weekendID = getTestDateID(date) || date;
@@ -2327,6 +2197,11 @@ export default function App() {
   const persistTeacherMessages = useCallback(async (nextGlobalMessage, nextByStudentMessages) => {
       const normalizedGlobal = String(nextGlobalMessage || '').trim();
       const normalizedByStudent = normalizeTeacherStudentMessages(nextByStudentMessages);
+      const payload = {
+          globalMessage: normalizedGlobal,
+          byStudent: normalizedByStudent
+      };
+      writeLocalCache(LOCAL_CACHE_KEYS.teacherMessage, payload);
       if (db) {
           const messageDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', TEACHER_MESSAGE_DOC_ID);
           await setDoc(messageDocRef, {
@@ -2842,32 +2717,34 @@ export default function App() {
           notifyPermissionDenied('2491212 權限無法修改學生成績');
           return;
       }
-      setAllStudentsData(prev => prev.map(s => {
-          if (s.id !== studentId) return s;
-          const currentGrades = s.grades || {};
+      setAllStudentsData(prev => {
+          const index = prev.findIndex((s) => s.id === studentId);
+          if (index < 0) return prev;
+
+          const student = prev[index];
+          const currentGrades = student.grades || {};
           let targetDate = batchDate;
           const batchDateID = getTestDateID(batchDate);
-          const existingKey = Object.keys(currentGrades).find(k => getTestDateID(k) === batchDateID);
+          const existingKey = Object.keys(currentGrades).find((k) => getTestDateID(k) === batchDateID);
           if (existingKey) targetDate = existingKey;
-          else {
-             // 對於日A班/日B班，嘗試找連續的日期（例如週日的日期）
-             // 但現在連續日期邏輯已經在 getTestDateID 中處理，所以這裡可以簡化
-             // 如果找不到，就使用 batchDate 作為新日期
-          }
-          const currentDateGrades = currentGrades[targetDate] || { chi: '', eng: '', math: '', total: '', class: teacherClassFilter }; 
+
+          const currentDateGrades = currentGrades[targetDate] || { chi: '', eng: '', math: '', total: '', class: teacherClassFilter };
           let updatedDateGrades;
           if (subject === 'class') {
               updatedDateGrades = { ...currentDateGrades, class: value };
           } else {
               updatedDateGrades = { ...currentDateGrades, [subject]: value };
               updatedDateGrades.total = calculateTotal(
-                  subject==='chi'?value:updatedDateGrades.chi, 
-                  subject==='eng'?value:updatedDateGrades.eng, 
-                  subject==='math'?value:updatedDateGrades.math
+                  subject === 'chi' ? value : updatedDateGrades.chi,
+                  subject === 'eng' ? value : updatedDateGrades.eng,
+                  subject === 'math' ? value : updatedDateGrades.math
               );
           }
-          return { ...s, grades: { ...currentGrades, [targetDate]: updatedDateGrades } };
-      }));
+
+          const next = [...prev];
+          next[index] = { ...student, grades: { ...currentGrades, [targetDate]: updatedDateGrades } };
+          return next;
+      });
       batchDirtyStudentIdsRef.current.add(String(studentId));
       setIsBatchDirty(true);
   }, [batchDate, teacherClassFilter, getTestDateID, canEditStudentGrades, notifyPermissionDenied]); 
@@ -4086,11 +3963,24 @@ export default function App() {
       }));
   };
 
+  const relevantWeekendIdsForPR = useMemo(() => {
+      if (!shouldBuildBatchAnalytics) return [];
+      const selectedWeekendID = getTestDateID(batchDate);
+      if (!selectedWeekendID) return [];
+      const ids = [selectedWeekendID];
+      const selectedIndex = orderedWeekendIds.indexOf(selectedWeekendID);
+      if (selectedIndex > 0) ids.push(orderedWeekendIds[selectedIndex - 1]);
+      return ids;
+  }, [shouldBuildBatchAnalytics, batchDate, getTestDateID, orderedWeekendIds]);
+
   const globalPRByStudentAndWeekend = useMemo(() => {
-      if (!shouldBuildBatchAnalytics) return {};
+      if (!shouldBuildBatchAnalytics || relevantWeekendIdsForPR.length === 0) return {};
+      const targetWeekendSet = new Set(relevantWeekendIdsForPR);
       const totalsByWeekend = {};
       Object.entries(studentGradeMapsByStudentId).forEach(([studentId, weekendGrades]) => {
-          Object.entries(weekendGrades || {}).forEach(([weekendID, grade]) => {
+          targetWeekendSet.forEach((weekendID) => {
+              const grade = weekendGrades?.[weekendID];
+              if (!grade) return;
               const total = toNumberOrNull(grade?.total);
               if (total === null) return;
               if (!totalsByWeekend[weekendID]) totalsByWeekend[weekendID] = [];
@@ -4112,7 +4002,7 @@ export default function App() {
       });
 
       return prByStudent;
-  }, [studentGradeMapsByStudentId, shouldBuildBatchAnalytics]);
+  }, [studentGradeMapsByStudentId, shouldBuildBatchAnalytics, relevantWeekendIdsForPR]);
 
   const batchRowsForDisplay = useMemo(() => {
       if (!shouldBuildBatchAnalytics) return [];

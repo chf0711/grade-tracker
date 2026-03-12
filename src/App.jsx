@@ -5164,18 +5164,18 @@ export default function App() {
       <header className={`header-glass fixed top-0 w-full backdrop-blur-xl z-30 border-b transition-all duration-300 ${shouldElevateHeader ? 'header-glass--scrolled' : ''} ${darkMode ? 'header-glass--dark bg-[#0b1512]/84 border-emerald-200/15 shadow-lg shadow-black/35' : 'bg-[linear-gradient(108deg,rgba(255,255,255,0.78)_0%,rgba(244,252,248,0.84)_52%,rgba(241,247,255,0.8)_100%)] border-white/75 shadow-[0_14px_36px_rgba(15,23,42,0.12)]'}`}>
         <div className="max-w-5xl mx-auto px-3 sm:px-6 h-[calc(4rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)] flex justify-between items-center relative z-10">
           <div
-            className="flex items-center gap-3 cursor-pointer group"
+            className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3 cursor-pointer group"
             onClick={() => runWithBatchDiscardGuard(() => setMode('landing'))}
           >
             <div className={`p-2 rounded-xl transition-transform group-hover:scale-105 duration-300 ${darkMode ? 'bg-emerald-500/10 text-emerald-200 ring-1 ring-emerald-300/35' : 'bg-white/74 text-emerald-700 ring-1 ring-white/90 shadow-sm'}`}><GraduationCap className="h-5 w-5" /></div>
-            <div>
-                <h1 className={`text-xl sm:text-2xl font-black tracking-widest font-serif uppercase leading-none bg-clip-text text-transparent ${darkMode ? 'bg-gradient-to-r from-emerald-50 via-emerald-200 to-lime-200' : 'bg-[linear-gradient(112deg,#0f172a_0%,#047857_34%,#0f766e_66%,#0369a1_100%)] drop-shadow-[0_1px_0_rgba(255,255,255,0.55)]'}`}>
+            <div className="min-w-0">
+                <h1 className={`truncate text-[clamp(0.92rem,4.4vw,1.18rem)] sm:text-2xl font-black tracking-[0.12em] sm:tracking-widest font-serif uppercase leading-none bg-clip-text text-transparent ${darkMode ? 'bg-gradient-to-r from-emerald-50 via-emerald-200 to-lime-200' : 'bg-[linear-gradient(112deg,#0f172a_0%,#047857_34%,#0f766e_66%,#0369a1_100%)] drop-shadow-[0_1px_0_rgba(255,255,255,0.55)]'}`}>
                   HSINRU
                 </h1>
-                <p className={`hidden sm:block text-[9px] font-bold tracking-widest uppercase mt-0.5 ${darkMode ? 'text-slate-300/85' : 'text-slate-500/90'}`}>Grade Tracker</p>
+                <p className={`truncate block text-[8px] sm:text-[9px] font-bold tracking-[0.16em] sm:tracking-widest uppercase mt-0.5 ${darkMode ? 'text-slate-300/85' : 'text-slate-500/90'}`}>Grade Tracker</p>
             </div>
           </div>
-          <div className="flex items-center gap-1.5 sm:gap-2">
+          <div className={`ml-2 flex shrink-0 items-center gap-1 sm:gap-1.5 rounded-full border px-1.5 sm:px-2 py-1 backdrop-blur-md ${darkMode ? 'border-white/15 bg-slate-900/35' : 'border-white/80 bg-white/72 shadow-[0_8px_24px_rgba(15,23,42,0.08)] ring-1 ring-white/45'}`}>
                 <button
                   onClick={() => runWithBatchDiscardGuard(() => {
                     if (isAuthenticated) {
@@ -5186,9 +5186,10 @@ export default function App() {
                       setMode('teacher_login');
                     }
                   })}
-                  className={`btn-sheen shrink-0 px-3 sm:px-4 py-1.5 rounded-full text-[11px] sm:text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : (darkMode ? 'text-slate-200 hover:text-white bg-slate-900/45 border border-emerald-200/20 hover:bg-slate-900/70' : 'text-slate-600 hover:text-slate-800 bg-white/60 border border-white/70 hover:bg-white/85')}`}
+                  className={`btn-sheen shrink-0 px-2.5 sm:px-4 py-1.5 rounded-full text-[10px] sm:text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : (darkMode ? 'text-slate-200 hover:text-white bg-slate-900/45 border border-emerald-200/20 hover:bg-slate-900/70' : 'text-slate-600 hover:text-slate-800 bg-white/70 border border-white/80 hover:bg-white/95')}`}
                 >
-                  {isAuthenticated ? '後台' : '老師'}
+                  <span className="sm:hidden">{isAuthenticated ? '後台' : '師'}</span>
+                  <span className="hidden sm:inline">{isAuthenticated ? '後台' : '老師'}</span>
                 </button>
                 <button
                   onClick={() => runWithBatchDiscardGuard(() => {
@@ -5196,12 +5197,13 @@ export default function App() {
                     setSearchError('');
                     setMode('parent');
                   })}
-                  className={`btn-sheen shrink-0 px-3 sm:px-4 py-1.5 rounded-full text-[11px] sm:text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : (darkMode ? 'text-slate-200 hover:text-white bg-slate-900/45 border border-emerald-200/20 hover:bg-slate-900/70' : 'text-slate-600 hover:text-slate-800 bg-white/60 border border-white/70 hover:bg-white/85')}`}
+                  className={`btn-sheen shrink-0 px-2.5 sm:px-4 py-1.5 rounded-full text-[10px] sm:text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : (darkMode ? 'text-slate-200 hover:text-white bg-slate-900/45 border border-emerald-200/20 hover:bg-slate-900/70' : 'text-slate-600 hover:text-slate-800 bg-white/70 border border-white/80 hover:bg-white/95')}`}
                 >
-                  家長
+                  <span className="sm:hidden">家</span>
+                  <span className="hidden sm:inline">家長</span>
                 </button>
             {isAuthenticated && (
-                <button onClick={handleLogout} className="ml-1 p-2 text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-full transition-colors" title="登出"><LogOut className="w-5 h-5"/></button>
+                <button onClick={handleLogout} className="ml-0.5 p-1.5 sm:p-2 text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-full transition-colors" title="登出"><LogOut className="w-4 h-4 sm:w-5 sm:h-5"/></button>
             )}
           </div>
         </div>
@@ -6356,33 +6358,38 @@ export default function App() {
                 <div className={`p-8 pb-6 relative overflow-hidden ${darkMode ? 'bg-[#0d1712] text-white border-b border-emerald-200/10' : 'bg-[linear-gradient(112deg,rgba(236,253,245,0.93)_0%,rgba(224,242,254,0.9)_54%,rgba(255,255,255,0.92)_100%)] text-slate-800 border-b border-white/70'}`}>
                    <div className={`absolute top-0 right-0 w-64 h-64 rounded-full -mr-20 -mt-20 blur-3xl ${darkMode ? 'bg-emerald-500 opacity-20' : 'bg-emerald-300 opacity-25'}`}></div>
                    
-                   <div className="relative z-10 flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4 mb-6">
-                       {/* Left Side: Name & ID */}
-                       <div className="min-w-0">
-                           <div className={`text-[9px] font-bold uppercase tracking-widest mb-2 border inline-block px-2 py-1 rounded ${darkMode ? 'text-emerald-300 border-emerald-300/25' : 'text-emerald-700 border-emerald-200'}`}>Student Profile</div>
-                           <h3 className={`text-2xl sm:text-3xl font-bold tracking-tighter break-words ${darkMode ? 'text-white' : 'text-slate-800'}`}>{viewData.name}</h3>
-                           <p className="font-mono text-xs mt-1 font-bold text-slate-500">{viewData.id}</p>
-                       </div>
+                   <div className="relative z-10 mb-6">
+                       <button
+                         onClick={() => setViewData(null)}
+                         className={`absolute top-0 right-0 p-2 rounded-full backdrop-blur-md transition-colors ${darkMode ? 'text-slate-400 hover:text-white bg-white/5' : 'text-slate-500 hover:text-slate-700 bg-white border border-slate-200'}`}
+                       >
+                         <LogOut className="w-4 h-4"/>
+                       </button>
 
-                       {/* Right Side: Logout & Prob */}
-                       <div className="flex flex-col items-start sm:items-end gap-4 w-full sm:w-auto">
-                           <button onClick={() => setViewData(null)} className={`p-2 rounded-full backdrop-blur-md transition-colors ${darkMode ? 'text-slate-400 hover:text-white bg-white/5' : 'text-slate-500 hover:text-slate-700 bg-white border border-slate-200'}`}><LogOut className="w-4 h-4"/></button>
-                           
-                           {/* --- NEW PROBABILITY DISPLAY --- */}
+                       <div className="flex items-start justify-between gap-3 pr-11">
+                           <div className="min-w-0 flex-1">
+                               <div className={`text-[9px] font-bold uppercase tracking-widest mb-2 border inline-block px-2 py-1 rounded ${darkMode ? 'text-emerald-300 border-emerald-300/25' : 'text-emerald-700 border-emerald-200'}`}>Student Profile</div>
+                               <h3 className={`text-[clamp(1.25rem,5.2vw,2rem)] sm:text-3xl font-bold tracking-tighter break-words ${darkMode ? 'text-white' : 'text-slate-800'}`}>{viewData.name}</h3>
+                               <p className="font-mono text-xs mt-1 font-bold text-slate-500">{viewData.id}</p>
+                           </div>
+
                            {viewData.prob && viewData.prob !== '-' && (
-                               <div className="text-left sm:text-right mt-2">
+                               <div className="shrink-0 text-right pt-0.5">
                                    <div className={`text-[10px] font-bold uppercase tracking-widest mb-0.5 ${darkMode ? 'text-emerald-300/80' : 'text-emerald-700/80'}`}>錄取機率</div>
-                                   <div className="text-3xl sm:text-4xl font-black flex items-baseline justify-start sm:justify-end gap-1" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>
-                                       {viewData.prob}<span className="text-lg font-bold" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>%</span>
-                                   </div>
-                                   <div className="mt-1 flex items-center justify-start sm:justify-end gap-1.5 opacity-50">
-                                        <p className={`text-[9px] font-medium ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
-                                            系統綜合歷史成績運算，<span className={`${darkMode ? 'text-white/90 border-white/20' : 'text-slate-700 border-slate-300'} border-b pb-0.5`}>僅供參考</span>
-                                        </p>
+                                   <div className="text-2xl sm:text-4xl font-black flex items-baseline justify-end gap-1" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>
+                                       {viewData.prob}<span className="text-base sm:text-lg font-bold" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>%</span>
                                    </div>
                                </div>
                            )}
                        </div>
+
+                       {viewData.prob && viewData.prob !== '-' && (
+                           <div className="mt-2 flex items-center justify-end gap-1.5 opacity-50">
+                                <p className={`text-[9px] font-medium ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
+                                    系統綜合歷史成績運算，<span className={`${darkMode ? 'text-white/90 border-white/20' : 'text-slate-700 border-slate-300'} border-b pb-0.5`}>僅供參考</span>
+                                </p>
+                           </div>
+                       )}
                    </div>
                 </div>
 

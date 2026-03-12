@@ -80,12 +80,30 @@
 }
 
 .header-glass {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   transition:
     box-shadow var(--motion-medium) var(--ease-standard),
     backdrop-filter var(--motion-medium) var(--ease-standard),
     -webkit-backdrop-filter var(--motion-medium) var(--ease-standard),
     background-color var(--motion-medium) var(--ease-standard),
     border-color var(--motion-medium) var(--ease-standard);
+}
+
+.header-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    120deg,
+    rgba(255, 255, 255, 0.34) 0%,
+    rgba(255, 255, 255, 0.14) 42%,
+    rgba(255, 255, 255, 0.26) 100%
+  );
+  mix-blend-mode: screen;
+  opacity: 0.9;
 }
 
 .header-glass.header-glass--scrolled {

@@ -44,6 +44,7 @@ const MAX_OPERATION_LOG_ENTRIES = 220;
 const MAX_LOCAL_SNAPSHOTS = 4;
 const MAX_IMPORT_PREVIEW_ROWS = 12;
 const MAX_QUALITY_DETAIL_ITEMS = 120;
+const AUTO_THEME_COORDS_TTL_MS = 45 * 24 * 60 * 60 * 1000;
 const SCORE_KEYS = ['chi', 'eng', 'math'];
 const LOCAL_CACHE_KEYS = Object.freeze({
     dates: 'grade_tracker_cache_dates_v1',
@@ -52,7 +53,8 @@ const LOCAL_CACHE_KEYS = Object.freeze({
     queryStats: 'grade_tracker_cache_query_stats_v1',
     parentQueryResults: 'grade_tracker_cache_parent_query_results_v1',
     operationLog: 'grade_tracker_cache_operation_log_v1',
-    snapshots: 'grade_tracker_cache_snapshots_v1'
+    snapshots: 'grade_tracker_cache_snapshots_v1',
+    autoThemeGeo: 'grade_tracker_cache_theme_geo_v1'
 });
 const STUDENTS_SESSION_SYNC_KEY = 'grade_tracker_students_session_synced_v1';
 
@@ -250,6 +252,100 @@ const findStudentByIdOrName = (students, keyword) => {
 };
 
 // --- Helpers ---
+const isValidGeoCoord = (lat, lng) => (
+    Number.isFinite(lat)
+    && Number.isFinite(lng)
+    && Math.abs(lat) <= 90
+    && Math.abs(lng) <= 180
+);
+
+const toRadians = (value) => (value * Math.PI) / 180;
+const toDegrees = (value) => (value * 180) / Math.PI;
+const normalizeDegrees = (value) => ((value % 360) + 360) % 360;
+const normalizeHours = (value) => ((value % 24) + 24) % 24;
+
+const getDayOfYear = (dateObj) => {
+    if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return 0;
+    const start = new Date(dateObj.getFullYear(), 0, 0);
+    const diff = dateObj - start + ((start.getTimezoneOffset() - dateObj.getTimezoneOffset()) * 60 * 1000);
+    return Math.floor(diff / (1000 * 60 * 60 * 24));
+};
+
+const computeSunEventTime = (dateObj, latitude, longitude, isSunrise) => {
+    if (
+        !(dateObj instanceof Date)
+        || Number.isNaN(dateObj.getTime())
+        || !isValidGeoCoord(latitude, longitude)
+    ) {
+        return null;
+    }
+
+    const dayOfYear = getDayOfYear(dateObj);
+    if (!dayOfYear) return null;
+    const lngHour = longitude / 15;
+    const t = dayOfYear + (((isSunrise ? 6 : 18) - lngHour) / 24);
+    const meanAnomaly = (0.9856 * t) - 3.289;
+
+    const trueLongitude = normalizeDegrees(
+        meanAnomaly
+        + (1.916 * Math.sin(toRadians(meanAnomaly)))
+        + (0.02 * Math.sin(toRadians(2 * meanAnomaly)))
+        + 282.634
+    );
+
+    let rightAscension = normalizeDegrees(toDegrees(Math.atan(0.91764 * Math.tan(toRadians(trueLongitude)))));
+    const longitudeQuadrant = Math.floor(trueLongitude / 90) * 90;
+    const ascensionQuadrant = Math.floor(rightAscension / 90) * 90;
+    rightAscension = (rightAscension + (longitudeQuadrant - ascensionQuadrant)) / 15;
+
+    const sinDeclination = 0.39782 * Math.sin(toRadians(trueLongitude));
+    const cosDeclination = Math.cos(Math.asin(sinDeclination));
+    const latRad = toRadians(latitude);
+    const cosHourAngle = (
+        Math.cos(toRadians(90.833))
+        - (sinDeclination * Math.sin(latRad))
+    ) / (cosDeclination * Math.cos(latRad));
+
+    if (cosHourAngle > 1 || cosHourAngle < -1) return null;
+
+    let hourAngle = isSunrise
+        ? 360 - toDegrees(Math.acos(cosHourAngle))
+        : toDegrees(Math.acos(cosHourAngle));
+    hourAngle /= 15;
+
+    const localMeanTime = hourAngle + rightAscension - (0.06571 * t) - 6.622;
+    const utcHour = normalizeHours(localMeanTime - lngHour);
+    const utcBase = Date.UTC(
+        dateObj.getFullYear(),
+        dateObj.getMonth(),
+        dateObj.getDate(),
+        0,
+        0,
+        0,
+        0
+    );
+    return new Date(utcBase + (utcHour * 60 * 60 * 1000));
+};
+
+const getSunriseSunsetTimes = (dateObj, coords) => {
+    if (!coords || !isValidGeoCoord(coords.lat, coords.lng)) {
+        return { sunrise: null, sunset: null };
+    }
+    const sunrise = computeSunEventTime(dateObj, coords.lat, coords.lng, true);
+    const sunset = computeSunEventTime(dateObj, coords.lat, coords.lng, false);
+    return { sunrise, sunset };
+};
+
+const getAutoDarkModeValue = (dateObj, coords) => {
+    if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return false;
+    const { sunrise, sunset } = getSunriseSunsetTimes(dateObj, coords);
+    if (sunrise instanceof Date && sunset instanceof Date) {
+        return dateObj < sunrise || dateObj >= sunset;
+    }
+    const hour = dateObj.getHours();
+    return hour >= 18 || hour < 6;
+};
+
 const customDateSort = (a, b) => {
     try {
         const normalizedA = normalizeDateToken(a);
@@ -1165,7 +1261,7 @@ const ExamCountdown = ({ isDarkMode }) => {
 
     return (
         <div className={`flex items-center gap-3 mt-4 px-5 py-2 rounded-full border backdrop-blur-md transition-all duration-500 shadow-sm ${isDarkMode ? 'bg-emerald-500/10 border-emerald-200/20 text-slate-100 shadow-black/20' : 'bg-white/74 border-white text-slate-700 shadow-slate-200/50'}`}>
-            <Target className="w-4 h-4 text-sky-600" />
+            <Target className={`w-4 h-4 ${isDarkMode ? 'text-cyan-300' : 'text-sky-600'}`} />
             <div className="flex items-baseline gap-1.5 font-mono text-sm">
                 <span className="font-bold">{timeLeft.days}</span><span className="text-[10px] opacity-50 mr-1">DAYS</span>
                 <span className="font-bold">{String(timeLeft.hours).padStart(2,'0')}</span><span className="opacity-30">:</span>
@@ -1275,8 +1371,9 @@ export default function App() {
   const [admissionProbabilities, setAdmissionProbabilities] = useState({});
 
   const [_xlsxLoaded, setXlsxLoaded] = useState(false);
+  const [autoThemeCoords, setAutoThemeCoords] = useState(null);
+  const [darkMode, setDarkMode] = useState(false);
   const xlsxLoadingPromiseRef = useRef(null);
-  const darkMode = false;
   const isLimitedTeacherRole = teacherAuthRole === TEACHER_ROLE.LIMITED;
   const canEditStudentGrades = !isLimitedTeacherRole;
   const canImportExcel = canEditStudentGrades || isLimitedTeacherRole;
@@ -1591,6 +1688,56 @@ export default function App() {
       media.addEventListener?.('change', updateMotionPreference);
       return () => media.removeEventListener?.('change', updateMotionPreference);
   }, []);
+
+  useEffect(() => {
+      if (typeof window === 'undefined') return undefined;
+      const cachedCoords = readLocalCache(LOCAL_CACHE_KEYS.autoThemeGeo, AUTO_THEME_COORDS_TTL_MS);
+      const hasCachedCoords = Boolean(cachedCoords && isValidGeoCoord(cachedCoords.lat, cachedCoords.lng));
+      if (cachedCoords && isValidGeoCoord(cachedCoords.lat, cachedCoords.lng)) {
+          setAutoThemeCoords({
+              lat: Number(cachedCoords.lat),
+              lng: Number(cachedCoords.lng)
+          });
+      }
+
+      if (
+          typeof navigator === 'undefined'
+          || !navigator.geolocation
+          || hasCachedCoords
+      ) {
+          return undefined;
+      }
+
+      let cancelled = false;
+      navigator.geolocation.getCurrentPosition(
+          (position) => {
+              if (cancelled) return;
+              const lat = Number(position?.coords?.latitude);
+              const lng = Number(position?.coords?.longitude);
+              if (!isValidGeoCoord(lat, lng)) return;
+              const nextCoords = { lat, lng };
+              setAutoThemeCoords(nextCoords);
+              writeLocalCache(LOCAL_CACHE_KEYS.autoThemeGeo, nextCoords);
+          },
+          () => {},
+          { enableHighAccuracy: false, timeout: 5000, maximumAge: 12 * 60 * 60 * 1000 }
+      );
+
+      return () => {
+          cancelled = true;
+      };
+  }, []);
+
+  useEffect(() => {
+      if (typeof window === 'undefined') return undefined;
+      const syncTheme = () => {
+          const nextDarkMode = getAutoDarkModeValue(new Date(), autoThemeCoords);
+          setDarkMode((prev) => (prev === nextDarkMode ? prev : nextDarkMode));
+      };
+      syncTheme();
+      const timer = window.setInterval(syncTheme, 60 * 1000);
+      return () => window.clearInterval(timer);
+  }, [autoThemeCoords]);
 
   useEffect(() => {
       if (typeof window === 'undefined') return undefined;
@@ -5130,6 +5277,12 @@ export default function App() {
               ? 0.74
               : 0.72;
   const shouldElevateHeader = isHeaderScrolled || !isLandingMode;
+  const sharedBackgroundStyle = useMemo(() => ({
+      opacity: sharedBackgroundOpacity,
+      backgroundImage: darkMode
+          ? 'repeating-linear-gradient(0deg, rgba(148,163,184,0.08) 0px, rgba(148,163,184,0.08) 1px, transparent 1px, transparent 24px), repeating-linear-gradient(90deg, rgba(148,163,184,0.06) 0px, rgba(148,163,184,0.06) 1px, transparent 1px, transparent 24px), radial-gradient(circle at 14% 15%, rgba(16,185,129,0.26) 0%, transparent 40%), radial-gradient(circle at 88% 14%, rgba(56,189,248,0.24) 0%, transparent 40%), radial-gradient(circle at 78% 86%, rgba(59,130,246,0.18) 0%, transparent 34%), linear-gradient(138deg, #030712 0%, #052e2b 45%, #0b1f2f 100%)'
+          : 'repeating-linear-gradient(0deg, rgba(148,163,184,0.1) 0px, rgba(148,163,184,0.1) 1px, transparent 1px, transparent 24px), repeating-linear-gradient(90deg, rgba(148,163,184,0.08) 0px, rgba(148,163,184,0.08) 1px, transparent 1px, transparent 24px), radial-gradient(circle at 12% 15%, rgba(99,102,241,0.22) 0%, transparent 40%), radial-gradient(circle at 86% 12%, rgba(14,165,233,0.22) 0%, transparent 40%), radial-gradient(circle at 80% 84%, rgba(236,72,153,0.16) 0%, transparent 36%), linear-gradient(138deg, #f8fafc 0%, #f3f7ff 46%, #eefcf5 100%)'
+  }), [sharedBackgroundOpacity, darkMode]);
 
   if (!db) return <div className="flex items-center justify-center h-screen bg-slate-50 text-slate-400 text-sm font-mono tracking-widest uppercase">Initializing...</div>;
 
@@ -5138,12 +5291,9 @@ export default function App() {
       <div
         aria-hidden="true"
         className="fixed inset-0 pointer-events-none z-0 transition-opacity duration-500"
-        style={{
-          opacity: sharedBackgroundOpacity,
-          backgroundImage: 'repeating-linear-gradient(0deg, rgba(148,163,184,0.1) 0px, rgba(148,163,184,0.1) 1px, transparent 1px, transparent 24px), repeating-linear-gradient(90deg, rgba(148,163,184,0.08) 0px, rgba(148,163,184,0.08) 1px, transparent 1px, transparent 24px), radial-gradient(circle at 12% 15%, rgba(99,102,241,0.22) 0%, transparent 40%), radial-gradient(circle at 86% 12%, rgba(14,165,233,0.22) 0%, transparent 40%), radial-gradient(circle at 80% 84%, rgba(236,72,153,0.16) 0%, transparent 36%), linear-gradient(138deg, #f8fafc 0%, #f3f7ff 46%, #eefcf5 100%)'
-        }}
+        style={sharedBackgroundStyle}
       />
-      <div aria-hidden="true" className={`ambient-layer transition-opacity duration-700 ${isLandingMode ? 'opacity-95' : 'opacity-75'}`}>
+      <div aria-hidden="true" className={`ambient-layer transition-opacity duration-700 ${isLandingMode ? 'opacity-95' : 'opacity-75'} ${darkMode ? 'ambient-layer--dark' : ''}`}>
         <div className="ambient-dot ambient-dot--a" />
         <div className="ambient-dot ambient-dot--b" />
         <div className="ambient-dot ambient-dot--c" />
@@ -5156,7 +5306,7 @@ export default function App() {
       )}
 
       {/* Header */}
-      <header className={`header-glass fixed top-0 w-full backdrop-blur-xl z-30 border-b transition-all duration-300 ${shouldElevateHeader ? 'header-glass--scrolled' : ''} ${darkMode ? 'bg-[#121a17]/88 border-emerald-200/10 shadow-lg shadow-black/25' : 'bg-[linear-gradient(108deg,rgba(255,255,255,0.78)_0%,rgba(244,252,248,0.84)_52%,rgba(241,247,255,0.8)_100%)] border-white/75 shadow-[0_14px_36px_rgba(15,23,42,0.12)]'}`}>
+      <header className={`header-glass fixed top-0 w-full backdrop-blur-xl z-30 border-b transition-all duration-300 ${shouldElevateHeader ? 'header-glass--scrolled' : ''} ${darkMode ? 'header-glass--dark bg-[#0b1512]/84 border-emerald-200/15 shadow-lg shadow-black/35' : 'bg-[linear-gradient(108deg,rgba(255,255,255,0.78)_0%,rgba(244,252,248,0.84)_52%,rgba(241,247,255,0.8)_100%)] border-white/75 shadow-[0_14px_36px_rgba(15,23,42,0.12)]'}`}>
         <div className="max-w-5xl mx-auto px-3 sm:px-6 h-[calc(4rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)] flex justify-between items-center relative z-10">
           <div
             className="flex items-center gap-3 cursor-pointer group"
@@ -5167,7 +5317,7 @@ export default function App() {
                 <h1 className={`text-xl sm:text-2xl font-black tracking-widest font-serif uppercase leading-none bg-clip-text text-transparent ${darkMode ? 'bg-gradient-to-r from-emerald-50 via-emerald-200 to-lime-200' : 'bg-[linear-gradient(112deg,#0f172a_0%,#047857_34%,#0f766e_66%,#0369a1_100%)] drop-shadow-[0_1px_0_rgba(255,255,255,0.55)]'}`}>
                   HSINRU
                 </h1>
-                <p className="hidden sm:block text-[9px] text-slate-500/90 font-bold tracking-widest uppercase mt-0.5">Grade Tracker</p>
+                <p className={`hidden sm:block text-[9px] font-bold tracking-widest uppercase mt-0.5 ${darkMode ? 'text-slate-300/85' : 'text-slate-500/90'}`}>Grade Tracker</p>
             </div>
           </div>
           <div className="flex items-center gap-1.5 sm:gap-2">
@@ -5181,7 +5331,7 @@ export default function App() {
                       setMode('teacher_login');
                     }
                   })}
-                  className={`btn-sheen shrink-0 px-3 sm:px-4 py-1.5 rounded-full text-[11px] sm:text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : 'text-slate-600 hover:text-slate-800 bg-white/60 border border-white/70 hover:bg-white/85'}`}
+                  className={`btn-sheen shrink-0 px-3 sm:px-4 py-1.5 rounded-full text-[11px] sm:text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : (darkMode ? 'text-slate-200 hover:text-white bg-slate-900/45 border border-emerald-200/20 hover:bg-slate-900/70' : 'text-slate-600 hover:text-slate-800 bg-white/60 border border-white/70 hover:bg-white/85')}`}
                 >
                   {isAuthenticated ? '後台' : '老師'}
                 </button>
@@ -5191,7 +5341,7 @@ export default function App() {
                     setSearchError('');
                     setMode('parent');
                   })}
-                  className={`btn-sheen shrink-0 px-3 sm:px-4 py-1.5 rounded-full text-[11px] sm:text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : 'text-slate-600 hover:text-slate-800 bg-white/60 border border-white/70 hover:bg-white/85'}`}
+                  className={`btn-sheen shrink-0 px-3 sm:px-4 py-1.5 rounded-full text-[11px] sm:text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : (darkMode ? 'text-slate-200 hover:text-white bg-slate-900/45 border border-emerald-200/20 hover:bg-slate-900/70' : 'text-slate-600 hover:text-slate-800 bg-white/60 border border-white/70 hover:bg-white/85')}`}
                 >
                   家長
                 </button>
@@ -5207,11 +5357,11 @@ export default function App() {
           <div className="h-[calc(100dvh-4rem-env(safe-area-inset-top))] min-h-[calc(100svh-4rem-env(safe-area-inset-top))] flex items-center justify-center">
             <div className="w-full max-w-4xl h-full">
               <div className="relative z-10 h-full flex flex-col items-center justify-center px-[clamp(0.9rem,3.6vw,1.55rem)] py-[clamp(0.8rem,2.8vh,1.45rem)]">
-                <div className="hero-reveal px-4 py-1.5 rounded-full mb-[clamp(0.55rem,1.9vh,1.25rem)] border border-white/95 bg-white/92 text-[10px] tracking-[0.22em] font-black uppercase text-slate-600 shadow-[0_8px_24px_rgba(15,23,42,0.08)]" style={{ '--stagger-index': 0 }}>
+                <div className={`hero-reveal px-4 py-1.5 rounded-full mb-[clamp(0.55rem,1.9vh,1.25rem)] border text-[10px] tracking-[0.22em] font-black uppercase shadow-[0_8px_24px_rgba(15,23,42,0.08)] ${darkMode ? 'border-emerald-200/30 bg-[#071a16]/82 text-emerald-100 shadow-black/25' : 'border-white/95 bg-white/92 text-slate-600'}`} style={{ '--stagger-index': 0 }}>
                     HSINRU CENTRAL
                 </div>
-                <h2 className="hero-reveal w-full px-[clamp(0.2rem,1vw,0.7rem)] whitespace-nowrap text-[clamp(1.2rem,5.35vw,2.9rem)] sm:text-[clamp(1.8rem,4.4vw,2.9rem)] font-black font-serif tracking-[-0.016em] sm:tracking-tight mb-[clamp(0.35rem,1.2vh,0.9rem)] text-center leading-[1.18] bg-clip-text text-transparent bg-[linear-gradient(104deg,#047857_0%,#0f766e_24%,#0891b2_56%,#1d4ed8_100%)] drop-shadow-[0_1px_0_rgba(255,255,255,0.45)]" style={{ '--stagger-index': 1 }}>Make Progress Visible</h2>
-                <p className="hero-reveal text-[clamp(10px,2.35vw,11px)] font-bold tracking-[0.2em] mb-[clamp(0.7rem,2.4vh,1.6rem)] uppercase text-slate-600" style={{ '--stagger-index': 2 }}>2025-2026 Learning Journey</p>
+                <h2 className={`hero-reveal w-full px-[clamp(0.2rem,1vw,0.7rem)] whitespace-nowrap text-[clamp(1.2rem,5.35vw,2.9rem)] sm:text-[clamp(1.8rem,4.4vw,2.9rem)] font-black font-serif tracking-[-0.016em] sm:tracking-tight mb-[clamp(0.35rem,1.2vh,0.9rem)] text-center leading-[1.18] bg-clip-text text-transparent ${darkMode ? 'bg-[linear-gradient(104deg,#a7f3d0_0%,#34d399_26%,#22d3ee_58%,#60a5fa_100%)] drop-shadow-[0_2px_10px_rgba(16,185,129,0.24)]' : 'bg-[linear-gradient(104deg,#047857_0%,#0f766e_24%,#0891b2_56%,#1d4ed8_100%)] drop-shadow-[0_1px_0_rgba(255,255,255,0.45)]'}`} style={{ '--stagger-index': 1 }}>Make Progress Visible</h2>
+                <p className={`hero-reveal text-[clamp(10px,2.35vw,11px)] font-bold tracking-[0.2em] mb-[clamp(0.7rem,2.4vh,1.6rem)] uppercase ${darkMode ? 'text-slate-300' : 'text-slate-600'}`} style={{ '--stagger-index': 2 }}>2025-2026 Learning Journey</p>
                 <div className="hero-reveal" style={{ '--stagger-index': 3 }}>
                   <ExamCountdown isDarkMode={darkMode} />
                 </div>
@@ -5227,11 +5377,11 @@ export default function App() {
                           setMode('teacher_login');
                         }
                       })}
-                      className="btn-sheen group w-full p-5 rounded-[1.45rem] border flex items-center gap-4 transition-all duration-200 backdrop-blur-xl bg-white/94 border-white/95 shadow-[0_14px_32px_rgba(15,23,42,0.09)] hover:bg-white hover:border-sky-200/90 hover:-translate-y-0.5"
+                      className={`btn-sheen group w-full p-5 rounded-[1.45rem] border flex items-center gap-4 transition-all duration-200 backdrop-blur-xl ${darkMode ? 'bg-[#081c18]/82 border-emerald-200/22 shadow-[0_14px_32px_rgba(2,6,23,0.45)] hover:bg-[#0c2620]/90 hover:border-emerald-300/40 hover:-translate-y-0.5' : 'bg-white/94 border-white/95 shadow-[0_14px_32px_rgba(15,23,42,0.09)] hover:bg-white hover:border-sky-200/90 hover:-translate-y-0.5'}`}
                     >
-                      <div className="w-11 h-11 rounded-2xl flex items-center justify-center transition-colors bg-gradient-to-br from-indigo-100 to-sky-100 text-indigo-700"><LayoutDashboard className="w-5 h-5" /></div>
-                      <div className="text-left flex-1"><h3 className="text-base font-black text-slate-800">老師通道</h3><p className="text-[11px] text-slate-500 mt-0.5">管理成績與設定</p></div>
-                      <ChevronRight className="w-4.5 h-4.5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
+                      <div className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-colors ${darkMode ? 'bg-gradient-to-br from-emerald-500/24 to-cyan-400/18 text-emerald-100' : 'bg-gradient-to-br from-indigo-100 to-sky-100 text-indigo-700'}`}><LayoutDashboard className="w-5 h-5" /></div>
+                      <div className="text-left flex-1"><h3 className={`text-base font-black ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>老師通道</h3><p className={`text-[11px] mt-0.5 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>管理成績與設定</p></div>
+                      <ChevronRight className={`w-4.5 h-4.5 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all ${darkMode ? 'text-slate-300' : 'text-slate-400'}`}/>
                    </button>
                    <button
                       onClick={() => runWithBatchDiscardGuard(() => {
@@ -5239,15 +5389,15 @@ export default function App() {
                         setSearchError('');
                         setMode('parent');
                       })}
-                      className="btn-sheen group w-full p-5 rounded-[1.45rem] border flex items-center gap-4 transition-all duration-200 backdrop-blur-xl bg-white/94 border-white/95 shadow-[0_14px_32px_rgba(15,23,42,0.09)] hover:bg-white hover:border-emerald-200/90 hover:-translate-y-0.5"
+                      className={`btn-sheen group w-full p-5 rounded-[1.45rem] border flex items-center gap-4 transition-all duration-200 backdrop-blur-xl ${darkMode ? 'bg-[#081c18]/82 border-emerald-200/22 shadow-[0_14px_32px_rgba(2,6,23,0.45)] hover:bg-[#0c2620]/90 hover:border-cyan-300/45 hover:-translate-y-0.5' : 'bg-white/94 border-white/95 shadow-[0_14px_32px_rgba(15,23,42,0.09)] hover:bg-white hover:border-emerald-200/90 hover:-translate-y-0.5'}`}
                     >
-                      <div className="w-11 h-11 rounded-2xl flex items-center justify-center transition-colors bg-gradient-to-br from-sky-100 to-emerald-100 text-sky-700"><BarChart3 className="w-5 h-5" /></div>
-                      <div className="text-left flex-1"><h3 className="text-base font-black text-slate-800">家長查詢</h3><p className="text-[11px] text-slate-500 mt-0.5">輸入學號或姓名查看分析</p></div>
-                      <ChevronRight className="w-4.5 h-4.5 text-slate-400 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all"/>
+                      <div className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-colors ${darkMode ? 'bg-gradient-to-br from-cyan-500/24 to-emerald-400/20 text-cyan-100' : 'bg-gradient-to-br from-sky-100 to-emerald-100 text-sky-700'}`}><BarChart3 className="w-5 h-5" /></div>
+                      <div className="text-left flex-1"><h3 className={`text-base font-black ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>家長查詢</h3><p className={`text-[11px] mt-0.5 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>輸入學號或姓名查看分析</p></div>
+                      <ChevronRight className={`w-4.5 h-4.5 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all ${darkMode ? 'text-slate-300' : 'text-slate-400'}`}/>
                    </button>
                 </div>
 
-                <p className="hero-reveal mt-[clamp(0.9rem,3vh,1.8rem)] text-[11px] font-serif font-semibold tracking-[0.14em] text-slate-500/90" style={{ '--stagger-index': 5 }}>
+                <p className={`hero-reveal mt-[clamp(0.9rem,3vh,1.8rem)] text-[11px] font-serif font-semibold tracking-[0.14em] ${darkMode ? 'text-slate-300/90' : 'text-slate-500/90'}`} style={{ '--stagger-index': 5 }}>
                   Created by CH Fan
                 </p>
               </div>

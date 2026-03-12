@@ -1183,6 +1183,7 @@ export default function App() {
   const queryPendingEventsRef = useRef([]);
   const queryFlushTimerRef = useRef(null);
   const queryFlushInFlightRef = useRef(false);
+  const shouldSnapTeacherEntryRef = useRef(false);
   const deferredQueryMonitorKeyword = useDeferredValue(queryMonitorKeyword);
     
   const [loading, setLoading] = useState(false);
@@ -1367,6 +1368,7 @@ export default function App() {
       if (!shouldCompute || allStudentsData.length === 0) return;
 
       let rafId = null;
+      const debounceMs = allStudentsData.length > 220 ? 520 : allStudentsData.length > 140 ? 360 : 220;
       const timer = setTimeout(() => {
           const context = buildProbabilityContext(allStudentsData, availableDates, getTestDateID);
           const {
@@ -1401,7 +1403,7 @@ export default function App() {
                   setAdmissionProbabilities(probs);
               });
           });
-      }, 500);
+      }, debounceMs);
 
       return () => {
           clearTimeout(timer);
@@ -1522,12 +1524,55 @@ export default function App() {
   }, [orderedWeekendIds, batchDate, getTestDateID]);
 
   useEffect(() => {
-      if (mode !== 'teacher' || !orderedWeekendIds.length) return;
+      if (mode !== 'teacher') return;
+      shouldSnapTeacherEntryRef.current = true;
+  }, [mode]);
+
+  useEffect(() => {
+      if (mode !== 'teacher' || !shouldSnapTeacherEntryRef.current || !orderedWeekendIds.length) return;
       const latestWeekendID = orderedWeekendIds[orderedWeekendIds.length - 1];
-      if (!batchDate) {
-          setBatchDate(latestWeekendID);
+      setTeacherViewMode('batch');
+      setBatchDate(latestWeekendID);
+      shouldSnapTeacherEntryRef.current = false;
+  }, [mode, orderedWeekendIds]);
+
+  useEffect(() => {
+      if (mode !== 'teacher' || loading) return;
+      if (!availableDates.length || !allStudentsData.length) return;
+
+      const hasScoreValue = (value) => {
+          if (value === '' || value === null || value === undefined) return false;
+          if (typeof value === 'string') return value.trim() !== '';
+          return true;
+      };
+
+      const usedWeekendIds = new Set();
+      allStudentsData.forEach((student) => {
+          const weekendEntries = buildWeekendGradeEntryMap(student.grades, getTestDateID);
+          Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
+              const grade = entry?.grade || {};
+              const hasAnyScore = ['chi', 'eng', 'math', 'total'].some((key) => hasScoreValue(grade[key]));
+              if (hasAnyScore) usedWeekendIds.add(weekendID);
+          });
+      });
+
+      if (!usedWeekendIds.size) return;
+
+      const prunedDates = availableDates.filter((date) => usedWeekendIds.has(getTestDateID(date)));
+      const nextDates = sanitizeDateList(prunedDates);
+      if (!nextDates.length || nextDates.length === availableDates.length) return;
+
+      setAvailableDates(nextDates);
+      writeLocalCache(LOCAL_CACHE_KEYS.dates, nextDates);
+      if (db && user) {
+          setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: nextDates }, { merge: true })
+              .catch((err) => console.error('Auto prune empty dates error:', err));
       }
-  }, [mode, orderedWeekendIds, batchDate]);
+      const removedCount = availableDates.length - nextDates.length;
+      setStatusMsg(`已自動刪除 ${removedCount} 個無學生資料日期`);
+      const timer = setTimeout(() => setStatusMsg(''), 2200);
+      return () => clearTimeout(timer);
+  }, [mode, loading, availableDates, allStudentsData, getTestDateID, user]);
 
   const hasPendingBatchChanges = mode === 'teacher' && teacherViewMode === 'batch' && isBatchDirty;
 
@@ -4451,6 +4496,11 @@ export default function App() {
           backgroundImage: 'repeating-linear-gradient(0deg, rgba(148,163,184,0.1) 0px, rgba(148,163,184,0.1) 1px, transparent 1px, transparent 24px), repeating-linear-gradient(90deg, rgba(148,163,184,0.08) 0px, rgba(148,163,184,0.08) 1px, transparent 1px, transparent 24px), radial-gradient(circle at 12% 15%, rgba(99,102,241,0.22) 0%, transparent 40%), radial-gradient(circle at 86% 12%, rgba(14,165,233,0.22) 0%, transparent 40%), radial-gradient(circle at 80% 84%, rgba(236,72,153,0.16) 0%, transparent 36%), linear-gradient(138deg, #f8fafc 0%, #f3f7ff 46%, #eefcf5 100%)'
         }}
       />
+      <div aria-hidden="true" className={`ambient-layer transition-opacity duration-700 ${isLandingMode ? 'opacity-95' : 'opacity-75'}`}>
+        <div className="ambient-dot ambient-dot--a" />
+        <div className="ambient-dot ambient-dot--b" />
+        <div className="ambient-dot ambient-dot--c" />
+      </div>
 
       {!isConnectionReady && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-40 rounded-full px-3 py-1.5 text-[10px] font-black tracking-wide border border-white/90 bg-white/95 text-slate-600 shadow-lg">
@@ -4609,7 +4659,7 @@ export default function App() {
                     </div>
 
                     <div className={`mt-3.5 rounded-2xl border p-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-white/85 border-slate-200/80'}`}>
-                        <div className="overflow-x-auto pb-1">
+                        <div className="overflow-x-auto pb-1 snap-x snap-mandatory scroll-smooth [scrollbar-width:none] [-ms-overflow-style:none]">
                             <div className={`inline-flex gap-2.5 min-w-full ${prefersReducedMotion ? '' : 'list-fade-in'}`}>
                                 {teacherDateCards.map((item) => {
                                     const { weekendID, label, phaseId, phaseLabel, isLatest, isSelected } = item;
@@ -4626,7 +4676,7 @@ export default function App() {
                                             onClick={() => {
                                                 if (teacherViewMode === 'batch' && weekendID !== selectedBatchWeekendID) setBatchDate(weekendID);
                                             }}
-                                            className={`btn-sheen text-left min-w-[126px] rounded-2xl border px-3 py-2.5 transition-all ${darkMode ? 'bg-slate-800/88 border-white/10 hover:border-emerald-300/30' : 'bg-white border-slate-200/80 shadow-[0_8px_18px_rgba(15,23,42,0.06)] hover:border-emerald-200'} ${isSelected ? (darkMode ? 'ring-1 ring-emerald-300/40 border-emerald-300/40' : 'ring-2 ring-emerald-100 border-emerald-300/60') : ''}`}
+                                            className={`btn-sheen snap-start shrink-0 text-left min-w-[126px] rounded-2xl border px-3 py-2.5 transition-all will-change-transform ${darkMode ? 'bg-slate-800/88 border-white/10 hover:border-emerald-300/30' : 'bg-white border-slate-200/80 shadow-[0_8px_18px_rgba(15,23,42,0.06)] hover:border-emerald-200'} ${isSelected ? (darkMode ? 'ring-1 ring-emerald-300/40 border-emerald-300/40 scale-[1.01]' : 'ring-2 ring-emerald-100 border-emerald-300/60 scale-[1.01]') : ''}`}
                                         >
                                             <div className="flex items-start justify-between gap-2">
                                                 <span className={`text-[9px] font-black px-2 py-0.5 rounded-full border tracking-wide ${phaseTagClass}`}>{phaseLabel}</span>
@@ -4793,6 +4843,7 @@ export default function App() {
                             ))}
                         </div>
 
+                        <div key={`batch-tab-${batchInsightTab}-${selectedBatchWeekendID || 'none'}-${teacherClassFilter}`} className={prefersReducedMotion ? '' : 'tab-panel-enter'}>
                         {batchInsightTab === 'grades' && (
                             <div
                                 key={`batch-grades-${selectedBatchWeekendID || 'none'}-${teacherClassFilter}-${sortByPR ? 'pr' : 'none'}-${sortByProb ? 'prob' : 'none'}`}
@@ -5378,11 +5429,18 @@ export default function App() {
                                 </div>
                             </div>
                         )}
+                        </div>
                     </div>
                 )}
             </div>
             {/* ... other modals ... */}
-            {statusMsg && <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/90 text-white px-5 py-3 rounded-full flex items-center text-xs font-bold shadow-2xl backdrop-blur-md z-50 border border-white/10"><Check className="w-4 h-4 mr-2 text-blue-400" /> {statusMsg}</div>}
+            {statusMsg && (
+              <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50">
+                <div className="status-toast-enter bg-slate-900/90 text-white px-5 py-3 rounded-full flex items-center text-xs font-bold shadow-2xl backdrop-blur-md border border-white/10">
+                  <Check className="w-4 h-4 mr-2 text-blue-400" /> {statusMsg}
+                </div>
+              </div>
+            )}
               
             {/* ... Single View ... */}
             {teacherViewMode === 'single' && currentStudentId && !loading && (
@@ -5530,19 +5588,21 @@ export default function App() {
                       })}
                   </div>
 
-                  {parentPhaseData.length > 0 ? (
-                    <Suspense fallback={<ChartFallback heightClass="h-72" />}>
-                      {activeTab === 'total' && <SingleSubjectChart data={parentPhaseData} subjectKey="total" avgKey="avgTotal" lineColor={COLORS.total.hex} title="總分" domain={[0, 300]} isDarkMode={darkMode} />}
-                      {activeTab === 'chi' && <SingleSubjectChart data={parentPhaseData} subjectKey="chi" avgKey="avgChi" lineColor={COLORS.chi.hex} title="國文" domain={[0, 100]} isDarkMode={darkMode} />}
-                      {activeTab === 'eng' && <SingleSubjectChart data={parentPhaseData} subjectKey="eng" avgKey="avgEng" lineColor={COLORS.eng.hex} title="英文" domain={activePhase === 'mock' ? [0, 80] : [0, 100]} isDarkMode={darkMode} />}
-                      {activeTab === 'math' && <SingleSubjectChart data={parentPhaseData} subjectKey="math" avgKey="avgMath" lineColor={COLORS.math.hex} title="數學" domain={activePhase === 'mock' ? [0, 120] : [0, 100]} isDarkMode={darkMode} />}
-                      <ParentAbilityRadar data={parentRadarData} maxValue={parentRadarMax} isDarkMode={darkMode} recordCount={parentPhaseData.length} phaseName={activePhaseLabel} />
-                    </Suspense>
-                  ) : (
-                    <div className={`rounded-2xl border px-4 py-8 text-center text-xs font-bold ${darkMode ? 'bg-white/5 border-white/10 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
-                      目前「{activePhaseLabel || '此階段'}」暫無資料，請切換其他階段查看
-                    </div>
-                  )}
+                  <div key={`parent-tab-${activePhase}-${activeTab}`} className={prefersReducedMotion ? '' : 'tab-panel-enter'}>
+                    {parentPhaseData.length > 0 ? (
+                      <Suspense fallback={<ChartFallback heightClass="h-72" />}>
+                        {activeTab === 'total' && <SingleSubjectChart data={parentPhaseData} subjectKey="total" avgKey="avgTotal" lineColor={COLORS.total.hex} title="總分" domain={[0, 300]} isDarkMode={darkMode} />}
+                        {activeTab === 'chi' && <SingleSubjectChart data={parentPhaseData} subjectKey="chi" avgKey="avgChi" lineColor={COLORS.chi.hex} title="國文" domain={[0, 100]} isDarkMode={darkMode} />}
+                        {activeTab === 'eng' && <SingleSubjectChart data={parentPhaseData} subjectKey="eng" avgKey="avgEng" lineColor={COLORS.eng.hex} title="英文" domain={activePhase === 'mock' ? [0, 80] : [0, 100]} isDarkMode={darkMode} />}
+                        {activeTab === 'math' && <SingleSubjectChart data={parentPhaseData} subjectKey="math" avgKey="avgMath" lineColor={COLORS.math.hex} title="數學" domain={activePhase === 'mock' ? [0, 120] : [0, 100]} isDarkMode={darkMode} />}
+                        <ParentAbilityRadar data={parentRadarData} maxValue={parentRadarMax} isDarkMode={darkMode} recordCount={parentPhaseData.length} phaseName={activePhaseLabel} />
+                      </Suspense>
+                    ) : (
+                      <div className={`rounded-2xl border px-4 py-8 text-center text-xs font-bold ${darkMode ? 'bg-white/5 border-white/10 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>
+                        目前「{activePhaseLabel || '此階段'}」暫無資料，請切換其他階段查看
+                      </div>
+                    )}
+                  </div>
                 </div>
                   
                 <div className={`p-6 border-t backdrop-blur-md ${darkMode ? 'bg-[#101a15] border-emerald-200/10' : 'bg-white/74 border-white/75 ring-1 ring-white/45'}`}>

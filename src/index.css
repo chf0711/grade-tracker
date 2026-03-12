@@ -53,6 +53,32 @@
   }
 }
 
+@keyframes gt-ambient-drift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.32;
+  }
+  50% {
+    transform: translate3d(1.6%, -1.8%, 0) scale(1.06);
+    opacity: 0.46;
+  }
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.32;
+  }
+}
+
+@keyframes gt-toast-pop {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
 .header-glass {
   transition:
     box-shadow var(--motion-medium) var(--ease-standard),
@@ -83,6 +109,10 @@
 
 .panel-fade-in {
   animation: gt-fade-up var(--motion-medium) var(--ease-standard);
+}
+
+.tab-panel-enter {
+  animation: gt-fade-up var(--motion-fast) var(--ease-standard);
 }
 
 .modal-backdrop-animate {
@@ -158,10 +188,57 @@
   animation: gt-skeleton-shimmer 1200ms linear infinite;
 }
 
+.ambient-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+
+.ambient-dot {
+  position: absolute;
+  border-radius: 999px;
+  filter: blur(60px);
+  animation: gt-ambient-drift 18s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.ambient-dot--a {
+  width: 34vmax;
+  height: 34vmax;
+  top: -12vmax;
+  left: -10vmax;
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.26) 0%, rgba(16, 185, 129, 0) 70%);
+}
+
+.ambient-dot--b {
+  width: 28vmax;
+  height: 28vmax;
+  right: -9vmax;
+  top: 22%;
+  animation-delay: 4s;
+  background: radial-gradient(circle, rgba(14, 165, 233, 0.2) 0%, rgba(14, 165, 233, 0) 72%);
+}
+
+.ambient-dot--c {
+  width: 30vmax;
+  height: 30vmax;
+  bottom: -12vmax;
+  left: 38%;
+  animation-delay: 8s;
+  background: radial-gradient(circle, rgba(21, 128, 61, 0.18) 0%, rgba(21, 128, 61, 0) 74%);
+}
+
+.status-toast-enter {
+  animation: gt-toast-pop var(--motion-fast) var(--ease-spring);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hero-reveal,
   .list-fade-in,
   .panel-fade-in,
+  .tab-panel-enter,
   .modal-backdrop-animate,
   .modal-panel-animate {
     animation: none !important;
@@ -178,6 +255,11 @@
   }
 
   .brand-skeleton__shine {
+    animation: none !important;
+  }
+
+  .ambient-dot,
+  .status-toast-enter {
     animation: none !important;
   }
 }

@@ -1487,14 +1487,17 @@ export default function App() {
       setLocalSnapshots(cachedSnapshots);
   }, []);
 
-  // --- OPTIMIZATION: Debounced Calculation Effect ---
+  // --- OPTIMIZATION: Debounced + chunked probability calculation to keep UI responsive ---
   useEffect(() => {
       const shouldCompute = mode === 'teacher' && teacherViewMode === 'batch';
       if (!shouldCompute || allStudentsData.length === 0) return;
 
       let rafId = null;
-      const debounceMs = allStudentsData.length > 220 ? 520 : allStudentsData.length > 140 ? 360 : 220;
+      let cancelled = false;
+      const debounceMs = allStudentsData.length > 260 ? 680 : allStudentsData.length > 150 ? 480 : 300;
       const timer = setTimeout(() => {
+          if (cancelled) return;
+
           const context = buildProbabilityContext(allStudentsData, availableDates, getTestDateID);
           const {
               scoresByDate,
@@ -1506,31 +1509,47 @@ export default function App() {
           } = context;
 
           const studentGradeMaps = studentGradeMapsByStudentId;
-
+          const students = allStudentsData;
           const probs = {};
-          
-          // 3. Calculate probs using fast lookups
-          allStudentsData.forEach((s) => {
-              probs[s.id] = calculateProbLogic(
-                  s,
-                  scoresByDate,
-                  mathScoresByDate,
-                  studentGradeMaps,
-                  normalizedDates,
-                  probabilityProfiles,
-                  totalPRLookupByDate,
-                  mathPRLookupByDate
-              );
-          });
-          
-          rafId = requestAnimationFrame(() => {
-              startTransition(() => {
-                  setAdmissionProbabilities(probs);
+          let index = 0;
+          const chunkSize = students.length > 320 ? 28 : students.length > 200 ? 44 : 72;
+
+          const processChunk = () => {
+              if (cancelled) return;
+              const end = Math.min(index + chunkSize, students.length);
+              while (index < end) {
+                  const student = students[index];
+                  probs[student.id] = calculateProbLogic(
+                      student,
+                      scoresByDate,
+                      mathScoresByDate,
+                      studentGradeMaps,
+                      normalizedDates,
+                      probabilityProfiles,
+                      totalPRLookupByDate,
+                      mathPRLookupByDate
+                  );
+                  index += 1;
+              }
+
+              if (index < students.length) {
+                  rafId = requestAnimationFrame(processChunk);
+                  return;
+              }
+
+              rafId = requestAnimationFrame(() => {
+                  if (cancelled) return;
+                  startTransition(() => {
+                      setAdmissionProbabilities(probs);
+                  });
               });
-          });
+          };
+
+          processChunk();
       }, debounceMs);
 
       return () => {
+          cancelled = true;
           clearTimeout(timer);
           if (rafId) cancelAnimationFrame(rafId);
       };
@@ -4768,6 +4787,20 @@ export default function App() {
   }, [queryStatsLastResetAt]);
 
   const dataQualitySummary = useMemo(() => {
+      if (!shouldBuildQueryInsights) {
+          return {
+              totalStudents: 0,
+              missingNameCount: 0,
+              duplicateNameCount: 0,
+              invalidDateKeyCount: 0,
+              outOfRangeScoreCount: 0,
+              invalidClassCount: 0,
+              orphanDateCount: 0,
+              emptyGradeStudentCount: 0,
+              issueCount: 0
+          };
+      }
+
       const validClassSet = new Set(CLASS_DEFS.map((item) => item.id));
       const duplicateNameMap = {};
       const usedWeekendIds = new Set();
@@ -4846,7 +4879,7 @@ export default function App() {
           emptyGradeStudentCount,
           issueCount
       };
-  }, [allStudentsData, availableDates, getTestDateID]);
+  }, [allStudentsData, availableDates, getTestDateID, shouldBuildQueryInsights]);
 
   const operationLogPreview = useMemo(
       () => operationLogs.slice(0, 36),
@@ -5032,7 +5065,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className={`${isLandingMode ? 'pt-[calc(4rem+env(safe-area-inset-top))]' : 'pt-[calc(7rem+env(safe-area-inset-top))]'} px-4 max-w-5xl mx-auto relative z-10`}>
+      <main className={`${isLandingMode ? 'pt-[calc(4rem+env(safe-area-inset-top))]' : 'pt-[calc(7rem+env(safe-area-inset-top))]'} px-4 max-w-5xl mx-auto relative`}>
         {mode === 'landing' && (
           <div className="h-[calc(100dvh-4rem-env(safe-area-inset-top))] min-h-[calc(100svh-4rem-env(safe-area-inset-top))] flex items-center justify-center">
             <div className="w-full max-w-4xl h-full">
@@ -5325,6 +5358,7 @@ export default function App() {
                             <div
                                 key={`batch-grades-${selectedBatchWeekendID || 'none'}-${teacherClassFilter}-${sortByPR ? 'pr' : 'none'}-${sortByProb ? 'prob' : 'none'}`}
                                 className={`overflow-x-auto rounded-xl border shadow-inner ${prefersReducedMotion ? '' : 'list-fade-in'} ${darkMode ? 'border-white/5 bg-[#020617]/30' : 'border-slate-200 bg-white'}`}
+                                style={{ contentVisibility: 'auto', containIntrinsicSize: '540px' }}
                             >
                                 <table className="w-full text-sm text-left min-w-[660px] table-fixed">
                                     <colgroup>
@@ -5733,7 +5767,7 @@ export default function App() {
                                 </div>
 
                                 <div className="grid grid-cols-1 lg:grid-cols-[1.34fr_0.86fr] gap-2">
-                                    <div className={`rounded-xl border overflow-hidden ${darkMode ? 'border-white/10' : 'border-slate-200'}`}>
+                                    <div className={`rounded-xl border overflow-hidden ${darkMode ? 'border-white/10' : 'border-slate-200'}`} style={{ contentVisibility: 'auto', containIntrinsicSize: '420px' }}>
                                         <div className={`grid grid-cols-[5.6rem_1fr_3.6rem_6rem_4.2rem] px-2.5 py-1.5 text-[10px] font-bold tracking-wide ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>
                                             <span className="text-center">學號</span>
                                             <span className="text-center">姓名</span>
@@ -5876,7 +5910,7 @@ export default function App() {
                                     </div>
                                 </div>
 
-                                <div className={`rounded-xl border overflow-hidden ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
+                                <div className={`rounded-xl border overflow-hidden ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`} style={{ contentVisibility: 'auto', containIntrinsicSize: '420px' }}>
                                     <div className={`px-2.5 py-1.5 text-[10px] font-bold tracking-wide uppercase ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>每日查詢名單（由新到舊）</div>
                                     <div className="max-h-[18rem] overflow-y-auto">
                                         {queryEventsByDayFiltered.map((day) => (

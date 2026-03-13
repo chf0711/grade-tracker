@@ -1087,7 +1087,10 @@ export default function App() {
       cacheMiss: 0,
       durations: []
   });
+  const deferredBatchInsightTab = useDeferredValue(batchInsightTab);
   const deferredQueryMonitorKeyword = useDeferredValue(queryMonitorKeyword);
+  const deferredQueryStatsById = useDeferredValue(queryStatsById);
+  const deferredQueryEvents = useDeferredValue(queryEvents);
     
   const [loading, setLoading] = useState(false);
   const [searchId, setSearchId] = useState('');
@@ -4291,19 +4294,25 @@ export default function App() {
   }, [batchRowsForDisplay, batchRiskAlerts]);
 
   const shouldBuildQueryInsights =
-      mode === 'teacher' && teacherViewMode === 'batch' && batchInsightTab === 'query';
+      mode === 'teacher' && teacherViewMode === 'batch' && deferredBatchInsightTab === 'query';
+  const isQueryInsightsPending =
+      mode === 'teacher'
+      && teacherViewMode === 'batch'
+      && batchInsightTab === 'query'
+      && !shouldBuildQueryInsights;
 
   const studentNameById = useMemo(() => {
+      if (!shouldBuildQueryInsights) return {};
       const map = {};
-      allStudentsData.forEach((student) => {
+      deferredStudentsForDerived.forEach((student) => {
           map[student.id] = student.name || '';
       });
       return map;
-  }, [allStudentsData]);
+  }, [deferredStudentsForDerived, shouldBuildQueryInsights]);
 
   const queryEventTimeline = useMemo(() => {
       if (!shouldBuildQueryInsights) return [];
-      return queryEvents
+      return deferredQueryEvents
           .map((event) => {
               const ts = Number.isFinite(event?.ts) ? event.ts : new Date(event?.at).getTime();
               if (Number.isNaN(ts)) return null;
@@ -4321,7 +4330,7 @@ export default function App() {
           })
           .filter(Boolean)
           .sort((a, b) => a.ts - b.ts);
-  }, [queryEvents, studentNameById, shouldBuildQueryInsights]);
+  }, [deferredQueryEvents, studentNameById, shouldBuildQueryInsights]);
 
   const queryEventsByDay = useMemo(() => {
       if (!shouldBuildQueryInsights) return [];
@@ -4347,7 +4356,7 @@ export default function App() {
           latestTsById[event.id] = event.ts;
       });
 
-      return Object.entries(queryStatsById)
+      return Object.entries(deferredQueryStatsById)
           .map(([id, count]) => {
               const latestTs = latestTsById[id] || 0;
               const latestAtLabel = latestTs
@@ -4365,7 +4374,7 @@ export default function App() {
               if (b.count !== a.count) return b.count - a.count;
               return b.latestTs - a.latestTs;
           });
-  }, [queryStatsById, studentNameById, queryEventTimeline, shouldBuildQueryInsights]);
+  }, [deferredQueryStatsById, studentNameById, queryEventTimeline, shouldBuildQueryInsights]);
 
   const latestQueryTsById = useMemo(() => {
       if (!shouldBuildQueryInsights) return {};
@@ -4380,7 +4389,7 @@ export default function App() {
       if (!shouldBuildQueryInsights) return [];
       const rows = deferredBatchRowsForDisplay.map((row) => {
           const id = String(row.student.id || '').toUpperCase();
-          const count = Number(queryStatsById[id] || 0);
+          const count = Number(deferredQueryStatsById[id] || 0);
           const latestTs = Number(latestQueryTsById[id]) || 0;
           const latestAtLabel = latestTs
               ? formatMonitorDateTimeLabel(latestTs, false)
@@ -4399,7 +4408,7 @@ export default function App() {
           if (b.count !== a.count) return b.count - a.count;
           return b.latestTs - a.latestTs;
       });
-  }, [deferredBatchRowsForDisplay, queryStatsById, latestQueryTsById, shouldBuildQueryInsights]);
+  }, [deferredBatchRowsForDisplay, deferredQueryStatsById, latestQueryTsById, shouldBuildQueryInsights]);
 
   const queryClassStudentIdSet = useMemo(() => {
       if (!shouldBuildQueryInsights) return new Set();
@@ -4761,7 +4770,7 @@ export default function App() {
       let invalidClassCount = 0;
       let emptyGradeStudentCount = 0;
 
-      allStudentsData.forEach((student) => {
+      deferredStudentsForDerived.forEach((student) => {
           const studentId = String(student?.id || '').toUpperCase().trim() || '未填學號';
           const studentName = String(student?.name || '').trim();
           const displayName = studentName || '未命名';
@@ -4809,7 +4818,7 @@ export default function App() {
               SCORE_KEYS.forEach((subject) => {
                   const score = toNumberOrNull(grade?.[subject]);
                   if (score === null) return;
-                  const maxScore = getMaxScore(weekendID, subject, availableDates);
+                  const maxScore = getMaxScore(weekendID, subject, deferredDatesForDerived);
                   if (score < 0 || score > maxScore) {
                       outOfRangeScoreCount += 1;
                       pushDetail('outOfRangeScore', {
@@ -4847,7 +4856,7 @@ export default function App() {
       });
 
       const orphanWeekendIds = new Set();
-      sanitizeDateList(availableDates).forEach((date) => {
+      sanitizeDateList(deferredDatesForDerived).forEach((date) => {
           const weekendID = getTestDateID(date);
           if (!weekendID) return;
           if (usedWeekendIds.has(weekendID)) return;
@@ -4872,7 +4881,7 @@ export default function App() {
 
       return {
           summary: {
-              totalStudents: allStudentsData.length,
+              totalStudents: deferredStudentsForDerived.length,
               missingNameCount,
               duplicateNameCount,
               invalidDateKeyCount,
@@ -4884,7 +4893,7 @@ export default function App() {
           },
           details
       };
-  }, [allStudentsData, availableDates, getTestDateID, shouldBuildQueryInsights]);
+  }, [deferredDatesForDerived, deferredStudentsForDerived, getTestDateID, shouldBuildQueryInsights]);
 
   const dataQualitySummary = dataQualityReport.summary;
   const dataQualityDetails = dataQualityReport.details;
@@ -5660,6 +5669,35 @@ export default function App() {
 
                         {batchInsightTab === 'query' && (
                             <div className={`rounded-2xl border p-3 sm:p-3.5 space-y-2.5 ${darkMode ? 'bg-slate-900/40 border-white/10' : 'bg-white border-slate-200'}`}>
+                                {isQueryInsightsPending ? (
+                                    <div className="space-y-2.5">
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <div className="flex items-center gap-2">
+                                                <Info className={`w-4 h-4 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`} />
+                                                <h4 className={`text-xs font-black tracking-widest uppercase ${darkMode ? 'text-slate-200' : 'text-slate-600'}`}>查詢監控中心</h4>
+                                            </div>
+                                            <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                正在整理監控資料...
+                                            </div>
+                                        </div>
+                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+                                            {Array.from({ length: 3 }).map((_, index) => (
+                                                <div
+                                                  key={`query-shell-${index}`}
+                                                  className={`rounded-xl border px-3 py-3 animate-pulse ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-slate-50'}`}
+                                                >
+                                                    <div className={`h-2.5 w-16 rounded-full ${darkMode ? 'bg-slate-700' : 'bg-slate-200'}`} />
+                                                    <div className={`mt-2 h-5 w-12 rounded-full ${darkMode ? 'bg-slate-800' : 'bg-slate-200'}`} />
+                                                    <div className={`mt-2 h-2.5 w-24 rounded-full ${darkMode ? 'bg-slate-800' : 'bg-slate-100'}`} />
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className={`rounded-xl border px-3 py-8 text-center text-xs font-bold ${darkMode ? 'border-white/10 bg-slate-900/45 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                                            分頁已切換，統計正在背景整理，不會卡住其他操作。
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <>
                                 <div className="flex flex-wrap items-center justify-between gap-1.5">
                                     <div className="flex items-center gap-2">
                                         <Info className={`w-4 h-4 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`} />
@@ -6168,6 +6206,8 @@ export default function App() {
                                         </div>
                                     </div>
                                 </div>
+                                    </>
+                                )}
                             </div>
                         )}
                         </div>

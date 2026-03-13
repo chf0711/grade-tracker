@@ -956,19 +956,46 @@ const ExamCountdown = ({ isDarkMode }) => {
                 const minutes = Math.floor((difference / 1000 / 60) % 60);
                 const seconds = Math.floor((difference / 1000) % 60);
                 setTimeLeft({ days, hours, minutes, seconds });
-            } else {
-                setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+                return true;
             }
+            setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+            return false;
         };
-        calculateTimeLeft();
-        const timer = setInterval(calculateTimeLeft, 1000); 
+
+        const shouldContinue = calculateTimeLeft();
+        if (!shouldContinue) return undefined;
+
+        const timer = setInterval(() => {
+            const keepRunning = calculateTimeLeft();
+            if (!keepRunning) clearInterval(timer);
+        }, 1000);
         return () => clearInterval(timer);
     }, []);
+
+    const isComplete = timeLeft.days === 0 && timeLeft.hours === 0 && timeLeft.minutes === 0 && timeLeft.seconds === 0;
+
+    if (isComplete) {
+        return (
+            <div className={`countdown-complete-enter relative mt-4 overflow-hidden px-5 py-3 rounded-[1.35rem] border backdrop-blur-md shadow-sm ${isDarkMode ? 'bg-emerald-500/12 border-emerald-200/22 text-slate-100 shadow-black/20' : 'bg-white/80 border-white text-slate-700 shadow-slate-200/55'}`}>
+                <div className={`countdown-complete-halo absolute inset-0 pointer-events-none ${isDarkMode ? 'bg-[radial-gradient(circle_at_18%_50%,rgba(52,211,153,0.3),transparent_46%),radial-gradient(circle_at_82%_45%,rgba(34,211,238,0.16),transparent_42%)]' : 'bg-[radial-gradient(circle_at_18%_50%,rgba(16,185,129,0.18),transparent_46%),radial-gradient(circle_at_82%_45%,rgba(14,165,233,0.14),transparent_42%)]'}`} />
+                <div className={`countdown-complete-halo countdown-complete-halo--delay absolute inset-0 pointer-events-none ${isDarkMode ? 'bg-[radial-gradient(circle_at_50%_50%,rgba(167,243,208,0.18),transparent_58%)]' : 'bg-[radial-gradient(circle_at_50%_50%,rgba(236,253,245,0.75),transparent_60%)]'}`} />
+                <div className="relative z-10 flex items-center gap-3">
+                    <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${isDarkMode ? 'bg-emerald-400/14 text-emerald-100 ring-1 ring-emerald-200/20' : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100'}`}>
+                        <Sparkles className="w-4 h-4" />
+                    </div>
+                    <div className="text-left">
+                        <div className={`text-[9px] font-black uppercase tracking-[0.22em] ${isDarkMode ? 'text-emerald-200/80' : 'text-emerald-700/75'}`}>Countdown Complete</div>
+                        <p className={`text-sm sm:text-[15px] font-black tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>This is the moment. Make it count.</p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className={`flex items-center gap-3 mt-4 px-5 py-2 rounded-full border backdrop-blur-md transition-all duration-500 shadow-sm ${isDarkMode ? 'bg-emerald-500/10 border-emerald-200/20 text-slate-100 shadow-black/20' : 'bg-white/74 border-white text-slate-700 shadow-slate-200/50'}`}>
             <Target className={`w-4 h-4 ${isDarkMode ? 'text-cyan-300' : 'text-sky-600'}`} />
-            <div className="flex items-baseline gap-1.5 font-mono text-sm">
+            <div className="flex items-baseline gap-1.5 font-mono text-sm tabular-nums">
                 <span className="font-bold">{timeLeft.days}</span><span className="text-[10px] opacity-50 mr-1">DAYS</span>
                 <span className="font-bold">{String(timeLeft.hours).padStart(2,'0')}</span><span className="opacity-30">:</span>
                 <span className="font-bold">{String(timeLeft.minutes).padStart(2,'0')}</span><span className="opacity-30">:</span>

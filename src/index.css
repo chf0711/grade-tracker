@@ -79,6 +79,36 @@
   }
 }
 
+@keyframes gt-countdown-bloom {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.96);
+  }
+  60% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes gt-countdown-halo {
+  0% {
+    opacity: 0;
+    transform: scale(0.72);
+  }
+  55% {
+    opacity: 0.55;
+    transform: scale(1.06);
+  }
+  100% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+}
+
 .header-glass {
   position: relative;
   isolation: isolate;
@@ -259,6 +289,18 @@
   animation: gt-toast-pop var(--motion-fast) var(--ease-spring);
 }
 
+.countdown-complete-enter {
+  animation: gt-countdown-bloom 720ms var(--ease-spring);
+}
+
+.countdown-complete-halo {
+  animation: gt-countdown-halo 880ms var(--ease-spring);
+}
+
+.countdown-complete-halo--delay {
+  animation-delay: 120ms;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hero-reveal,
   .list-fade-in,
@@ -284,7 +326,10 @@
   }
 
   .ambient-dot,
-  .status-toast-enter {
+  .status-toast-enter,
+  .countdown-complete-enter,
+  .countdown-complete-halo,
+  .countdown-complete-halo--delay {
     animation: none !important;
   }
 }

@@ -1007,7 +1007,7 @@ const ExamCountdown = ({ isDarkMode }) => {
                             <div className={`text-[7px] sm:text-[7.5px] font-black uppercase tracking-[0.3em] ${isDarkMode ? 'text-emerald-200/80' : 'text-[#3f8f80]'}`}>Countdown Complete</div>
                         </div>
                         <p
-                          className={`mt-0.5 text-[13.5px] sm:text-[15.5px] font-[650] tracking-[-0.034em] leading-[1.08] ${isDarkMode ? 'text-white' : 'text-slate-800'}`}
+                          className={`mt-0.5 text-[14.25px] sm:text-[16.25px] font-[650] tracking-[-0.034em] leading-[1.08] ${isDarkMode ? 'text-white' : 'text-slate-800'}`}
                           style={{ textWrap: 'balance' }}
                         >
                             <span>This is the moment.</span>{' '}

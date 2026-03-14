@@ -138,6 +138,19 @@
   }
 }
 
+@keyframes gt-tooltip-float {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0) scale(0.985);
+    filter: blur(4px);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+    filter: blur(0);
+  }
+}
+
 .header-glass {
   position: relative;
   isolation: isolate;
@@ -359,6 +372,8 @@
   backdrop-filter: blur(18px) saturate(160%);
   -webkit-backdrop-filter: blur(18px) saturate(160%);
   overflow: hidden;
+  transform-origin: left bottom;
+  will-change: transform, opacity, filter;
 }
 
 .chart-liquid-tooltip--dark {
@@ -370,19 +385,14 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
+.chart-liquid-tooltip--enter {
+  animation: gt-tooltip-float 180ms var(--ease-spring);
+}
+
 .chart-liquid-tooltip__glow {
   position: absolute;
   inset: 0;
-  background:
-    radial-gradient(circle at 18% 18%, rgba(16, 185, 129, 0.18), transparent 34%),
-    radial-gradient(circle at 82% 12%, rgba(14, 165, 233, 0.16), transparent 32%);
   pointer-events: none;
-}
-
-.chart-liquid-tooltip__glow--dark {
-  background:
-    radial-gradient(circle at 18% 18%, rgba(52, 211, 153, 0.18), transparent 34%),
-    radial-gradient(circle at 82% 12%, rgba(125, 211, 252, 0.14), transparent 32%);
 }
 
 .chart-liquid-legend {
@@ -457,7 +467,8 @@
   .countdown-complete-halo--delay,
   .chart-stage-enter,
   .chart-stage-enter--delay,
-  .chart-stage-enter--late {
+  .chart-stage-enter--late,
+  .chart-liquid-tooltip--enter {
     animation: none !important;
   }
 }

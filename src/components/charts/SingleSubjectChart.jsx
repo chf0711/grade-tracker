@@ -161,6 +161,7 @@ export default function SingleSubjectChart({
   isDarkMode
 }) {
   const pointCount = Array.isArray(data) ? data.length : 0;
+  const isSinglePoint = pointCount === 1;
   const prefersReducedMotion = typeof window !== 'undefined'
     && typeof window.matchMedia === 'function'
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -283,7 +284,7 @@ export default function SingleSubjectChart({
               strokeDasharray="4 5"
               strokeLinecap="round"
               strokeLinejoin="round"
-              dot={false}
+              dot={isSinglePoint ? { r: 4.2, fill: '#94a3b8', stroke: isDarkMode ? '#0f172a' : '#ffffff', strokeWidth: 1.6 } : false}
               activeDot={{ r: 4.5, fill: '#94a3b8', stroke: isDarkMode ? '#0f172a' : '#ffffff', strokeWidth: 1.5 }}
               isAnimationActive={shouldAnimate}
               animationBegin={140}
@@ -317,7 +318,7 @@ export default function SingleSubjectChart({
               strokeWidth={3.2}
               strokeLinecap="round"
               strokeLinejoin="round"
-              dot={shouldShowDots ? { r: dotRadius, fill: isDarkMode ? '#0f172a' : '#ffffff', stroke: lineColor, strokeWidth: dotStrokeWidth } : false}
+              dot={isSinglePoint ? { r: 4.4, fill: isDarkMode ? '#0f172a' : '#ffffff', stroke: lineColor, strokeWidth: 2.2 } : shouldShowDots ? { r: dotRadius, fill: isDarkMode ? '#0f172a' : '#ffffff', stroke: lineColor, strokeWidth: dotStrokeWidth } : false}
               activeDot={(props) => renderActiveDot(props, lineColor, isDarkMode)}
               isAnimationActive={shouldAnimate}
               animationBegin={280}

@@ -63,7 +63,7 @@ const LOCAL_CACHE_KEYS = Object.freeze({
     students: 'grade_tracker_cache_students_v1',
     teacherMessage: 'grade_tracker_cache_teacher_message_v1',
     queryStats: 'grade_tracker_cache_query_stats_v1',
-    parentQueryResults: 'grade_tracker_cache_parent_query_results_v1',
+    parentQueryResults: 'grade_tracker_cache_parent_query_results_v2',
     operationLog: 'grade_tracker_cache_operation_log_v1',
     snapshots: 'grade_tracker_cache_snapshots_v1'
 });
@@ -992,23 +992,23 @@ const ExamCountdown = ({ isDarkMode }) => {
 
     if (isComplete) {
         return (
-            <div className={`countdown-complete-enter relative mt-4 overflow-hidden px-5 sm:px-6 py-3.5 sm:py-4 rounded-[1.55rem] border backdrop-blur-xl ${isDarkMode ? 'bg-emerald-500/12 border-emerald-200/24 text-slate-100 shadow-[0_18px_48px_rgba(2,6,23,0.34)]' : 'bg-white/84 border-white/95 text-slate-700 shadow-[0_18px_46px_rgba(148,163,184,0.26)]'}`}>
+            <div className={`countdown-complete-enter relative mt-4 overflow-hidden px-4.5 sm:px-5.5 py-3 sm:py-3.5 rounded-[1.8rem] border backdrop-blur-xl ${isDarkMode ? 'bg-emerald-500/12 border-emerald-200/24 text-slate-100 shadow-[0_16px_42px_rgba(2,6,23,0.32)]' : 'bg-white/84 border-white/95 text-slate-700 shadow-[0_16px_40px_rgba(148,163,184,0.22)]'}`}>
                 <div className={`countdown-complete-halo absolute inset-0 pointer-events-none ${isDarkMode ? 'bg-[radial-gradient(circle_at_18%_50%,rgba(52,211,153,0.3),transparent_46%),radial-gradient(circle_at_82%_45%,rgba(34,211,238,0.16),transparent_42%)]' : 'bg-[radial-gradient(circle_at_18%_50%,rgba(16,185,129,0.18),transparent_46%),radial-gradient(circle_at_82%_45%,rgba(14,165,233,0.14),transparent_42%)]'}`} />
                 <div className={`countdown-complete-halo countdown-complete-halo--delay absolute inset-0 pointer-events-none ${isDarkMode ? 'bg-[radial-gradient(circle_at_50%_50%,rgba(167,243,208,0.18),transparent_58%)]' : 'bg-[radial-gradient(circle_at_50%_50%,rgba(236,253,245,0.75),transparent_60%)]'}`} />
-                <div className={`absolute inset-x-5 sm:inset-x-6 top-0 h-px ${isDarkMode ? 'bg-gradient-to-r from-transparent via-emerald-100/55 to-transparent' : 'bg-gradient-to-r from-transparent via-white to-transparent'}`} />
-                <div className={`absolute left-5 sm:left-6 right-5 sm:right-6 bottom-0 h-10 pointer-events-none ${isDarkMode ? 'bg-[radial-gradient(circle_at_50%_110%,rgba(45,212,191,0.22),transparent_62%)]' : 'bg-[radial-gradient(circle_at_50%_110%,rgba(186,230,253,0.4),transparent_62%)]'}`} />
-                <div className="relative z-10 flex items-center gap-3.5 sm:gap-4">
-                    <div className={`relative w-10 h-10 rounded-[1.05rem] flex items-center justify-center shrink-0 ${isDarkMode ? 'bg-white/[0.08] text-emerald-100 ring-1 ring-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]' : 'bg-white/88 text-emerald-700 ring-1 ring-slate-200/70 shadow-[0_10px_24px_rgba(226,232,240,0.6)]'}`}>
-                        <div className={`absolute inset-[5px] rounded-[0.85rem] ${isDarkMode ? 'bg-emerald-400/10' : 'bg-emerald-50/90'}`} />
-                        <Sparkles className="relative z-[1] w-4 h-4" />
+                <div className={`absolute inset-x-4.5 sm:inset-x-5.5 top-0 h-px ${isDarkMode ? 'bg-gradient-to-r from-transparent via-emerald-100/55 to-transparent' : 'bg-gradient-to-r from-transparent via-white to-transparent'}`} />
+                <div className={`absolute left-4.5 sm:left-5.5 right-4.5 sm:right-5.5 bottom-0 h-9 pointer-events-none ${isDarkMode ? 'bg-[radial-gradient(circle_at_50%_110%,rgba(45,212,191,0.2),transparent_62%)]' : 'bg-[radial-gradient(circle_at_50%_110%,rgba(186,230,253,0.34),transparent_62%)]'}`} />
+                <div className="relative z-10 flex items-center gap-3 sm:gap-3.5">
+                    <div className={`relative w-8.5 h-8.5 rounded-[999px] flex items-center justify-center shrink-0 ${isDarkMode ? 'bg-white/[0.08] text-emerald-100 ring-1 ring-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]' : 'bg-white/88 text-emerald-700 ring-1 ring-slate-200/70 shadow-[0_8px_18px_rgba(226,232,240,0.5)]'}`}>
+                        <div className={`absolute inset-[4px] rounded-full ${isDarkMode ? 'bg-emerald-400/10' : 'bg-emerald-50/90'}`} />
+                        <Sparkles className="relative z-[1] w-[0.92rem] h-[0.92rem]" />
                     </div>
                     <div className="min-w-0 text-left">
                         <div className="flex items-center gap-2">
-                            <div className={`text-[9px] font-black uppercase tracking-[0.24em] ${isDarkMode ? 'text-emerald-200/80' : 'text-emerald-700/75'}`}>Countdown Complete</div>
-                            <div className={`h-px flex-1 min-w-[2.75rem] ${isDarkMode ? 'bg-gradient-to-r from-emerald-200/28 to-transparent' : 'bg-gradient-to-r from-emerald-300/55 to-transparent'}`} />
+                            <div className={`text-[8px] sm:text-[8.5px] font-black uppercase tracking-[0.28em] ${isDarkMode ? 'text-emerald-200/80' : 'text-[#3f8f80]'}`}>Countdown Complete</div>
+                            <div className={`h-px flex-1 min-w-[2.35rem] ${isDarkMode ? 'bg-gradient-to-r from-emerald-200/28 to-transparent' : 'bg-gradient-to-r from-emerald-300/55 to-transparent'}`} />
                         </div>
                         <p
-                          className={`mt-1 text-[15px] sm:text-[17px] font-semibold tracking-[-0.03em] leading-[1.08] ${isDarkMode ? 'text-white' : 'text-slate-800'}`}
+                          className={`mt-[0.14rem] text-[14px] sm:text-[16px] font-[650] tracking-[-0.038em] leading-[1.02] ${isDarkMode ? 'text-white' : 'text-slate-800'}`}
                           style={{ textWrap: 'balance' }}
                         >
                             <span>This is the moment.</span>{' '}
@@ -3674,6 +3674,11 @@ export default function App() {
             const avgAllData = (classAverages[weekendID] && classAverages[weekendID].all)
                           ? classAverages[weekendID].all
                           : {};
+            const resolveAverageValue = (primaryValue, fallbackValue) => {
+                const primaryNumber = toNumberOrNull(primaryValue);
+                if (primaryNumber !== null) return primaryNumber;
+                return toNumberOrNull(fallbackValue);
+            };
             
             // 決定顯示日期：日A班/日B班顯示週日，其他顯示週六
             let displayDate = weekendID;
@@ -3688,14 +3693,14 @@ export default function App() {
                 chi: parseFloat(weekData.chi)||0, 
                 eng: parseFloat(weekData.eng)||0, 
                 math: parseFloat(weekData.math)||0,
-                avgTotal: parseFloat(avgData.total)||null, 
-                avgChi: parseFloat(avgData.chi)||null, 
-                avgEng: parseFloat(avgData.eng)||null, 
-                avgMath: parseFloat(avgData.math)||null,
-                avgAllTotal: parseFloat(avgAllData.total)||null,
-                avgAllChi: parseFloat(avgAllData.chi)||null,
-                avgAllEng: parseFloat(avgAllData.eng)||null,
-                avgAllMath: parseFloat(avgAllData.math)||null,
+                avgTotal: resolveAverageValue(avgData.total, avgAllData.total), 
+                avgChi: resolveAverageValue(avgData.chi, avgAllData.chi), 
+                avgEng: resolveAverageValue(avgData.eng, avgAllData.eng), 
+                avgMath: resolveAverageValue(avgData.math, avgAllData.math),
+                avgAllTotal: toNumberOrNull(avgAllData.total),
+                avgAllChi: toNumberOrNull(avgAllData.chi),
+                avgAllEng: toNumberOrNull(avgAllData.eng),
+                avgAllMath: toNumberOrNull(avgAllData.math),
                 class: weekClass
             });
           });
@@ -5180,12 +5185,12 @@ export default function App() {
             className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3 cursor-pointer group"
             onClick={() => runWithBatchDiscardGuard(() => setMode('landing'))}
           >
-            <div className={`p-2 rounded-xl transition-transform group-hover:scale-105 duration-300 ${darkMode ? 'bg-emerald-500/10 text-emerald-200 ring-1 ring-emerald-300/35' : 'bg-white/74 text-emerald-700 ring-1 ring-white/90 shadow-sm'}`}><GraduationCap className="h-5 w-5" /></div>
-            <div className="min-w-0">
-                <h1 className={`truncate text-[clamp(0.92rem,4.4vw,1.18rem)] sm:text-2xl font-black tracking-[0.12em] sm:tracking-widest font-serif uppercase leading-none bg-clip-text text-transparent ${darkMode ? 'bg-gradient-to-r from-emerald-50 via-emerald-200 to-lime-200' : 'bg-[linear-gradient(112deg,#0f172a_0%,#047857_34%,#0f766e_66%,#0369a1_100%)] drop-shadow-[0_1px_0_rgba(255,255,255,0.55)]'}`}>
+            <div className={`p-2 rounded-[1.15rem] transition-transform group-hover:scale-105 duration-300 ${darkMode ? 'bg-emerald-500/10 text-emerald-200 ring-1 ring-emerald-300/35' : 'bg-[linear-gradient(145deg,rgba(255,255,255,0.96)_0%,rgba(236,253,245,0.92)_56%,rgba(239,246,255,0.9)_100%)] text-[#0f766e] ring-1 ring-white/95 shadow-[0_10px_24px_rgba(148,163,184,0.16)]'}`}><GraduationCap className="h-5 w-5" /></div>
+            <div className="min-w-0 flex flex-col justify-center -space-y-[0.14rem] sm:-space-y-[0.2rem]">
+                <h1 className={`truncate text-[clamp(0.92rem,4.4vw,1.18rem)] sm:text-2xl font-black tracking-[0.1em] sm:tracking-[0.16em] font-serif uppercase leading-[0.92] bg-clip-text text-transparent ${darkMode ? 'bg-gradient-to-r from-emerald-50 via-emerald-200 to-lime-200' : 'bg-[linear-gradient(112deg,#0f172a_0%,#14532d_26%,#0f766e_58%,#0f4c81_100%)] drop-shadow-[0_1px_0_rgba(255,255,255,0.6)]'}`}>
                   HSINRU
                 </h1>
-                <p className={`truncate block text-[8px] sm:text-[9px] font-bold tracking-[0.16em] sm:tracking-widest uppercase mt-0.5 ${darkMode ? 'text-slate-300/85' : 'text-slate-500/90'}`}>Grade Tracker</p>
+                <p className={`truncate block text-[8px] sm:text-[9px] font-black tracking-[0.2em] sm:tracking-[0.28em] uppercase leading-[1.02] ${darkMode ? 'text-slate-300/85' : 'text-[#64748b]'}`}>Grade Tracker</p>
             </div>
           </div>
           <div className={`ml-2 flex shrink-0 items-center gap-1 sm:gap-1.5 rounded-full border px-1.5 sm:px-2 py-1 backdrop-blur-md ${darkMode ? 'border-white/15 bg-slate-900/35' : 'border-white/80 bg-white/72 shadow-[0_8px_24px_rgba(15,23,42,0.08)] ring-1 ring-white/45'}`}>
@@ -6414,7 +6419,7 @@ export default function App() {
 
         {/* ... Parent View ... */}
         {mode === 'parent' && (
-          <div className={`${viewData ? 'max-w-5xl pt-3 sm:pt-4' : 'max-w-md pt-6'} mx-auto space-y-6 transition-all duration-300`}> 
+          <div className={`${viewData ? 'max-w-5xl pt-1 sm:pt-2' : 'max-w-md pt-6'} mx-auto space-y-6 transition-all duration-300`}> 
             {!viewData && (
             <div className={`panel-fade-in backdrop-blur-[26px] p-8 rounded-[2.5rem] shadow-2xl border text-center relative overflow-hidden ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/15 shadow-black/30' : 'bg-white/78 border-white/85 ring-1 ring-white/55 shadow-[0_24px_55px_rgba(15,23,42,0.12)]'}`}>
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-sky-500 via-emerald-500 to-indigo-500"></div>

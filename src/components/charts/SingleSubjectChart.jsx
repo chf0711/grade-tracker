@@ -61,9 +61,21 @@ const renderActiveDot = (props, accentColor, isDarkMode) => {
   );
 };
 
-const ChartTooltip = ({ active, payload, label, isDarkMode, accentColor }) => {
+const ChartTooltip = ({ active, payload, label, isDarkMode, accentColor, title, avgKey, subjectKey }) => {
   if (!active || !Array.isArray(payload) || payload.length === 0) return null;
-  const filteredPayload = payload.filter((entry) => entry && entry.name);
+  const filteredPayload = payload
+    .filter((entry) => entry && (entry.dataKey === avgKey || entry.dataKey === subjectKey))
+    .map((entry) => ({
+      ...entry,
+      label: entry.dataKey === avgKey ? '班平均' : title
+    }))
+    .filter((entry, index, list) => list.findIndex((item) => item.label === entry.label) === index)
+    .sort((a, b) => {
+      if (a.dataKey === avgKey && b.dataKey !== avgKey) return -1;
+      if (a.dataKey !== avgKey && b.dataKey === avgKey) return 1;
+      return 0;
+    });
+  if (!filteredPayload.length) return null;
   const tooltipGlow = softMix(accentColor, '#e0f2fe', isDarkMode ? 0.18 : 0.62);
 
   return (
@@ -80,18 +92,18 @@ const ChartTooltip = ({ active, payload, label, isDarkMode, accentColor }) => {
         </div>
         <div className="mt-2 space-y-1.5">
           {filteredPayload.map((entry) => (
-            <div key={entry.dataKey || entry.name} className="flex items-center justify-between gap-4">
+            <div key={entry.dataKey || entry.label} className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-2 min-w-0">
                 <span
                   className="h-2.5 w-2.5 rounded-full shrink-0"
                   style={{
-                    background: entry.name === '班平均' ? '#94a3b8' : accentColor,
-                    boxShadow: `0 0 0 4px ${entry.name === '班平均' ? 'rgba(148,163,184,0.14)' : hexToRgba(accentColor, isDarkMode ? 0.14 : 0.12)}`
+                    background: entry.label === '班平均' ? '#94a3b8' : accentColor,
+                    boxShadow: `0 0 0 4px ${entry.label === '班平均' ? 'rgba(148,163,184,0.14)' : hexToRgba(accentColor, isDarkMode ? 0.14 : 0.12)}`
                   }}
                 />
-                <span className={`text-[11px] font-semibold truncate ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>{entry.name}</span>
+                <span className={`text-[11px] font-semibold truncate ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>{entry.label}</span>
               </div>
-              <span className={`text-[11px] font-black tabular-nums ${entry.name === '班平均' ? (isDarkMode ? 'text-slate-100' : 'text-slate-800') : ''}`} style={entry.name === '班平均' ? undefined : { color: accentColor }}>
+              <span className={`text-[11px] font-black tabular-nums ${entry.label === '班平均' ? (isDarkMode ? 'text-slate-100' : 'text-slate-800') : ''}`} style={entry.label === '班平均' ? undefined : { color: accentColor }}>
                 {entry.value ?? '--'}
               </span>
             </div>
@@ -153,7 +165,9 @@ export default function SingleSubjectChart({
     && typeof window.matchMedia === 'function'
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const shouldAnimate = !prefersReducedMotion && pointCount > 1 && pointCount <= 42;
-  const shouldShowDots = pointCount > 1 && pointCount <= 18;
+  const shouldShowDots = pointCount > 1 && pointCount <= 30;
+  const dotRadius = pointCount > 24 ? 2.35 : pointCount > 18 ? 2.8 : 3.5;
+  const dotStrokeWidth = pointCount > 24 ? 1.35 : pointCount > 18 ? 1.65 : 2;
   const chartId = useId().replace(/:/g, '');
   const areaGradientId = `${chartId}-area`;
   const lineGradientId = `${chartId}-line`;
@@ -222,7 +236,7 @@ export default function SingleSubjectChart({
             />
             <Tooltip
               cursor={{ stroke: hexToRgba(lineColor, isDarkMode ? 0.28 : 0.24), strokeWidth: 1, strokeDasharray: '4 4' }}
-              content={(props) => <ChartTooltip {...props} isDarkMode={isDarkMode} accentColor={lineColor} />}
+              content={(props) => <ChartTooltip {...props} isDarkMode={isDarkMode} accentColor={lineColor} title={title} avgKey={avgKey} subjectKey={subjectKey} />}
             />
             <Legend
               verticalAlign="top"
@@ -303,7 +317,7 @@ export default function SingleSubjectChart({
               strokeWidth={3.2}
               strokeLinecap="round"
               strokeLinejoin="round"
-              dot={shouldShowDots ? { r: 3.5, fill: isDarkMode ? '#0f172a' : '#ffffff', stroke: lineColor, strokeWidth: 2 } : false}
+              dot={shouldShowDots ? { r: dotRadius, fill: isDarkMode ? '#0f172a' : '#ffffff', stroke: lineColor, strokeWidth: dotStrokeWidth } : false}
               activeDot={(props) => renderActiveDot(props, lineColor, isDarkMode)}
               isAnimationActive={shouldAnimate}
               animationBegin={280}

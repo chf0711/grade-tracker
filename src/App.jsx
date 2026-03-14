@@ -54,6 +54,8 @@ const MAX_OPERATION_LOG_ENTRIES = 220;
 const MAX_LOCAL_SNAPSHOTS = 4;
 const MAX_IMPORT_PREVIEW_ROWS = 12;
 const MAX_QUALITY_DETAIL_ITEMS = 120;
+const INITIAL_BATCH_RENDER_ROWS = 42;
+const BATCH_RENDER_CHUNK_ROWS = 56;
 const SCORE_KEYS = ['chi', 'eng', 'math'];
 const LOCAL_CACHE_KEYS = Object.freeze({
     dates: 'grade_tracker_cache_dates_v1',
@@ -354,6 +356,20 @@ const buildWeekendGradeEntryMap = (grades, getDateID) => {
     Object.entries(grades || {}).forEach(([sourceDate, grade]) => {
         const weekendID = getDateID(sourceDate);
         if (!weekendID) return;
+        const nextEntry = { sourceDate, grade };
+        if (shouldReplaceGradeEntry(weekendEntryMap[weekendID], nextEntry)) {
+            weekendEntryMap[weekendID] = nextEntry;
+        }
+    });
+    return weekendEntryMap;
+};
+
+const buildTargetWeekendGradeEntryMap = (grades, targetWeekendIds, getDateID) => {
+    if (!targetWeekendIds?.size) return {};
+    const weekendEntryMap = {};
+    Object.entries(grades || {}).forEach(([sourceDate, grade]) => {
+        const weekendID = getDateID(sourceDate);
+        if (!weekendID || !targetWeekendIds.has(weekendID)) return;
         const nextEntry = { sourceDate, grade };
         if (shouldReplaceGradeEntry(weekendEntryMap[weekendID], nextEntry)) {
             weekendEntryMap[weekendID] = nextEntry;
@@ -976,16 +992,30 @@ const ExamCountdown = ({ isDarkMode }) => {
 
     if (isComplete) {
         return (
-            <div className={`countdown-complete-enter relative mt-4 overflow-hidden px-5 py-3 rounded-[1.35rem] border backdrop-blur-md shadow-sm ${isDarkMode ? 'bg-emerald-500/12 border-emerald-200/22 text-slate-100 shadow-black/20' : 'bg-white/80 border-white text-slate-700 shadow-slate-200/55'}`}>
+            <div className={`countdown-complete-enter relative mt-4 overflow-hidden px-5 sm:px-6 py-3.5 sm:py-4 rounded-[1.55rem] border backdrop-blur-xl ${isDarkMode ? 'bg-emerald-500/12 border-emerald-200/24 text-slate-100 shadow-[0_18px_48px_rgba(2,6,23,0.34)]' : 'bg-white/84 border-white/95 text-slate-700 shadow-[0_18px_46px_rgba(148,163,184,0.26)]'}`}>
                 <div className={`countdown-complete-halo absolute inset-0 pointer-events-none ${isDarkMode ? 'bg-[radial-gradient(circle_at_18%_50%,rgba(52,211,153,0.3),transparent_46%),radial-gradient(circle_at_82%_45%,rgba(34,211,238,0.16),transparent_42%)]' : 'bg-[radial-gradient(circle_at_18%_50%,rgba(16,185,129,0.18),transparent_46%),radial-gradient(circle_at_82%_45%,rgba(14,165,233,0.14),transparent_42%)]'}`} />
                 <div className={`countdown-complete-halo countdown-complete-halo--delay absolute inset-0 pointer-events-none ${isDarkMode ? 'bg-[radial-gradient(circle_at_50%_50%,rgba(167,243,208,0.18),transparent_58%)]' : 'bg-[radial-gradient(circle_at_50%_50%,rgba(236,253,245,0.75),transparent_60%)]'}`} />
-                <div className="relative z-10 flex items-center gap-3">
-                    <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${isDarkMode ? 'bg-emerald-400/14 text-emerald-100 ring-1 ring-emerald-200/20' : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100'}`}>
-                        <Sparkles className="w-4 h-4" />
+                <div className={`absolute inset-x-5 sm:inset-x-6 top-0 h-px ${isDarkMode ? 'bg-gradient-to-r from-transparent via-emerald-100/55 to-transparent' : 'bg-gradient-to-r from-transparent via-white to-transparent'}`} />
+                <div className={`absolute left-5 sm:left-6 right-5 sm:right-6 bottom-0 h-10 pointer-events-none ${isDarkMode ? 'bg-[radial-gradient(circle_at_50%_110%,rgba(45,212,191,0.22),transparent_62%)]' : 'bg-[radial-gradient(circle_at_50%_110%,rgba(186,230,253,0.4),transparent_62%)]'}`} />
+                <div className="relative z-10 flex items-center gap-3.5 sm:gap-4">
+                    <div className={`relative w-10 h-10 rounded-[1.05rem] flex items-center justify-center shrink-0 ${isDarkMode ? 'bg-white/[0.08] text-emerald-100 ring-1 ring-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]' : 'bg-white/88 text-emerald-700 ring-1 ring-slate-200/70 shadow-[0_10px_24px_rgba(226,232,240,0.6)]'}`}>
+                        <div className={`absolute inset-[5px] rounded-[0.85rem] ${isDarkMode ? 'bg-emerald-400/10' : 'bg-emerald-50/90'}`} />
+                        <Sparkles className="relative z-[1] w-4 h-4" />
                     </div>
-                    <div className="text-left">
-                        <div className={`text-[9px] font-black uppercase tracking-[0.22em] ${isDarkMode ? 'text-emerald-200/80' : 'text-emerald-700/75'}`}>Countdown Complete</div>
-                        <p className={`text-sm sm:text-[15px] font-black tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>This is the moment. Make it count.</p>
+                    <div className="min-w-0 text-left">
+                        <div className="flex items-center gap-2">
+                            <div className={`text-[9px] font-black uppercase tracking-[0.24em] ${isDarkMode ? 'text-emerald-200/80' : 'text-emerald-700/75'}`}>Countdown Complete</div>
+                            <div className={`h-px flex-1 min-w-[2.75rem] ${isDarkMode ? 'bg-gradient-to-r from-emerald-200/28 to-transparent' : 'bg-gradient-to-r from-emerald-300/55 to-transparent'}`} />
+                        </div>
+                        <p
+                          className={`mt-1 text-[15px] sm:text-[17px] font-semibold tracking-[-0.03em] leading-[1.08] ${isDarkMode ? 'text-white' : 'text-slate-800'}`}
+                          style={{ textWrap: 'balance' }}
+                        >
+                            <span>This is the moment.</span>{' '}
+                            <span className={isDarkMode ? 'bg-[linear-gradient(135deg,#ecfdf5_0%,#99f6e4_38%,#7dd3fc_100%)] bg-clip-text text-transparent' : 'bg-[linear-gradient(135deg,#0f766e_0%,#059669_28%,#0ea5e9_100%)] bg-clip-text text-transparent'}>
+                                Make it count.
+                            </span>
+                        </p>
                     </div>
                 </div>
             </div>
@@ -1041,6 +1071,7 @@ export default function App() {
   const [batchDate, setBatchDate] = useState(''); 
   const [batchInsightTab, setBatchInsightTab] = useState('grades');
   const [isBatchDirty, setIsBatchDirty] = useState(false);
+  const [visibleBatchRowCount, setVisibleBatchRowCount] = useState(INITIAL_BATCH_RENDER_ROWS);
   const [allStudentsData, setAllStudentsData] = useState([]); 
   const [cachedClassData, setCachedClassData] = useState([]); 
   const [sortByPR, setSortByPR] = useState(false);
@@ -1303,9 +1334,9 @@ export default function App() {
   const deferredDatesForDerived = useDeferredValue(availableDates);
 
   // 將每位學生的日期成績先依週末 ID 正規化，避免在多個流程中重複掃描 grades 物件
-  const studentGradeMapsByStudentId = useMemo(() => {
+  const deferredStudentGradeMapsByStudentId = useMemo(() => {
       const gradeMaps = {};
-      allStudentsData.forEach((student) => {
+      deferredStudentsForDerived.forEach((student) => {
           const weekendGrades = {};
           const weekendEntries = buildWeekendGradeEntryMap(student.grades, getTestDateID);
           Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
@@ -1314,7 +1345,7 @@ export default function App() {
           gradeMaps[student.id] = weekendGrades;
       });
       return gradeMaps;
-  }, [allStudentsData, getTestDateID]);
+  }, [deferredStudentsForDerived, getTestDateID]);
 
   const avgSettingsDateKeysDesc = useMemo(
       () => [...orderedWeekendIds].slice().reverse(),
@@ -1347,15 +1378,15 @@ export default function App() {
   // --- OPTIMIZATION: Debounced + chunked probability calculation to keep UI responsive ---
   useEffect(() => {
       const shouldCompute = mode === 'teacher' && teacherViewMode === 'batch';
-      if (!shouldCompute || allStudentsData.length === 0) return;
+      if (!shouldCompute || deferredStudentsForDerived.length === 0) return;
 
       let rafId = null;
       let cancelled = false;
-      const debounceMs = allStudentsData.length > 260 ? 680 : allStudentsData.length > 150 ? 480 : 300;
+      const debounceMs = deferredStudentsForDerived.length > 260 ? 680 : deferredStudentsForDerived.length > 150 ? 480 : 300;
       const timer = setTimeout(() => {
           if (cancelled) return;
 
-          const context = buildProbabilityContext(allStudentsData, availableDates, getTestDateID);
+          const context = buildProbabilityContext(deferredStudentsForDerived, deferredDatesForDerived, getTestDateID);
           const {
               scoresByDate,
               mathScoresByDate,
@@ -1365,8 +1396,8 @@ export default function App() {
               normalizedDates
           } = context;
 
-          const studentGradeMaps = studentGradeMapsByStudentId;
-          const students = allStudentsData;
+          const studentGradeMaps = deferredStudentGradeMapsByStudentId;
+          const students = deferredStudentsForDerived;
           const probs = {};
           let index = 0;
           const chunkSize = students.length > 320 ? 28 : students.length > 200 ? 44 : 72;
@@ -1410,7 +1441,7 @@ export default function App() {
           clearTimeout(timer);
           if (rafId) cancelAnimationFrame(rafId);
       };
-  }, [allStudentsData, availableDates, getTestDateID, mode, teacherViewMode, studentGradeMapsByStudentId]);
+  }, [deferredStudentsForDerived, deferredDatesForDerived, getTestDateID, mode, teacherViewMode, deferredStudentGradeMapsByStudentId]);
 
   useEffect(() => {
       if (mode !== 'parent' || !viewData?.chartData?.length) return;
@@ -1548,7 +1579,7 @@ export default function App() {
       };
 
       const usedWeekendIds = new Set();
-      Object.values(studentGradeMapsByStudentId).forEach((weekendGrades) => {
+      Object.values(deferredStudentGradeMapsByStudentId).forEach((weekendGrades) => {
           Object.entries(weekendGrades || {}).forEach(([weekendID, grade]) => {
               const hasAnyScore = ['chi', 'eng', 'math', 'total'].some((key) => hasScoreValue(grade[key]));
               if (hasAnyScore) usedWeekendIds.add(weekendID);
@@ -1571,7 +1602,7 @@ export default function App() {
       setStatusMsg(`已自動刪除 ${removedCount} 個無學生資料日期`);
       const timer = setTimeout(() => setStatusMsg(''), 2200);
       return () => clearTimeout(timer);
-  }, [mode, loading, isBatchDirty, availableDates, allStudentsData.length, studentGradeMapsByStudentId, getTestDateID, user]);
+  }, [mode, loading, isBatchDirty, availableDates, allStudentsData.length, deferredStudentGradeMapsByStudentId, getTestDateID, user]);
 
   const hasPendingBatchChanges = mode === 'teacher' && teacherViewMode === 'batch' && isBatchDirty;
 
@@ -3732,6 +3763,7 @@ export default function App() {
           return resolvePhaseByDate(dateKey, sortedAvailableDatesAsc) === activePhase;
       });
   }, [shouldBuildParentAnalytics, viewData, activePhase, sortedAvailableDatesAsc, getTestDateID]);
+  const deferredParentPhaseData = useDeferredValue(parentPhaseData);
 
   const allSubjectScoresByWeekend = useMemo(() => {
       const buckets = {};
@@ -3763,7 +3795,7 @@ export default function App() {
   }, [shouldBuildParentAnalytics, cachedClassData, getTestDateID]);
 
   const parentRadarData = useMemo(() => {
-      if (!parentPhaseData.length) return [];
+      if (!deferredParentPhaseData.length) return [];
       const fallbackAvgKeyBySubject = {
           chi: 'avgAllChi',
           eng: 'avgAllEng',
@@ -3771,10 +3803,10 @@ export default function App() {
       };
 
       const summarize = (label, scoreKey) => {
-          const selfValues = parentPhaseData
+          const selfValues = deferredParentPhaseData
               .map((item) => parseFloat(item[scoreKey]))
               .filter((v) => !isNaN(v));
-          const benchmarkValues = parentPhaseData
+          const benchmarkValues = deferredParentPhaseData
               .map((item) => {
                   const weekendID = item.weekendID || getTestDateID(item.date);
                   const scoreList = allSubjectScoresByWeekend[weekendID]?.[scoreKey] || [];
@@ -3800,10 +3832,11 @@ export default function App() {
           summarize('英文', 'eng'),
           summarize('數學', 'math')
       ];
-  }, [parentPhaseData, allSubjectScoresByWeekend, getTestDateID]);
+  }, [deferredParentPhaseData, allSubjectScoresByWeekend, getTestDateID]);
+  const deferredParentRadarData = useDeferredValue(parentRadarData);
 
   const parentRadarMax = useMemo(() => {
-      const values = parentRadarData
+      const values = deferredParentRadarData
           .flatMap((item) => [item.student, item.classAvg])
           .filter((v) => !isNaN(v));
 
@@ -3811,7 +3844,7 @@ export default function App() {
 
       const maxValue = Math.max(...values, 80);
       return Math.min(120, Math.ceil(maxValue / 10) * 10);
-  }, [parentRadarData]);
+  }, [deferredParentRadarData]);
 
   const activePhaseLabel = useMemo(() => {
       const phase = PHASES.find((item) => item.id === activePhase);
@@ -3819,8 +3852,8 @@ export default function App() {
   }, [activePhase]);
 
   const parentPhaseDataDesc = useMemo(
-      () => [...parentPhaseData].reverse(),
-      [parentPhaseData]
+      () => [...deferredParentPhaseData].reverse(),
+      [deferredParentPhaseData]
   );
 
   // 預先為每個週末 / 班級 / 科目建立排序好的成績索引，避免在畫面 render 時重複掃描全班資料
@@ -4003,11 +4036,30 @@ export default function App() {
       return ids;
   }, [shouldBuildBatchAnalytics, batchDate, getTestDateID, orderedWeekendIds]);
 
+  const batchRelevantGradeMapsByStudentId = useMemo(() => {
+      if (!shouldBuildBatchAnalytics || relevantWeekendIdsForPR.length === 0) return {};
+      const targetWeekendIds = new Set(relevantWeekendIdsForPR);
+      const gradeMaps = {};
+
+      allStudentsData.forEach((student) => {
+          const weekendEntries = buildTargetWeekendGradeEntryMap(student.grades, targetWeekendIds, getTestDateID);
+          const weekendGrades = {};
+          Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
+              weekendGrades[weekendID] = entry.grade;
+          });
+          if (Object.keys(weekendGrades).length > 0) {
+              gradeMaps[student.id] = weekendGrades;
+          }
+      });
+
+      return gradeMaps;
+  }, [allStudentsData, getTestDateID, relevantWeekendIdsForPR, shouldBuildBatchAnalytics]);
+
   const globalPRByStudentAndWeekend = useMemo(() => {
       if (!shouldBuildBatchAnalytics || relevantWeekendIdsForPR.length === 0) return {};
       const targetWeekendSet = new Set(relevantWeekendIdsForPR);
       const totalsByWeekend = {};
-      Object.entries(studentGradeMapsByStudentId).forEach(([studentId, weekendGrades]) => {
+      Object.entries(batchRelevantGradeMapsByStudentId).forEach(([studentId, weekendGrades]) => {
           targetWeekendSet.forEach((weekendID) => {
               const grade = weekendGrades?.[weekendID];
               if (!grade) return;
@@ -4032,7 +4084,7 @@ export default function App() {
       });
 
       return prByStudent;
-  }, [studentGradeMapsByStudentId, shouldBuildBatchAnalytics, relevantWeekendIdsForPR]);
+  }, [batchRelevantGradeMapsByStudentId, shouldBuildBatchAnalytics, relevantWeekendIdsForPR]);
 
   const batchRowsForDisplay = useMemo(() => {
       if (!shouldBuildBatchAnalytics) return [];
@@ -4041,7 +4093,7 @@ export default function App() {
       const rows = [];
 
       allStudentsData.forEach(student => {
-          const dateGrades = studentGradeMapsByStudentId[student.id]?.[weekendID];
+          const dateGrades = batchRelevantGradeMapsByStudentId[student.id]?.[weekendID];
           if (!dateGrades) return;
 
           const currentClass = dateGrades.class || 'A班';
@@ -4083,9 +4135,44 @@ export default function App() {
       sortByPR,
       sortByProb,
       admissionProbabilities,
-      studentGradeMapsByStudentId,
+      batchRelevantGradeMapsByStudentId,
       globalPRByStudentAndWeekend
   ]);
+
+  useEffect(() => {
+      if (teacherViewMode !== 'batch' || batchInsightTab !== 'grades') return;
+      const totalRows = batchRowsForDisplay.length;
+      if (totalRows <= INITIAL_BATCH_RENDER_ROWS) {
+          setVisibleBatchRowCount(totalRows);
+          return;
+      }
+
+      let rafId = null;
+      let cancelled = false;
+      setVisibleBatchRowCount(INITIAL_BATCH_RENDER_ROWS);
+
+      const appendChunk = () => {
+          if (cancelled) return;
+          setVisibleBatchRowCount((prev) => {
+              const next = Math.min(prev + BATCH_RENDER_CHUNK_ROWS, totalRows);
+              if (next < totalRows) {
+                  rafId = requestAnimationFrame(appendChunk);
+              }
+              return next;
+          });
+      };
+
+      rafId = requestAnimationFrame(appendChunk);
+      return () => {
+          cancelled = true;
+          if (rafId) cancelAnimationFrame(rafId);
+      };
+  }, [batchRowsForDisplay.length, batchInsightTab, teacherClassFilter, teacherViewMode, selectedBatchWeekendID, sortByPR, sortByProb]);
+
+  const renderedBatchRows = useMemo(
+      () => batchRowsForDisplay.slice(0, visibleBatchRowCount),
+      [batchRowsForDisplay, visibleBatchRowCount]
+  );
 
   const deferredBatchRowsForDisplay = useDeferredValue(batchRowsForDisplay);
 
@@ -5223,7 +5310,11 @@ export default function App() {
                             {teacherViewMode === 'batch' && latestAvailableDate && selectedBatchWeekendID !== latestAvailableDate && (
                                 <button
                                     type="button"
-                                    onClick={() => setBatchDate(latestAvailableDate)}
+                                    onClick={() => {
+                                        startTransition(() => {
+                                            setBatchDate(latestAvailableDate);
+                                        });
+                                    }}
                                     className={`btn-sheen px-3 py-2 rounded-xl text-[11px] font-bold transition-colors border shadow-sm ${darkMode ? 'bg-slate-800 text-slate-200 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
                                 >
                                     切到最新
@@ -5252,7 +5343,11 @@ export default function App() {
                                             key={weekendID}
                                             type="button"
                                             onClick={() => {
-                                                if (teacherViewMode === 'batch' && weekendID !== selectedBatchWeekendID) setBatchDate(weekendID);
+                                                if (teacherViewMode === 'batch' && weekendID !== selectedBatchWeekendID) {
+                                                    startTransition(() => {
+                                                        setBatchDate(weekendID);
+                                                    });
+                                                }
                                             }}
                                             className={`btn-sheen snap-start shrink-0 text-left min-w-[126px] rounded-2xl border px-3 py-2.5 transition-all will-change-transform ${darkMode ? 'bg-slate-800/88 border-white/10 hover:border-emerald-300/30' : 'bg-white border-slate-200/80 shadow-[0_8px_18px_rgba(15,23,42,0.06)] hover:border-emerald-200'} ${isSelected ? (darkMode ? 'ring-1 ring-emerald-300/40 border-emerald-300/40 scale-[1.01]' : 'ring-2 ring-emerald-100 border-emerald-300/60 scale-[1.01]') : ''}`}
                                         >
@@ -5286,7 +5381,11 @@ export default function App() {
 
                 <div className={`flex p-1 rounded-xl mb-6 shadow-inner border ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-100/90 border-slate-200/70'}`}>
                      <button
-                       onClick={() => setTeacherViewMode('batch')}
+                       onClick={() => {
+                         startTransition(() => {
+                           setTeacherViewMode('batch');
+                         });
+                       }}
                        className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${teacherViewMode==='batch' ? (darkMode ? 'bg-slate-800 text-blue-400 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-blue-700 shadow-sm') : 'text-slate-500'}`}
                      >
                        批量檢視
@@ -5346,7 +5445,12 @@ export default function App() {
                                 <select
                                     className={`border rounded-lg px-2 py-1.5 text-xs font-bold outline-none shadow-sm ${darkMode ? 'bg-[#020617]/50 border-white/10 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}
                                     value={selectedBatchWeekendID || ''}
-                                    onChange={(e) => setBatchDate(e.target.value)}
+                                    onChange={(e) => {
+                                        const nextValue = e.target.value;
+                                        startTransition(() => {
+                                            setBatchDate(nextValue);
+                                        });
+                                    }}
                                 >
                                     {teacherDateCards.map((item) => (
                                         <option key={item.weekendID} value={item.weekendID}>
@@ -5386,7 +5490,11 @@ export default function App() {
 
                         <div className={`flex p-1 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
                             {CLASS_DEFS.map(c => (
-                                <button key={c.id} onClick={() => setTeacherClassFilter(c.id)} className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${teacherClassFilter === c.id ? (darkMode ? 'bg-slate-800 text-white shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-700 shadow-sm border border-slate-200/50') : 'text-slate-500 hover:text-slate-400'}`}>{c.label}</button>
+                                <button key={c.id} onClick={() => {
+                                    startTransition(() => {
+                                        setTeacherClassFilter(c.id);
+                                    });
+                                }} className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${teacherClassFilter === c.id ? (darkMode ? 'bg-slate-800 text-white shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-700 shadow-sm border border-slate-200/50') : 'text-slate-500 hover:text-slate-400'}`}>{c.label}</button>
                             ))}
                         </div>
 
@@ -5413,7 +5521,11 @@ export default function App() {
                             {BATCH_INSIGHT_TABS.map((tab) => (
                                 <button
                                   key={tab.id}
-                                  onClick={() => setBatchInsightTab(tab.id)}
+                                  onClick={() => {
+                                      startTransition(() => {
+                                          setBatchInsightTab(tab.id);
+                                      });
+                                  }}
                                   className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${batchInsightTab === tab.id ? (darkMode ? 'bg-slate-800 text-emerald-100 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-700 shadow-sm border border-slate-200/50') : 'text-slate-500 hover:text-slate-400'}`}
                                 >
                                   {tab.label}
@@ -5456,7 +5568,7 @@ export default function App() {
                                         </tr>
                                     </thead>
                                     <tbody className={`divide-y ${darkMode ? 'divide-slate-800' : 'divide-slate-100'}`}>
-                                        {batchRowsForDisplay.map((row, sIndex) => (
+                                        {renderedBatchRows.map((row, sIndex) => (
                                             <BatchRow
                                                 key={row.student.id}
                                                 student={row.student}
@@ -5471,6 +5583,13 @@ export default function App() {
                                                 handlePaste={handlePaste} 
                                             />
                                         ))}
+                                        {batchRowsForDisplay.length > renderedBatchRows.length && (
+                                            <tr>
+                                                <td colSpan={10} className={`px-4 py-3 text-center text-[11px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                    正在載入更多列 {renderedBatchRows.length} / {batchRowsForDisplay.length}
+                                                </td>
+                                            </tr>
+                                        )}
                                         {batchRowsForDisplay.length === 0 && (
                                             <tr>
                                                 <td colSpan={10} className={`px-4 py-8 text-center text-xs font-bold ${darkMode ? 'text-slate-400' : 'text-slate-400'}`}>
@@ -6354,7 +6473,11 @@ export default function App() {
 
                   <div className={`flex p-1 mb-6 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#08120d]/70 border-emerald-200/10' : 'bg-slate-50 border-slate-100'}`}>
                       {PHASES.map(phase => (
-                          <button key={phase.id} onClick={() => setActivePhase(phase.id)} className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${activePhase === phase.id ? (darkMode ? 'bg-[#1f2a24] text-emerald-100 shadow-md border border-emerald-200/20 ring-1 ring-emerald-200/10' : 'bg-white text-slate-800 shadow-sm border border-slate-100') : 'text-slate-500 hover:text-slate-400'}`}>{phase.name}</button>
+                          <button key={phase.id} onClick={() => {
+                              startTransition(() => {
+                                  setActivePhase(phase.id);
+                              });
+                          }} className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${activePhase === phase.id ? (darkMode ? 'bg-[#1f2a24] text-emerald-100 shadow-md border border-emerald-200/20 ring-1 ring-emerald-200/10' : 'bg-white text-slate-800 shadow-sm border border-slate-100') : 'text-slate-500 hover:text-slate-400'}`}>{phase.name}</button>
                       ))}
                   </div>
 
@@ -6363,7 +6486,11 @@ export default function App() {
                           const tabKey = tab === '總分' ? 'total' : tab === '國文' ? 'chi' : tab === '英文' ? 'eng' : 'math';
                           const isActive = activeTab === tabKey;
                           return (
-                              <button key={tabKey} onClick={() => setActiveTab(tabKey)} className={`flex-1 py-2.5 text-xs font-bold rounded-xl transition-all duration-300 ${isActive ? (darkMode ? 'bg-[#1f2a24] text-emerald-100 shadow-md border border-emerald-200/15 ring-1 ring-emerald-200/10' : 'bg-white text-slate-800 shadow-sm border border-slate-100') : 'text-slate-400'}`}>
+                              <button key={tabKey} onClick={() => {
+                                  startTransition(() => {
+                                      setActiveTab(tabKey);
+                                  });
+                              }} className={`flex-1 py-2.5 text-xs font-bold rounded-xl transition-all duration-300 ${isActive ? (darkMode ? 'bg-[#1f2a24] text-emerald-100 shadow-md border border-emerald-200/15 ring-1 ring-emerald-200/10' : 'bg-white text-slate-800 shadow-sm border border-slate-100') : 'text-slate-400'}`}>
                                 {isActive && <span className={`inline-block w-1.5 h-1.5 rounded-full ${TAB_DOT_BG_CLASS[tabKey]} mr-1.5 mb-0.5`}></span>}{tab}
                               </button>
                           )
@@ -6371,13 +6498,13 @@ export default function App() {
                   </div>
 
                   <div key={`parent-tab-${activePhase}-${activeTab}`} className={prefersReducedMotion ? '' : 'tab-panel-enter'}>
-                    {parentPhaseData.length > 0 ? (
+                    {deferredParentPhaseData.length > 0 ? (
                       <Suspense fallback={<ChartFallback heightClass="h-72" />}>
-                        {activeTab === 'total' && <SingleSubjectChart data={parentPhaseData} subjectKey="total" avgKey="avgTotal" lineColor={COLORS.total.hex} title="總分" domain={[0, 300]} isDarkMode={darkMode} />}
-                        {activeTab === 'chi' && <SingleSubjectChart data={parentPhaseData} subjectKey="chi" avgKey="avgChi" lineColor={COLORS.chi.hex} title="國文" domain={[0, 100]} isDarkMode={darkMode} />}
-                        {activeTab === 'eng' && <SingleSubjectChart data={parentPhaseData} subjectKey="eng" avgKey="avgEng" lineColor={COLORS.eng.hex} title="英文" domain={activePhase === 'mock' ? [0, 80] : [0, 100]} isDarkMode={darkMode} />}
-                        {activeTab === 'math' && <SingleSubjectChart data={parentPhaseData} subjectKey="math" avgKey="avgMath" lineColor={COLORS.math.hex} title="數學" domain={activePhase === 'mock' ? [0, 120] : [0, 100]} isDarkMode={darkMode} />}
-                        <ParentAbilityRadar data={parentRadarData} maxValue={parentRadarMax} isDarkMode={darkMode} recordCount={parentPhaseData.length} phaseName={activePhaseLabel} />
+                        {activeTab === 'total' && <SingleSubjectChart data={deferredParentPhaseData} subjectKey="total" avgKey="avgTotal" lineColor={COLORS.total.hex} title="總分" domain={[0, 300]} isDarkMode={darkMode} />}
+                        {activeTab === 'chi' && <SingleSubjectChart data={deferredParentPhaseData} subjectKey="chi" avgKey="avgChi" lineColor={COLORS.chi.hex} title="國文" domain={[0, 100]} isDarkMode={darkMode} />}
+                        {activeTab === 'eng' && <SingleSubjectChart data={deferredParentPhaseData} subjectKey="eng" avgKey="avgEng" lineColor={COLORS.eng.hex} title="英文" domain={activePhase === 'mock' ? [0, 80] : [0, 100]} isDarkMode={darkMode} />}
+                        {activeTab === 'math' && <SingleSubjectChart data={deferredParentPhaseData} subjectKey="math" avgKey="avgMath" lineColor={COLORS.math.hex} title="數學" domain={activePhase === 'mock' ? [0, 120] : [0, 100]} isDarkMode={darkMode} />}
+                        <ParentAbilityRadar data={deferredParentRadarData} maxValue={parentRadarMax} isDarkMode={darkMode} recordCount={deferredParentPhaseData.length} phaseName={activePhaseLabel} />
                       </Suspense>
                     ) : (
                       <div className={`rounded-2xl border px-4 py-8 text-center text-xs font-bold ${darkMode ? 'bg-white/5 border-white/10 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>

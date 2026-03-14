@@ -992,23 +992,22 @@ const ExamCountdown = ({ isDarkMode }) => {
 
     if (isComplete) {
         return (
-            <div className={`countdown-complete-enter relative mt-4 overflow-hidden px-4.5 sm:px-5.5 py-3 sm:py-3.5 rounded-[1.8rem] border backdrop-blur-xl ${isDarkMode ? 'bg-emerald-500/12 border-emerald-200/24 text-slate-100 shadow-[0_16px_42px_rgba(2,6,23,0.32)]' : 'bg-white/84 border-white/95 text-slate-700 shadow-[0_16px_40px_rgba(148,163,184,0.22)]'}`}>
+            <div className={`countdown-complete-enter relative mt-4 overflow-hidden px-5 sm:px-6 py-3.5 sm:py-4 rounded-[2rem] border backdrop-blur-xl ${isDarkMode ? 'bg-emerald-500/12 border-emerald-200/24 text-slate-100 shadow-[0_16px_42px_rgba(2,6,23,0.32)]' : 'bg-white/84 border-white/95 text-slate-700 shadow-[0_16px_40px_rgba(148,163,184,0.22)]'}`}>
                 <div className={`countdown-complete-halo absolute inset-0 pointer-events-none ${isDarkMode ? 'bg-[radial-gradient(circle_at_18%_50%,rgba(52,211,153,0.3),transparent_46%),radial-gradient(circle_at_82%_45%,rgba(34,211,238,0.16),transparent_42%)]' : 'bg-[radial-gradient(circle_at_18%_50%,rgba(16,185,129,0.18),transparent_46%),radial-gradient(circle_at_82%_45%,rgba(14,165,233,0.14),transparent_42%)]'}`} />
                 <div className={`countdown-complete-halo countdown-complete-halo--delay absolute inset-0 pointer-events-none ${isDarkMode ? 'bg-[radial-gradient(circle_at_50%_50%,rgba(167,243,208,0.18),transparent_58%)]' : 'bg-[radial-gradient(circle_at_50%_50%,rgba(236,253,245,0.75),transparent_60%)]'}`} />
-                <div className={`absolute inset-x-4.5 sm:inset-x-5.5 top-0 h-px ${isDarkMode ? 'bg-gradient-to-r from-transparent via-emerald-100/55 to-transparent' : 'bg-gradient-to-r from-transparent via-white to-transparent'}`} />
-                <div className={`absolute left-4.5 sm:left-5.5 right-4.5 sm:right-5.5 bottom-0 h-9 pointer-events-none ${isDarkMode ? 'bg-[radial-gradient(circle_at_50%_110%,rgba(45,212,191,0.2),transparent_62%)]' : 'bg-[radial-gradient(circle_at_50%_110%,rgba(186,230,253,0.34),transparent_62%)]'}`} />
-                <div className="relative z-10 flex items-center gap-3 sm:gap-3.5">
-                    <div className={`relative w-8.5 h-8.5 rounded-[999px] flex items-center justify-center shrink-0 ${isDarkMode ? 'bg-white/[0.08] text-emerald-100 ring-1 ring-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]' : 'bg-white/88 text-emerald-700 ring-1 ring-slate-200/70 shadow-[0_8px_18px_rgba(226,232,240,0.5)]'}`}>
-                        <div className={`absolute inset-[4px] rounded-full ${isDarkMode ? 'bg-emerald-400/10' : 'bg-emerald-50/90'}`} />
-                        <Sparkles className="relative z-[1] w-[0.92rem] h-[0.92rem]" />
+                <div className={`absolute inset-x-5 sm:inset-x-6 top-0 h-px ${isDarkMode ? 'bg-gradient-to-r from-transparent via-emerald-100/55 to-transparent' : 'bg-gradient-to-r from-transparent via-white to-transparent'}`} />
+                <div className={`absolute left-5 sm:left-6 right-5 sm:right-6 bottom-0 h-9 pointer-events-none ${isDarkMode ? 'bg-[radial-gradient(circle_at_50%_110%,rgba(45,212,191,0.2),transparent_62%)]' : 'bg-[radial-gradient(circle_at_50%_110%,rgba(186,230,253,0.34),transparent_62%)]'}`} />
+                <div className="relative z-10 flex items-center gap-3.5 sm:gap-4">
+                    <div className={`relative w-9 h-9 sm:w-10 sm:h-10 rounded-[1.2rem] flex items-center justify-center shrink-0 ${isDarkMode ? 'bg-white/[0.08] text-emerald-100 ring-1 ring-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]' : 'bg-white/90 text-emerald-700 ring-1 ring-slate-200/70 shadow-[0_10px_20px_rgba(226,232,240,0.5)]'}`}>
+                        <div className={`absolute inset-[4px] rounded-[0.95rem] ${isDarkMode ? 'bg-emerald-400/10' : 'bg-emerald-50/90'}`} />
+                        <Sparkles className="relative z-[1] w-[0.95rem] h-[0.95rem]" />
                     </div>
-                    <div className="min-w-0 text-left">
-                        <div className="flex items-center gap-2">
-                            <div className={`text-[7.5px] sm:text-[8px] font-black uppercase tracking-[0.26em] ${isDarkMode ? 'text-emerald-200/80' : 'text-[#3f8f80]'}`}>Countdown Complete</div>
-                            <div className={`h-px flex-1 min-w-[2.35rem] ${isDarkMode ? 'bg-gradient-to-r from-emerald-200/28 to-transparent' : 'bg-gradient-to-r from-emerald-300/55 to-transparent'}`} />
+                    <div className="min-w-0 flex-1 text-left">
+                        <div className="inline-flex items-center rounded-full px-2.5 py-[0.34rem]">
+                            <div className={`text-[7px] sm:text-[7.5px] font-black uppercase tracking-[0.3em] ${isDarkMode ? 'text-emerald-200/80' : 'text-[#3f8f80]'}`}>Countdown Complete</div>
                         </div>
                         <p
-                          className={`mt-[0.14rem] text-[13px] sm:text-[14.5px] font-[650] tracking-[-0.036em] leading-[1.02] ${isDarkMode ? 'text-white' : 'text-slate-800'}`}
+                          className={`mt-1 text-[12.5px] sm:text-[14.75px] font-[650] tracking-[-0.034em] leading-[1.08] ${isDarkMode ? 'text-white' : 'text-slate-800'}`}
                           style={{ textWrap: 'balance' }}
                         >
                             <span>This is the moment.</span>{' '}
@@ -5182,7 +5181,7 @@ export default function App() {
       <header className={`header-glass fixed top-0 w-full backdrop-blur-xl z-30 border-b transition-all duration-300 ${shouldElevateHeader ? 'header-glass--scrolled' : ''} ${darkMode ? 'header-glass--dark bg-[#0b1512]/84 border-emerald-200/15 shadow-lg shadow-black/35' : 'bg-[linear-gradient(108deg,rgba(255,255,255,0.78)_0%,rgba(244,252,248,0.84)_52%,rgba(241,247,255,0.8)_100%)] border-white/75 shadow-[0_14px_36px_rgba(15,23,42,0.12)]'}`}>
         <div className="max-w-5xl mx-auto px-3 sm:px-6 h-[calc(4rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)] flex justify-between items-center relative z-10">
           <div
-            className="flex min-w-0 flex-1 h-full items-center gap-2 sm:gap-3 cursor-pointer group translate-y-[1px] sm:translate-y-[2px]"
+            className="flex min-w-0 flex-1 h-full items-center gap-2 sm:gap-3 cursor-pointer group sm:translate-y-[1px]"
             onClick={() => runWithBatchDiscardGuard(() => setMode('landing'))}
           >
             <div className={`p-2 rounded-[1.15rem] transition-transform group-hover:scale-105 duration-300 ${darkMode ? 'bg-emerald-500/10 text-emerald-200 ring-1 ring-emerald-300/35' : 'bg-[linear-gradient(145deg,rgba(255,255,255,0.96)_0%,rgba(236,253,245,0.92)_56%,rgba(239,246,255,0.9)_100%)] text-[#0f766e] ring-1 ring-white/95 shadow-[0_10px_24px_rgba(148,163,184,0.16)]'}`}><GraduationCap className="h-5 w-5" /></div>

@@ -1004,11 +1004,11 @@ const ExamCountdown = ({ isDarkMode }) => {
                     </div>
                     <div className="min-w-0 text-left">
                         <div className="flex items-center gap-2">
-                            <div className={`text-[8px] sm:text-[8.5px] font-black uppercase tracking-[0.28em] ${isDarkMode ? 'text-emerald-200/80' : 'text-[#3f8f80]'}`}>Countdown Complete</div>
+                            <div className={`text-[7.5px] sm:text-[8px] font-black uppercase tracking-[0.26em] ${isDarkMode ? 'text-emerald-200/80' : 'text-[#3f8f80]'}`}>Countdown Complete</div>
                             <div className={`h-px flex-1 min-w-[2.35rem] ${isDarkMode ? 'bg-gradient-to-r from-emerald-200/28 to-transparent' : 'bg-gradient-to-r from-emerald-300/55 to-transparent'}`} />
                         </div>
                         <p
-                          className={`mt-[0.14rem] text-[14px] sm:text-[16px] font-[650] tracking-[-0.038em] leading-[1.02] ${isDarkMode ? 'text-white' : 'text-slate-800'}`}
+                          className={`mt-[0.14rem] text-[13px] sm:text-[14.5px] font-[650] tracking-[-0.036em] leading-[1.02] ${isDarkMode ? 'text-white' : 'text-slate-800'}`}
                           style={{ textWrap: 'balance' }}
                         >
                             <span>This is the moment.</span>{' '}
@@ -5182,7 +5182,7 @@ export default function App() {
       <header className={`header-glass fixed top-0 w-full backdrop-blur-xl z-30 border-b transition-all duration-300 ${shouldElevateHeader ? 'header-glass--scrolled' : ''} ${darkMode ? 'header-glass--dark bg-[#0b1512]/84 border-emerald-200/15 shadow-lg shadow-black/35' : 'bg-[linear-gradient(108deg,rgba(255,255,255,0.78)_0%,rgba(244,252,248,0.84)_52%,rgba(241,247,255,0.8)_100%)] border-white/75 shadow-[0_14px_36px_rgba(15,23,42,0.12)]'}`}>
         <div className="max-w-5xl mx-auto px-3 sm:px-6 h-[calc(4rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)] flex justify-between items-center relative z-10">
           <div
-            className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3 cursor-pointer group"
+            className="flex min-w-0 flex-1 h-full items-center gap-2 sm:gap-3 cursor-pointer group translate-y-[1px] sm:translate-y-[2px]"
             onClick={() => runWithBatchDiscardGuard(() => setMode('landing'))}
           >
             <div className={`p-2 rounded-[1.15rem] transition-transform group-hover:scale-105 duration-300 ${darkMode ? 'bg-emerald-500/10 text-emerald-200 ring-1 ring-emerald-300/35' : 'bg-[linear-gradient(145deg,rgba(255,255,255,0.96)_0%,rgba(236,253,245,0.92)_56%,rgba(239,246,255,0.9)_100%)] text-[#0f766e] ring-1 ring-white/95 shadow-[0_10px_24px_rgba(148,163,184,0.16)]'}`}><GraduationCap className="h-5 w-5" /></div>

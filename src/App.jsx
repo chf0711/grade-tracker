@@ -1002,12 +1002,12 @@ const ExamCountdown = ({ isDarkMode }) => {
                         <div className={`absolute inset-[4px] rounded-[0.95rem] ${isDarkMode ? 'bg-emerald-400/10' : 'bg-emerald-50/90'}`} />
                         <Sparkles className="relative z-[1] w-[0.95rem] h-[0.95rem]" />
                     </div>
-                    <div className="min-w-0 flex-1 text-left">
+                    <div className="min-w-0 flex-1 text-left -translate-y-[1px] sm:-translate-y-[2px]">
                         <div className="inline-flex items-center rounded-full px-2.5 py-[0.34rem]">
                             <div className={`text-[7px] sm:text-[7.5px] font-black uppercase tracking-[0.3em] ${isDarkMode ? 'text-emerald-200/80' : 'text-[#3f8f80]'}`}>Countdown Complete</div>
                         </div>
                         <p
-                          className={`mt-1 text-[13.5px] sm:text-[15.5px] font-[650] tracking-[-0.034em] leading-[1.08] ${isDarkMode ? 'text-white' : 'text-slate-800'}`}
+                          className={`mt-0.5 text-[13.5px] sm:text-[15.5px] font-[650] tracking-[-0.034em] leading-[1.08] ${isDarkMode ? 'text-white' : 'text-slate-800'}`}
                           style={{ textWrap: 'balance' }}
                         >
                             <span>This is the moment.</span>{' '}

@@ -992,13 +992,17 @@ const ExamCountdown = ({ isDarkMode }) => {
 
     if (isComplete) {
         return (
-            <div className={`countdown-complete-enter relative mt-4 mx-auto w-fit overflow-hidden px-4.5 sm:px-5.5 py-2.5 sm:py-3 rounded-[1.75rem] border backdrop-blur-xl ${isDarkMode ? 'bg-emerald-500/12 border-emerald-200/24 text-slate-100 shadow-[0_14px_34px_rgba(2,6,23,0.28)]' : 'bg-white/84 border-white/95 text-slate-700 shadow-[0_14px_32px_rgba(148,163,184,0.18)]'}`}>
+            <div className={`countdown-complete-enter relative mt-4 mx-auto w-fit overflow-hidden px-4 sm:px-5 py-2.5 sm:py-3 rounded-[1.75rem] border backdrop-blur-xl ${isDarkMode ? 'bg-emerald-500/12 border-emerald-200/24 text-slate-100 shadow-[0_14px_34px_rgba(2,6,23,0.28)]' : 'bg-white/84 border-white/95 text-slate-700 shadow-[0_14px_32px_rgba(148,163,184,0.18)]'}`}>
                 <div className={`countdown-complete-halo absolute inset-0 pointer-events-none ${isDarkMode ? 'bg-[radial-gradient(circle_at_18%_50%,rgba(52,211,153,0.3),transparent_46%),radial-gradient(circle_at_82%_45%,rgba(34,211,238,0.16),transparent_42%)]' : 'bg-[radial-gradient(circle_at_18%_50%,rgba(16,185,129,0.18),transparent_46%),radial-gradient(circle_at_82%_45%,rgba(14,165,233,0.14),transparent_42%)]'}`} />
                 <div className={`countdown-complete-halo countdown-complete-halo--delay absolute inset-0 pointer-events-none ${isDarkMode ? 'bg-[radial-gradient(circle_at_50%_50%,rgba(167,243,208,0.18),transparent_58%)]' : 'bg-[radial-gradient(circle_at_50%_50%,rgba(236,253,245,0.75),transparent_60%)]'}`} />
-                <div className={`absolute inset-x-4.5 sm:inset-x-5.5 top-0 h-px ${isDarkMode ? 'bg-gradient-to-r from-transparent via-emerald-100/55 to-transparent' : 'bg-gradient-to-r from-transparent via-white to-transparent'}`} />
-                <div className={`absolute left-4.5 sm:left-5.5 right-4.5 sm:right-5.5 bottom-0 h-7 pointer-events-none ${isDarkMode ? 'bg-[radial-gradient(circle_at_50%_110%,rgba(45,212,191,0.18),transparent_62%)]' : 'bg-[radial-gradient(circle_at_50%_110%,rgba(186,230,253,0.28),transparent_62%)]'}`} />
-                <div className="relative z-10 flex items-center justify-center text-center min-h-[1.25rem]">
-                    <div className={`text-[11px] sm:text-[12px] font-black uppercase tracking-[0.24em] leading-none ${isDarkMode ? 'text-emerald-100/88' : 'text-[#2f8c7f]'}`}>Countdown Complete</div>
+                <div className={`absolute inset-x-4 sm:inset-x-5 top-0 h-px ${isDarkMode ? 'bg-gradient-to-r from-transparent via-emerald-100/55 to-transparent' : 'bg-gradient-to-r from-transparent via-white to-transparent'}`} />
+                <div className={`absolute left-4 sm:left-5 right-4 sm:right-5 bottom-0 h-7 pointer-events-none ${isDarkMode ? 'bg-[radial-gradient(circle_at_50%_110%,rgba(45,212,191,0.18),transparent_62%)]' : 'bg-[radial-gradient(circle_at_50%_110%,rgba(186,230,253,0.28),transparent_62%)]'}`} />
+                <div className="relative z-10 flex items-center justify-center gap-2.5 sm:gap-3 text-center min-h-[1.25rem]">
+                    <div className={`relative w-7 h-7 sm:w-7.5 sm:h-7.5 rounded-full flex items-center justify-center shrink-0 ${isDarkMode ? 'bg-white/[0.08] text-emerald-100 ring-1 ring-white/10' : 'bg-white/92 text-emerald-700 ring-1 ring-slate-200/70 shadow-[0_8px_16px_rgba(226,232,240,0.44)]'}`}>
+                        <div className={`absolute inset-[3px] rounded-full ${isDarkMode ? 'bg-emerald-400/10' : 'bg-emerald-50/90'}`} />
+                        <Sparkles className="relative z-[1] w-[0.72rem] h-[0.72rem]" />
+                    </div>
+                    <div className={`text-[10px] sm:text-[11px] font-black uppercase tracking-[0.2em] leading-none ${isDarkMode ? 'text-emerald-100/88' : 'text-[#2f8c7f]'}`}>Countdown Complete</div>
                 </div>
             </div>
         );
@@ -1064,6 +1068,7 @@ export default function App() {
   const [queryEvents, setQueryEvents] = useState([]);
   const [queryStatsLastResetAt, setQueryStatsLastResetAt] = useState('');
   const [queryStatsLoading, setQueryStatsLoading] = useState(false);
+  const [queryPanelStage, setQueryPanelStage] = useState('idle');
   const [queryMonitorKeyword, setQueryMonitorKeyword] = useState('');
   const [queryMonitorDateFilter, setQueryMonitorDateFilter] = useState('all');
   const [queryMonitorScope, setQueryMonitorScope] = useState('all');
@@ -1094,6 +1099,7 @@ export default function App() {
   const shouldSnapTeacherEntryRef = useRef(false);
   const datesLoadPromiseRef = useRef(null);
   const classAveragesLoadPromiseRef = useRef(null);
+  const studentsLoadPromiseRef = useRef(null);
   const pendingImportPayloadRef = useRef(null);
   const parentQueryPerfRef = useRef({
       cacheHit: 0,
@@ -1102,6 +1108,9 @@ export default function App() {
   });
   const deferredBatchInsightTab = useDeferredValue(batchInsightTab);
   const deferredQueryMonitorKeyword = useDeferredValue(queryMonitorKeyword);
+  const deferredQueryMonitorDateFilter = useDeferredValue(queryMonitorDateFilter);
+  const deferredQueryMonitorScope = useDeferredValue(queryMonitorScope);
+  const deferredQueryMonitorSort = useDeferredValue(queryMonitorSort);
   const deferredQueryStatsById = useDeferredValue(queryStatsById);
   const deferredQueryEvents = useDeferredValue(queryEvents);
     
@@ -2376,20 +2385,31 @@ export default function App() {
 
   const loadAllStudents = async (options = {}) => {
       const { forceRemote = false } = options;
+      if (!forceRemote && studentsLoadPromiseRef.current) return studentsLoadPromiseRef.current;
+
+      const runner = async () => {
       setLoading(true);
+      let loadingReleased = false;
+      const releaseLoading = () => {
+          if (loadingReleased) return;
+          loadingReleased = true;
+          setLoading(false);
+      };
       try {
           const cachedStudents = readLocalCache(LOCAL_CACHE_KEYS.students, STUDENT_CACHE_TTL_MS);
           const hasSessionSynced =
               typeof window !== 'undefined'
               && sessionStorage.getItem(STUDENTS_SESSION_SYNC_KEY) === '1';
           if (!forceRemote && Array.isArray(cachedStudents)) {
-              setAllStudentsData(cachedStudents);
-              setCachedClassData(cachedStudents);
+              startTransition(() => {
+                  setAllStudentsData(cachedStudents);
+                  setCachedClassData(cachedStudents);
+              });
               batchDirtyStudentIdsRef.current = new Set();
               setIsBatchDirty(false);
+              releaseLoading();
               if (hasSessionSynced || !db) {
-                  setLoading(false);
-                  return;
+                  return cachedStudents;
               }
           }
 
@@ -2424,30 +2444,49 @@ export default function App() {
               });
           }
           const sortedStudents = Object.values(studentsMap).sort((a,b) => a.id.localeCompare(b.id));
-          setAllStudentsData(sortedStudents);
-          setCachedClassData(sortedStudents);
+          startTransition(() => {
+              setAllStudentsData(sortedStudents);
+              setCachedClassData(sortedStudents);
+          });
           writeLocalCache(LOCAL_CACHE_KEYS.students, sortedStudents);
           if (typeof window !== 'undefined') {
               sessionStorage.setItem(STUDENTS_SESSION_SYNC_KEY, '1');
           }
           batchDirtyStudentIdsRef.current = new Set();
           setIsBatchDirty(false);
+          releaseLoading();
 
           if (db && cleanupPayloads.length > 0) {
-              await Promise.all(
+              void Promise.all(
                   cleanupPayloads.map((item) =>
                       setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${item.id}`), item.payload)
                   )
-              );
-              setStatusMsg(
-                  cleanedInvalidDateCount > 0
-                      ? `已自動刪除 ${cleanedInvalidDateCount} 筆不合理日期資料`
-                      : `已自動整理 ${cleanupPayloads.length} 筆重複考次資料`
-              );
-              setTimeout(() => setStatusMsg(''), 2400);
+              ).then(() => {
+                  setStatusMsg(
+                      cleanedInvalidDateCount > 0
+                          ? `已自動刪除 ${cleanedInvalidDateCount} 筆不合理日期資料`
+                          : `已自動整理 ${cleanupPayloads.length} 筆重複考次資料`
+                  );
+                  setTimeout(() => setStatusMsg(''), 2400);
+              }).catch((err) => {
+                  console.error('Cleanup invalid student dates error:', err);
+              });
           }
+          return sortedStudents;
       } catch (e) { console.error("Load error:", e); }
-      setLoading(false);
+      finally {
+          releaseLoading();
+      }
+      return [];
+      };
+
+      const promise = runner().finally(() => {
+          if (studentsLoadPromiseRef.current === promise) {
+              studentsLoadPromiseRef.current = null;
+          }
+      });
+      studentsLoadPromiseRef.current = promise;
+      return promise;
   };
 
   useEffect(() => {
@@ -4028,7 +4067,7 @@ export default function App() {
       const targetWeekendIds = new Set(relevantWeekendIdsForPR);
       const gradeMaps = {};
 
-      allStudentsData.forEach((student) => {
+      deferredStudentsForDerived.forEach((student) => {
           const weekendEntries = buildTargetWeekendGradeEntryMap(student.grades, targetWeekendIds, getTestDateID);
           const weekendGrades = {};
           Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
@@ -4040,7 +4079,7 @@ export default function App() {
       });
 
       return gradeMaps;
-  }, [allStudentsData, getTestDateID, relevantWeekendIdsForPR, shouldBuildBatchAnalytics]);
+  }, [deferredStudentsForDerived, getTestDateID, relevantWeekendIdsForPR, shouldBuildBatchAnalytics]);
 
   const globalPRByStudentAndWeekend = useMemo(() => {
       if (!shouldBuildBatchAnalytics || relevantWeekendIdsForPR.length === 0) return {};
@@ -4079,7 +4118,7 @@ export default function App() {
       const weekendID = getTestDateID(batchDate);
       const rows = [];
 
-      allStudentsData.forEach(student => {
+      deferredStudentsForDerived.forEach(student => {
           const dateGrades = batchRelevantGradeMapsByStudentId[student.id]?.[weekendID];
           if (!dateGrades) return;
 
@@ -4115,7 +4154,7 @@ export default function App() {
       return computedRows;
   }, [
       shouldBuildBatchAnalytics,
-      allStudentsData,
+      deferredStudentsForDerived,
       batchDate,
       teacherClassFilter,
       getTestDateID,
@@ -4367,13 +4406,63 @@ export default function App() {
       };
   }, [batchRowsForDisplay, batchRiskAlerts]);
 
+  const isQueryTabRequested =
+      mode === 'teacher' && teacherViewMode === 'batch' && batchInsightTab === 'query';
+
+  useEffect(() => {
+      if (!isQueryTabRequested) {
+          setQueryPanelStage('idle');
+          return undefined;
+      }
+
+      setQueryPanelStage('shell');
+      let cancelled = false;
+      let rafId = null;
+      let idleId = null;
+      let timerId = null;
+
+      const promoteToFull = () => {
+          if (cancelled) return;
+          startTransition(() => {
+              setQueryPanelStage('full');
+          });
+      };
+
+      rafId = requestAnimationFrame(() => {
+          if (cancelled) return;
+          setQueryPanelStage('core');
+
+          if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+              idleId = window.requestIdleCallback(() => promoteToFull(), { timeout: 700 });
+              return;
+          }
+
+          timerId = window.setTimeout(promoteToFull, 180);
+      });
+
+      return () => {
+          cancelled = true;
+          if (rafId) cancelAnimationFrame(rafId);
+          if (idleId && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+              window.cancelIdleCallback(idleId);
+          }
+          if (timerId) window.clearTimeout(timerId);
+      };
+  }, [isQueryTabRequested]);
+
   const shouldBuildQueryInsights =
-      mode === 'teacher' && teacherViewMode === 'batch' && deferredBatchInsightTab === 'query';
-  const isQueryInsightsPending =
       mode === 'teacher'
       && teacherViewMode === 'batch'
-      && batchInsightTab === 'query'
-      && !shouldBuildQueryInsights;
+      && deferredBatchInsightTab === 'query'
+      && queryPanelStage !== 'idle'
+      && queryPanelStage !== 'shell';
+  const shouldBuildQueryDeepInsights =
+      shouldBuildQueryInsights && queryPanelStage === 'full';
+  const isQueryInsightsPending =
+      isQueryTabRequested
+      && (deferredBatchInsightTab !== 'query' || queryPanelStage === 'idle' || queryPanelStage === 'shell');
+  const isQueryDeepInsightsPending =
+      shouldBuildQueryInsights && queryPanelStage !== 'full';
 
   const studentNameById = useMemo(() => {
       if (!shouldBuildQueryInsights) return {};
@@ -4496,8 +4585,8 @@ export default function App() {
 
   const queryMonitorBaseRows = useMemo(() => {
       if (!shouldBuildQueryInsights) return [];
-      return queryMonitorScope === 'class' ? queryClassCoverageRows : queryStatsRows;
-  }, [queryMonitorScope, queryClassCoverageRows, queryStatsRows, shouldBuildQueryInsights]);
+      return deferredQueryMonitorScope === 'class' ? queryClassCoverageRows : queryStatsRows;
+  }, [deferredQueryMonitorScope, queryClassCoverageRows, queryStatsRows, shouldBuildQueryInsights]);
 
   const queryStatsRowsFiltered = useMemo(() => {
       if (!shouldBuildQueryInsights) return [];
@@ -4513,7 +4602,7 @@ export default function App() {
           return idText.includes(upperKeyword) || nameText.includes(lowerKeyword);
       });
 
-      if (queryMonitorSort === 'latest_desc') {
+      if (deferredQueryMonitorSort === 'latest_desc') {
           rows.sort((a, b) => {
               if (b.latestTs !== a.latestTs) return b.latestTs - a.latestTs;
               return b.count - a.count;
@@ -4521,7 +4610,7 @@ export default function App() {
           return rows;
       }
 
-      if (queryMonitorSort === 'id_asc') {
+      if (deferredQueryMonitorSort === 'id_asc') {
           rows.sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
           return rows;
       }
@@ -4531,7 +4620,7 @@ export default function App() {
           return b.latestTs - a.latestTs;
       });
       return rows;
-  }, [queryMonitorBaseRows, deferredQueryMonitorKeyword, queryMonitorSort, shouldBuildQueryInsights]);
+  }, [queryMonitorBaseRows, deferredQueryMonitorKeyword, deferredQueryMonitorSort, shouldBuildQueryInsights]);
 
   const queryEventsByDayFiltered = useMemo(() => {
       if (!shouldBuildQueryInsights) return [];
@@ -4539,10 +4628,10 @@ export default function App() {
       const hasKeyword = keyword.length > 0;
       const upperKeyword = keyword.toUpperCase();
       const lowerKeyword = keyword.toLowerCase();
-      const shouldLimitToClass = queryMonitorScope === 'class';
+      const shouldLimitToClass = deferredQueryMonitorScope === 'class';
 
       return queryEventsByDay
-          .filter((day) => queryMonitorDateFilter === 'all' || day.dateKey === queryMonitorDateFilter)
+          .filter((day) => deferredQueryMonitorDateFilter === 'all' || day.dateKey === deferredQueryMonitorDateFilter)
           .map((day) => {
               let items = day.items;
               if (shouldLimitToClass) {
@@ -4558,7 +4647,7 @@ export default function App() {
               return { ...day, items };
           })
           .filter((day) => day.items.length > 0);
-  }, [queryEventsByDay, queryMonitorDateFilter, deferredQueryMonitorKeyword, queryMonitorScope, queryClassStudentIdSet, shouldBuildQueryInsights]);
+  }, [queryEventsByDay, deferredQueryMonitorDateFilter, deferredQueryMonitorKeyword, deferredQueryMonitorScope, queryClassStudentIdSet, shouldBuildQueryInsights]);
 
   const queryFilteredEventList = useMemo(
       () => (shouldBuildQueryInsights ? queryEventsByDayFiltered.flatMap((day) => day.items) : []),
@@ -4623,16 +4712,7 @@ export default function App() {
   }, [queryFilteredEventList, shouldBuildQueryInsights]);
 
   const queryBiHourBuckets = useMemo(() => {
-      if (!shouldBuildQueryInsights) {
-          return Array.from({ length: 12 }, (_, index) => ({
-              key: index,
-              startHour: index * 2,
-              endHour: (index * 2) + 2,
-              count: 0,
-              label: `${String(index * 2).padStart(2, '0')}-${String(((index * 2) + 2) % 24).padStart(2, '0')}`,
-              ratio: 0
-          }));
-      }
+      if (!shouldBuildQueryDeepInsights) return [];
       const buckets = Array.from({ length: 12 }, (_, index) => ({
           key: index,
           startHour: index * 2,
@@ -4653,10 +4733,10 @@ export default function App() {
           label: `${String(bucket.startHour).padStart(2, '0')}-${String(bucket.endHour % 24).padStart(2, '0')}`,
           ratio: bucket.count / safeMax
       }));
-  }, [queryFilteredEventList, shouldBuildQueryInsights]);
+  }, [queryFilteredEventList, shouldBuildQueryDeepInsights]);
 
   const queryDailyTrend = useMemo(() => {
-      if (!shouldBuildQueryInsights) return [];
+      if (!shouldBuildQueryDeepInsights) return [];
       const trendDays = [...queryEventsByDayFiltered].slice(0, 14).reverse();
       const maxCount = trendDays.reduce((max, day) => Math.max(max, day.items.length), 0);
       const safeMax = maxCount > 0 ? maxCount : 1;
@@ -4666,10 +4746,10 @@ export default function App() {
           count: day.items.length,
           ratio: day.items.length / safeMax
       }));
-  }, [queryEventsByDayFiltered, shouldBuildQueryInsights]);
+  }, [queryEventsByDayFiltered, shouldBuildQueryDeepInsights]);
 
   const queryDayCountByIdMap = useMemo(() => {
-      if (!shouldBuildQueryInsights) return {};
+      if (!shouldBuildQueryDeepInsights) return {};
       const map = {};
       queryEventsByDayFiltered.forEach((day) => {
           const dayCount = {};
@@ -4684,10 +4764,10 @@ export default function App() {
           });
       });
       return map;
-  }, [queryEventsByDayFiltered, shouldBuildQueryInsights]);
+  }, [queryEventsByDayFiltered, shouldBuildQueryDeepInsights]);
 
   const queryRecent48hCountById = useMemo(() => {
-      if (!shouldBuildQueryInsights) return {};
+      if (!shouldBuildQueryDeepInsights) return {};
       const cutoff = Date.now() - (48 * 60 * 60 * 1000);
       const map = {};
       queryFilteredEventList.forEach((event) => {
@@ -4697,10 +4777,10 @@ export default function App() {
           map[id] = (map[id] || 0) + 1;
       });
       return map;
-  }, [queryFilteredEventList, shouldBuildQueryInsights]);
+  }, [queryFilteredEventList, shouldBuildQueryDeepInsights]);
 
   const queryMonitorAlertRows = useMemo(() => {
-      if (!shouldBuildQueryInsights) return [];
+      if (!shouldBuildQueryDeepInsights) return [];
       const now = Date.now();
       return queryStatsRowsFiltered
           .map((row) => {
@@ -4761,7 +4841,7 @@ export default function App() {
               return b.latestTs - a.latestTs;
           })
           .slice(0, 12);
-  }, [queryStatsRowsFiltered, queryDayCountByIdMap, queryRecent48hCountById, shouldBuildQueryInsights]);
+  }, [queryStatsRowsFiltered, queryDayCountByIdMap, queryRecent48hCountById, shouldBuildQueryDeepInsights]);
 
   const queryClassCoverageSummary = useMemo(() => {
       if (!shouldBuildQueryInsights) {
@@ -4781,10 +4861,10 @@ export default function App() {
 
   useEffect(() => {
       if (!shouldBuildQueryInsights) return;
-      if (queryMonitorDateFilter === 'all') return;
-      const exists = queryEventsByDay.some((day) => day.dateKey === queryMonitorDateFilter);
+      if (deferredQueryMonitorDateFilter === 'all') return;
+      const exists = queryEventsByDay.some((day) => day.dateKey === deferredQueryMonitorDateFilter);
       if (!exists) setQueryMonitorDateFilter('all');
-  }, [queryMonitorDateFilter, queryEventsByDay, shouldBuildQueryInsights]);
+  }, [deferredQueryMonitorDateFilter, queryEventsByDay, shouldBuildQueryInsights]);
 
   const queryStatsLastResetText = useMemo(() => {
       if (!queryStatsLastResetAt) return '尚未初始化';
@@ -4815,7 +4895,7 @@ export default function App() {
           emptyGradeStudent: []
       };
 
-      if (!shouldBuildQueryInsights) {
+      if (!shouldBuildQueryDeepInsights) {
           return { summary: emptySummary, details: emptyDetails };
       }
 
@@ -4967,7 +5047,7 @@ export default function App() {
           },
           details
       };
-  }, [deferredDatesForDerived, deferredStudentsForDerived, getTestDateID, shouldBuildQueryInsights]);
+  }, [deferredDatesForDerived, deferredStudentsForDerived, getTestDateID, shouldBuildQueryDeepInsights]);
 
   const dataQualitySummary = dataQualityReport.summary;
   const dataQualityDetails = dataQualityReport.details;
@@ -5011,10 +5091,10 @@ export default function App() {
   );
 
   useEffect(() => {
-      if (shouldBuildQueryInsights) return;
+      if (shouldBuildQueryDeepInsights) return;
       if (!activeQualityIssueType) return;
       setActiveQualityIssueType('');
-  }, [shouldBuildQueryInsights, activeQualityIssueType]);
+  }, [shouldBuildQueryDeepInsights, activeQualityIssueType]);
 
   useEffect(() => {
       if (!activeQualityIssueType) return;
@@ -5934,40 +6014,46 @@ export default function App() {
                                 <div className={`rounded-xl border p-2.5 ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
                                     <div className="flex items-center justify-between mb-2">
                                         <div className={`text-[10px] font-black tracking-widest uppercase ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>監控提醒</div>
-                                        <div className={`text-[10px] font-black ${darkMode ? 'text-amber-200' : 'text-amber-700'}`}>{queryMonitorAlertRows.length} 筆</div>
+                                        <div className={`text-[10px] font-black ${darkMode ? 'text-amber-200' : 'text-amber-700'}`}>{isQueryDeepInsightsPending ? '整理中' : `${queryMonitorAlertRows.length} 筆`}</div>
                                     </div>
-                                    <div className="space-y-1 max-h-[12.5rem] overflow-y-auto pr-1">
-                                        {queryMonitorAlertRows.map((row) => (
-                                            <div
-                                              key={`alert-${row.id}`}
-                                              onClick={() => setQueryMonitorKeyword(row.id)}
-                                              className={`rounded-lg border px-2 py-1.5 cursor-pointer transition-colors ${darkMode ? 'border-white/10 bg-slate-900/55 hover:bg-slate-800' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}`}
-                                              title="點擊可快速篩選此學號"
-                                            >
-                                                <div className="flex items-center justify-between gap-2">
-                                                    <div className={`text-[11px] font-black ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>
-                                                        <span className="font-mono">{row.id}</span>
-                                                        <span className="ml-1.5">{row.name || '-'}</span>
+                                    {isQueryDeepInsightsPending ? (
+                                        <div className={`rounded-lg border px-3 py-3 text-center text-xs font-bold ${darkMode ? 'border-white/10 bg-slate-900/55 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                                            進階監控提醒整理中，基本排行與事件紀錄已可先操作。
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-1 max-h-[12.5rem] overflow-y-auto pr-1">
+                                            {queryMonitorAlertRows.map((row) => (
+                                                <div
+                                                  key={`alert-${row.id}`}
+                                                  onClick={() => setQueryMonitorKeyword(row.id)}
+                                                  className={`rounded-lg border px-2 py-1.5 cursor-pointer transition-colors ${darkMode ? 'border-white/10 bg-slate-900/55 hover:bg-slate-800' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}`}
+                                                  title="點擊可快速篩選此學號"
+                                                >
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <div className={`text-[11px] font-black ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>
+                                                            <span className="font-mono">{row.id}</span>
+                                                            <span className="ml-1.5">{row.name || '-'}</span>
+                                                        </div>
+                                                        <div className={`text-[10px] font-black ${darkMode ? 'text-rose-200' : 'text-rose-700'}`}>
+                                                            {row.alertScore}
+                                                        </div>
                                                     </div>
-                                                    <div className={`text-[10px] font-black ${darkMode ? 'text-rose-200' : 'text-rose-700'}`}>
-                                                        {row.alertScore}
+                                                    <div className="mt-1 flex flex-wrap gap-1">
+                                                        {row.tags.map((tag) => (
+                                                            <span key={`${row.id}-${tag}`} className={`inline-flex text-[10px] font-bold rounded-full px-2 py-0.5 ${darkMode ? 'bg-rose-400/20 text-rose-100 border border-rose-300/25' : 'bg-rose-100 text-rose-700 border border-rose-200'}`}>
+                                                                {tag}
+                                                            </span>
+                                                        ))}
                                                     </div>
                                                 </div>
-                                                <div className="mt-1 flex flex-wrap gap-1">
-                                                    {row.tags.map((tag) => (
-                                                        <span key={`${row.id}-${tag}`} className={`inline-flex text-[10px] font-bold rounded-full px-2 py-0.5 ${darkMode ? 'bg-rose-400/20 text-rose-100 border border-rose-300/25' : 'bg-rose-100 text-rose-700 border border-rose-200'}`}>
-                                                            {tag}
-                                                        </span>
-                                                    ))}
+                                            ))}
+                                            {!queryMonitorAlertRows.length && (
+                                                <div className={`rounded-lg border px-3 py-3 text-center text-xs font-bold ${darkMode ? 'border-white/10 bg-slate-900/55 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                                                    目前沒有明顯異常行為
                                                 </div>
-                                            </div>
-                                        ))}
-                                        {!queryMonitorAlertRows.length && (
-                                            <div className={`rounded-lg border px-3 py-3 text-center text-xs font-bold ${darkMode ? 'border-white/10 bg-slate-900/55 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
-                                                目前沒有明顯異常行為
-                                            </div>
-                                        )}
-                                    </div>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="grid grid-cols-1 lg:grid-cols-[1.34fr_0.86fr] gap-2">
@@ -6073,43 +6159,55 @@ export default function App() {
 
                                         <div className={`rounded-xl border p-2.5 ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
                                             <div className={`text-[10px] font-black tracking-widest uppercase mb-2 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>兩小時查詢熱區</div>
-                                            <div className="grid grid-cols-2 gap-1.5">
-                                                {queryBiHourBuckets.map((bucket) => (
-                                                    <div key={bucket.key} className={`rounded-lg border px-1.5 py-1.5 ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-slate-50'}`}>
-                                                        <div className={`text-[10px] font-bold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>{bucket.label}</div>
-                                                        <div className={`h-1.5 rounded-full overflow-hidden ${darkMode ? 'bg-slate-800' : 'bg-slate-200'}`}>
-                                                            <div
-                                                              className="h-full rounded-full bg-[linear-gradient(90deg,#22c55e_0%,#0ea5e9_55%,#6366f1_100%)]"
-                                                              style={{ width: `${bucket.count > 0 ? Math.max(8, Math.round(bucket.ratio * 100)) : 0}%` }}
-                                                            />
+                                            {isQueryDeepInsightsPending ? (
+                                                <div className={`rounded-lg border px-3 py-3 text-center text-xs font-bold ${darkMode ? 'border-white/10 bg-slate-900/55 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                                                    正在整理熱區資料...
+                                                </div>
+                                            ) : (
+                                                <div className="grid grid-cols-2 gap-1.5">
+                                                    {queryBiHourBuckets.map((bucket) => (
+                                                        <div key={bucket.key} className={`rounded-lg border px-1.5 py-1.5 ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-slate-50'}`}>
+                                                            <div className={`text-[10px] font-bold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>{bucket.label}</div>
+                                                            <div className={`h-1.5 rounded-full overflow-hidden ${darkMode ? 'bg-slate-800' : 'bg-slate-200'}`}>
+                                                                <div
+                                                                  className="h-full rounded-full bg-[linear-gradient(90deg,#22c55e_0%,#0ea5e9_55%,#6366f1_100%)]"
+                                                                  style={{ width: `${bucket.count > 0 ? Math.max(8, Math.round(bucket.ratio * 100)) : 0}%` }}
+                                                                />
+                                                            </div>
+                                                            <div className={`text-[10px] font-black mt-1 ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}>{bucket.count}</div>
                                                         </div>
-                                                        <div className={`text-[10px] font-black mt-1 ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}>{bucket.count}</div>
-                                                    </div>
-                                                ))}
-                                            </div>
+                                                    ))}
+                                                </div>
+                                            )}
                                         </div>
 
                                         <div className={`rounded-xl border p-2.5 ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
                                             <div className={`text-[10px] font-black tracking-widest uppercase mb-2 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>14日查詢趨勢</div>
-                                            <div className="space-y-1 max-h-[11rem] overflow-y-auto pr-1">
-                                                {queryDailyTrend.map((day) => (
-                                                    <div key={day.dateKey} className="grid grid-cols-[3.9rem_1fr_2rem] items-center gap-2">
-                                                        <span className={`text-[10px] font-bold ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>{day.label.slice(0, 5)}</span>
-                                                        <div className={`h-1.5 rounded-full overflow-hidden ${darkMode ? 'bg-slate-800' : 'bg-slate-200'}`}>
-                                                            <div
-                                                              className="h-full rounded-full bg-[linear-gradient(90deg,#10b981_0%,#22c55e_35%,#0ea5e9_100%)]"
-                                                              style={{ width: `${day.count > 0 ? Math.max(8, Math.round(day.ratio * 100)) : 0}%` }}
-                                                            />
+                                            {isQueryDeepInsightsPending ? (
+                                                <div className={`rounded-lg border px-3 py-3 text-center text-xs font-bold ${darkMode ? 'border-white/10 bg-slate-900/55 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                                                    正在整理趨勢資料...
+                                                </div>
+                                            ) : (
+                                                <div className="space-y-1 max-h-[11rem] overflow-y-auto pr-1">
+                                                    {queryDailyTrend.map((day) => (
+                                                        <div key={day.dateKey} className="grid grid-cols-[3.9rem_1fr_2rem] items-center gap-2">
+                                                            <span className={`text-[10px] font-bold ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>{day.label.slice(0, 5)}</span>
+                                                            <div className={`h-1.5 rounded-full overflow-hidden ${darkMode ? 'bg-slate-800' : 'bg-slate-200'}`}>
+                                                                <div
+                                                                  className="h-full rounded-full bg-[linear-gradient(90deg,#10b981_0%,#22c55e_35%,#0ea5e9_100%)]"
+                                                                  style={{ width: `${day.count > 0 ? Math.max(8, Math.round(day.ratio * 100)) : 0}%` }}
+                                                                />
+                                                            </div>
+                                                            <span className={`text-[10px] font-black text-right ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>{day.count}</span>
                                                         </div>
-                                                        <span className={`text-[10px] font-black text-right ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>{day.count}</span>
-                                                    </div>
-                                                ))}
-                                                {!queryDailyTrend.length && (
-                                                    <div className={`text-[11px] text-center font-semibold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                                                        目前沒有趨勢資料
-                                                    </div>
-                                                )}
-                                            </div>
+                                                    ))}
+                                                    {!queryDailyTrend.length && (
+                                                        <div className={`text-[11px] text-center font-semibold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                            目前沒有趨勢資料
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
@@ -6148,13 +6246,20 @@ export default function App() {
                                         <div className="flex items-center justify-between gap-2">
                                             <div className={`text-[10px] font-black tracking-widest uppercase ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>資料品質中心</div>
                                             <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
-                                                dataQualitySummary.issueCount > 0
-                                                    ? (darkMode ? 'text-amber-200 border-amber-300/40 bg-amber-500/15' : 'text-amber-700 border-amber-200 bg-amber-50')
-                                                    : (darkMode ? 'text-emerald-200 border-emerald-300/35 bg-emerald-500/15' : 'text-emerald-700 border-emerald-200 bg-emerald-50')
+                                                isQueryDeepInsightsPending
+                                                    ? (darkMode ? 'text-slate-200 border-white/15 bg-slate-800/70' : 'text-slate-600 border-slate-200 bg-slate-50')
+                                                    : dataQualitySummary.issueCount > 0
+                                                        ? (darkMode ? 'text-amber-200 border-amber-300/40 bg-amber-500/15' : 'text-amber-700 border-amber-200 bg-amber-50')
+                                                        : (darkMode ? 'text-emerald-200 border-emerald-300/35 bg-emerald-500/15' : 'text-emerald-700 border-emerald-200 bg-emerald-50')
                                             }`}>
-                                                {dataQualitySummary.issueCount > 0 ? `${dataQualitySummary.issueCount} 項待檢查` : '狀態良好'}
+                                                {isQueryDeepInsightsPending ? '整理中' : (dataQualitySummary.issueCount > 0 ? `${dataQualitySummary.issueCount} 項待檢查` : '狀態良好')}
                                             </span>
                                         </div>
+                                        {isQueryDeepInsightsPending ? (
+                                            <div className={`rounded-lg border px-3 py-3 text-center text-xs font-bold ${darkMode ? 'border-white/10 bg-slate-900/55 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                                                正在掃描資料品質，先不阻塞查詢監控主畫面。
+                                            </div>
+                                        ) : (
                                         <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5">
                                             <div className={`rounded-lg border px-2 py-1.5 ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-slate-50'}`}>
                                                 <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>總學生數</div>
@@ -6190,7 +6295,8 @@ export default function App() {
                                                 );
                                             })}
                                         </div>
-                                        {activeQualityIssueType && (
+                                        )}
+                                        {!isQueryDeepInsightsPending && activeQualityIssueType && (
                                             <div className={`rounded-lg border p-2 space-y-1.5 ${darkMode ? 'border-sky-300/30 bg-slate-900/55' : 'border-sky-200 bg-sky-50/60'}`}>
                                                 <div className="flex items-center justify-between gap-2">
                                                     <div className={`text-[10px] font-black tracking-widest uppercase ${darkMode ? 'text-sky-200' : 'text-sky-700'}`}>

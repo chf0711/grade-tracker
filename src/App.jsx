@@ -992,21 +992,13 @@ const ExamCountdown = ({ isDarkMode }) => {
 
     if (isComplete) {
         return (
-            <div className={`countdown-complete-enter relative mt-4 overflow-hidden px-5 sm:px-6 py-3.5 sm:py-4 rounded-[2rem] border backdrop-blur-xl ${isDarkMode ? 'bg-emerald-500/12 border-emerald-200/24 text-slate-100 shadow-[0_16px_42px_rgba(2,6,23,0.32)]' : 'bg-white/84 border-white/95 text-slate-700 shadow-[0_16px_40px_rgba(148,163,184,0.22)]'}`}>
+            <div className={`countdown-complete-enter relative mt-4 mx-auto w-fit overflow-hidden px-4.5 sm:px-5.5 py-2.5 sm:py-3 rounded-[1.75rem] border backdrop-blur-xl ${isDarkMode ? 'bg-emerald-500/12 border-emerald-200/24 text-slate-100 shadow-[0_14px_34px_rgba(2,6,23,0.28)]' : 'bg-white/84 border-white/95 text-slate-700 shadow-[0_14px_32px_rgba(148,163,184,0.18)]'}`}>
                 <div className={`countdown-complete-halo absolute inset-0 pointer-events-none ${isDarkMode ? 'bg-[radial-gradient(circle_at_18%_50%,rgba(52,211,153,0.3),transparent_46%),radial-gradient(circle_at_82%_45%,rgba(34,211,238,0.16),transparent_42%)]' : 'bg-[radial-gradient(circle_at_18%_50%,rgba(16,185,129,0.18),transparent_46%),radial-gradient(circle_at_82%_45%,rgba(14,165,233,0.14),transparent_42%)]'}`} />
                 <div className={`countdown-complete-halo countdown-complete-halo--delay absolute inset-0 pointer-events-none ${isDarkMode ? 'bg-[radial-gradient(circle_at_50%_50%,rgba(167,243,208,0.18),transparent_58%)]' : 'bg-[radial-gradient(circle_at_50%_50%,rgba(236,253,245,0.75),transparent_60%)]'}`} />
-                <div className={`absolute inset-x-5 sm:inset-x-6 top-0 h-px ${isDarkMode ? 'bg-gradient-to-r from-transparent via-emerald-100/55 to-transparent' : 'bg-gradient-to-r from-transparent via-white to-transparent'}`} />
-                <div className={`absolute left-5 sm:left-6 right-5 sm:right-6 bottom-0 h-9 pointer-events-none ${isDarkMode ? 'bg-[radial-gradient(circle_at_50%_110%,rgba(45,212,191,0.2),transparent_62%)]' : 'bg-[radial-gradient(circle_at_50%_110%,rgba(186,230,253,0.34),transparent_62%)]'}`} />
-                <div className="relative z-10 flex items-center gap-3.5 sm:gap-4">
-                    <div className={`relative w-9 h-9 sm:w-10 sm:h-10 rounded-[1.2rem] flex items-center justify-center shrink-0 ${isDarkMode ? 'bg-white/[0.08] text-emerald-100 ring-1 ring-white/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]' : 'bg-white/90 text-emerald-700 ring-1 ring-slate-200/70 shadow-[0_10px_20px_rgba(226,232,240,0.5)]'}`}>
-                        <div className={`absolute inset-[4px] rounded-[0.95rem] ${isDarkMode ? 'bg-emerald-400/10' : 'bg-emerald-50/90'}`} />
-                        <Sparkles className="relative z-[1] w-[0.95rem] h-[0.95rem]" />
-                    </div>
-                    <div className="min-w-0 flex-1 text-left -translate-y-[2px] sm:-translate-y-[3px]">
-                        <div className="inline-flex items-center rounded-full px-2.5 py-[0.34rem]">
-                            <div className={`text-[12px] sm:text-[13px] font-black uppercase tracking-[0.22em] ${isDarkMode ? 'text-emerald-100/88' : 'text-[#2f8c7f]'}`}>Countdown Complete</div>
-                        </div>
-                    </div>
+                <div className={`absolute inset-x-4.5 sm:inset-x-5.5 top-0 h-px ${isDarkMode ? 'bg-gradient-to-r from-transparent via-emerald-100/55 to-transparent' : 'bg-gradient-to-r from-transparent via-white to-transparent'}`} />
+                <div className={`absolute left-4.5 sm:left-5.5 right-4.5 sm:right-5.5 bottom-0 h-7 pointer-events-none ${isDarkMode ? 'bg-[radial-gradient(circle_at_50%_110%,rgba(45,212,191,0.18),transparent_62%)]' : 'bg-[radial-gradient(circle_at_50%_110%,rgba(186,230,253,0.28),transparent_62%)]'}`} />
+                <div className="relative z-10 flex items-center justify-center text-center min-h-[1.25rem]">
+                    <div className={`text-[11px] sm:text-[12px] font-black uppercase tracking-[0.24em] leading-none ${isDarkMode ? 'text-emerald-100/88' : 'text-[#2f8c7f]'}`}>Countdown Complete</div>
                 </div>
             </div>
         );

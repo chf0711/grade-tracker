@@ -1002,19 +1002,10 @@ const ExamCountdown = ({ isDarkMode }) => {
                         <div className={`absolute inset-[4px] rounded-[0.95rem] ${isDarkMode ? 'bg-emerald-400/10' : 'bg-emerald-50/90'}`} />
                         <Sparkles className="relative z-[1] w-[0.95rem] h-[0.95rem]" />
                     </div>
-                    <div className="min-w-0 flex-1 text-left -translate-y-[1px] sm:-translate-y-[2px]">
+                    <div className="min-w-0 flex-1 text-left -translate-y-[2px] sm:-translate-y-[3px]">
                         <div className="inline-flex items-center rounded-full px-2.5 py-[0.34rem]">
-                            <div className={`text-[7px] sm:text-[7.5px] font-black uppercase tracking-[0.3em] ${isDarkMode ? 'text-emerald-200/80' : 'text-[#3f8f80]'}`}>Countdown Complete</div>
+                            <div className={`text-[12px] sm:text-[13px] font-black uppercase tracking-[0.22em] ${isDarkMode ? 'text-emerald-100/88' : 'text-[#2f8c7f]'}`}>Countdown Complete</div>
                         </div>
-                        <p
-                          className={`mt-0.5 text-[14.25px] sm:text-[16.25px] font-[650] tracking-[-0.034em] leading-[1.08] ${isDarkMode ? 'text-white' : 'text-slate-800'}`}
-                          style={{ textWrap: 'balance' }}
-                        >
-                            <span>This is the moment.</span>{' '}
-                            <span className={isDarkMode ? 'bg-[linear-gradient(135deg,#ecfdf5_0%,#99f6e4_38%,#7dd3fc_100%)] bg-clip-text text-transparent' : 'bg-[linear-gradient(135deg,#0f766e_0%,#059669_28%,#0ea5e9_100%)] bg-clip-text text-transparent'}>
-                                Make it count.
-                            </span>
-                        </p>
                     </div>
                 </div>
             </div>
@@ -5181,15 +5172,15 @@ export default function App() {
       <header className={`header-glass fixed top-0 w-full backdrop-blur-xl z-30 border-b transition-all duration-300 ${shouldElevateHeader ? 'header-glass--scrolled' : ''} ${darkMode ? 'header-glass--dark bg-[#0b1512]/84 border-emerald-200/15 shadow-lg shadow-black/35' : 'bg-[linear-gradient(108deg,rgba(255,255,255,0.78)_0%,rgba(244,252,248,0.84)_52%,rgba(241,247,255,0.8)_100%)] border-white/75 shadow-[0_14px_36px_rgba(15,23,42,0.12)]'}`}>
         <div className="max-w-5xl mx-auto px-3 sm:px-6 h-[calc(4rem+env(safe-area-inset-top))] pt-[env(safe-area-inset-top)] flex justify-between items-center relative z-10">
           <div
-            className="flex min-w-0 flex-1 h-full items-center gap-2 sm:gap-3 cursor-pointer group -translate-y-[1px]"
+            className="flex min-w-0 flex-1 h-full items-center gap-2 sm:gap-3 cursor-pointer group -translate-y-[2px]"
             onClick={() => runWithBatchDiscardGuard(() => setMode('landing'))}
           >
             <div className={`p-2 rounded-[1.15rem] transition-transform group-hover:scale-105 duration-300 ${darkMode ? 'bg-emerald-500/10 text-emerald-200 ring-1 ring-emerald-300/35' : 'bg-[linear-gradient(145deg,rgba(255,255,255,0.96)_0%,rgba(236,253,245,0.92)_56%,rgba(239,246,255,0.9)_100%)] text-[#0f766e] ring-1 ring-white/95 shadow-[0_10px_24px_rgba(148,163,184,0.16)]'}`}><GraduationCap className="h-5 w-5" /></div>
-            <div className="min-w-0 flex flex-col justify-center -space-y-[0.14rem] sm:-space-y-[0.2rem]">
+            <div className="min-w-0 flex flex-col justify-center gap-[0.14rem] sm:gap-[0.18rem]">
                 <h1 className={`truncate text-[clamp(0.92rem,4.4vw,1.18rem)] sm:text-2xl font-black tracking-[0.1em] sm:tracking-[0.16em] font-serif uppercase leading-[0.92] bg-clip-text text-transparent ${darkMode ? 'bg-gradient-to-r from-emerald-50 via-emerald-200 to-lime-200' : 'bg-[linear-gradient(112deg,#0f172a_0%,#14532d_26%,#0f766e_58%,#0f4c81_100%)] drop-shadow-[0_1px_0_rgba(255,255,255,0.6)]'}`}>
                   HSINRU
                 </h1>
-                <p className={`truncate block text-[8px] sm:text-[9px] font-black tracking-[0.2em] sm:tracking-[0.28em] uppercase leading-[1.02] ${darkMode ? 'text-slate-300/85' : 'text-[#64748b]'}`}>Grade Tracker</p>
+                <p className={`truncate block text-[8px] sm:text-[9px] font-black tracking-[0.2em] sm:tracking-[0.28em] uppercase leading-none ${darkMode ? 'text-slate-300/85' : 'text-[#64748b]'}`}>Grade Tracker</p>
             </div>
           </div>
           <div className={`ml-2 flex shrink-0 items-center gap-1 sm:gap-1.5 rounded-full border px-1.5 sm:px-2 py-1 backdrop-blur-md ${darkMode ? 'border-white/15 bg-slate-900/35' : 'border-white/80 bg-white/72 shadow-[0_8px_24px_rgba(15,23,42,0.08)] ring-1 ring-white/45'}`}>

@@ -63,7 +63,7 @@ const LOCAL_CACHE_KEYS = Object.freeze({
     students: 'grade_tracker_cache_students_v1',
     teacherMessage: 'grade_tracker_cache_teacher_message_v1',
     queryStats: 'grade_tracker_cache_query_stats_v1',
-    parentQueryResults: 'grade_tracker_cache_parent_query_results_v2',
+    parentQueryResults: 'grade_tracker_cache_parent_query_results_v3',
     operationLog: 'grade_tracker_cache_operation_log_v1',
     snapshots: 'grade_tracker_cache_snapshots_v1'
 });
@@ -72,13 +72,17 @@ const COHORT_STORAGE_MODE = Object.freeze({
     LEGACY: 'legacy',
     SCOPED: 'scoped'
 });
+const COHORT_DATE_MODE = Object.freeze({
+    LINKED: 'linked',
+    SINGLE: 'single'
+});
 const LEGACY_COHORT_ID = '2025-2026';
 const NEXT_COHORT_ID = '2026-2027';
 const COHORT_REGISTRY_DOC_ID = 'cohorts_v1';
 const TEACHER_ACTIVE_COHORT_STORAGE_KEY = 'grade_tracker_teacher_active_cohort_v1';
 const DEFAULT_COHORT_OPTIONS = Object.freeze([
-    { id: LEGACY_COHORT_ID, label: '2025-2026', storageMode: COHORT_STORAGE_MODE.LEGACY },
-    { id: NEXT_COHORT_ID, label: '2026-2027', storageMode: COHORT_STORAGE_MODE.SCOPED }
+    { id: LEGACY_COHORT_ID, label: '2025-2026', storageMode: COHORT_STORAGE_MODE.LEGACY, dateMode: COHORT_DATE_MODE.LINKED },
+    { id: NEXT_COHORT_ID, label: '2026-2027', storageMode: COHORT_STORAGE_MODE.SCOPED, dateMode: COHORT_DATE_MODE.SINGLE }
 ]);
 
 const runtimeFirebaseConfig =
@@ -151,11 +155,53 @@ const normalizeCohortOptions = (rawCohorts) => {
             label: String(rawCohort?.label || id).trim() || id,
             storageMode: rawCohort?.storageMode === COHORT_STORAGE_MODE.SCOPED
                 ? COHORT_STORAGE_MODE.SCOPED
-                : COHORT_STORAGE_MODE.LEGACY
+                : COHORT_STORAGE_MODE.LEGACY,
+            dateMode: rawCohort?.dateMode === COHORT_DATE_MODE.LINKED
+                ? COHORT_DATE_MODE.LINKED
+                : (
+                    rawCohort?.dateMode === COHORT_DATE_MODE.SINGLE
+                    || rawCohort?.storageMode === COHORT_STORAGE_MODE.SCOPED
+                    || id === NEXT_COHORT_ID
+                )
+                    ? COHORT_DATE_MODE.SINGLE
+                    : COHORT_DATE_MODE.LINKED
         });
     });
 
     return normalized.length ? normalized : [...DEFAULT_COHORT_OPTIONS];
+};
+
+const resolveCohortDateMode = (cohortId, rawCohorts = DEFAULT_COHORT_OPTIONS) => {
+    const normalizedId = String(cohortId || '').trim();
+    const cohorts = normalizeCohortOptions(rawCohorts);
+    const matched = cohorts.find((cohort) => cohort.id === normalizedId);
+    if (matched?.dateMode === COHORT_DATE_MODE.SINGLE) return COHORT_DATE_MODE.SINGLE;
+    if (matched?.dateMode === COHORT_DATE_MODE.LINKED) return COHORT_DATE_MODE.LINKED;
+    return normalizedId === NEXT_COHORT_ID ? COHORT_DATE_MODE.SINGLE : COHORT_DATE_MODE.LINKED;
+};
+
+const getDefaultDatesForCohort = (cohortId, rawCohorts = DEFAULT_COHORT_OPTIONS) => (
+    resolveCohortDateMode(cohortId, rawCohorts) === COHORT_DATE_MODE.SINGLE
+        ? []
+        : sanitizeDateList(DEFAULT_EXAM_STARTS)
+);
+
+const resolveDateIdForCohort = (dateStr, cohortId, rawDatePool = [], rawCohorts = DEFAULT_COHORT_OPTIONS) => {
+    const normalized = normalizeDateToken(dateStr);
+    if (!normalized) return '';
+    if (resolveCohortDateMode(cohortId, rawCohorts) === COHORT_DATE_MODE.SINGLE) {
+        return normalized;
+    }
+    const datePool = sanitizeDateList(rawDatePool);
+    return getWeekendID(normalized, datePool);
+};
+
+const getDateDisplayLabelForCohort = (dateStr, cohortId, rawDatePool = [], rawCohorts = DEFAULT_COHORT_OPTIONS) => {
+    const dateId = resolveDateIdForCohort(dateStr, cohortId, rawDatePool, rawCohorts);
+    if (!dateId) return normalizeDateToken(dateStr) || String(dateStr || '');
+    return resolveCohortDateMode(cohortId, rawCohorts) === COHORT_DATE_MODE.SINGLE
+        ? dateId
+        : getWeekendDisplayLabel(dateId);
 };
 
 const resolvePreferredPublicCohortId = (cohorts, requestedId = '') => {
@@ -1095,7 +1141,7 @@ export default function App() {
   const [currentStudentId, setCurrentStudentId] = useState(null);
   const [grades, setGrades] = useState({});
   const [classAverages, setClassAverages] = useState({}); 
-  const [availableDates, setAvailableDates] = useState(DEFAULT_EXAM_STARTS);
+  const [availableDates, setAvailableDates] = useState(() => getDefaultDatesForCohort(activeTeacherCohortId));
   const [newDateInput, setNewDateInput] = useState('');
     
   const [statusMsg, setStatusMsg] = useState('');
@@ -1164,6 +1210,8 @@ export default function App() {
   const studentsLoadPromiseRef = useRef(null);
   const cohortRegistryLoadPromiseRef = useRef(null);
   const pendingImportPayloadRef = useRef(null);
+  const importFileInputRef = useRef(null);
+  const legacyImportUnlockUntilRef = useRef(0);
   const parentQueryPerfRef = useRef({
       cacheHit: 0,
       cacheMiss: 0,
@@ -1207,6 +1255,7 @@ export default function App() {
   const activeTeacherCohort = cohortOptionsById[activeTeacherCohortId] || DEFAULT_COHORT_OPTIONS[1];
   const activePublicCohort = cohortOptionsById[activePublicCohortId] || DEFAULT_COHORT_OPTIONS[0];
   const activeDataCohortId = mode === 'parent' ? activePublicCohortId : activeTeacherCohortId;
+  const activeDateContextCohortId = datesCohortId || activeDataCohortId || activeTeacherCohortId || NEXT_COHORT_ID;
   const getCohortLabel = useCallback(
       (cohortId) => cohortOptionsById[cohortId]?.label || String(cohortId || ''),
       [cohortOptionsById]
@@ -1215,6 +1264,28 @@ export default function App() {
       (cohortId) => (cohortOptionsById[cohortId]?.storageMode || COHORT_STORAGE_MODE.LEGACY) === COHORT_STORAGE_MODE.LEGACY,
       [cohortOptionsById]
   );
+  const getCohortDateMode = useCallback(
+      (cohortId) => resolveCohortDateMode(cohortId, cohortOptions),
+      [cohortOptions]
+  );
+  const isSingleDayCohort = useCallback(
+      (cohortId) => getCohortDateMode(cohortId) === COHORT_DATE_MODE.SINGLE,
+      [getCohortDateMode]
+  );
+  const resolveScopedDateId = useCallback((dateStr, cohortId, datePool = []) => (
+      resolveDateIdForCohort(dateStr, cohortId, datePool, cohortOptions)
+  ), [cohortOptions]);
+  const getScopedDateLabel = useCallback((dateStr, cohortId, datePool = []) => (
+      getDateDisplayLabelForCohort(dateStr, cohortId, datePool, cohortOptions)
+  ), [cohortOptions]);
+  const parentSearchCohortOrder = useMemo(() => {
+      const ordered = [];
+      if (cohortOptionsById[NEXT_COHORT_ID]) ordered.push(NEXT_COHORT_ID);
+      cohortOptions.forEach((cohort) => {
+          if (!ordered.includes(cohort.id)) ordered.push(cohort.id);
+      });
+      return ordered.length ? ordered : [NEXT_COHORT_ID, LEGACY_COHORT_ID];
+  }, [cohortOptions, cohortOptionsById]);
   const getCohortCacheKey = useCallback(
       (baseKey, cohortId) => getScopedCacheKey(baseKey, cohortId || 'global'),
       []
@@ -1399,28 +1470,27 @@ export default function App() {
   const testDateIdLookup = useMemo(() => {
       const lookup = new Map();
       sanitizeDateList(availableDates).forEach((date) => {
-          lookup.set(date, getWeekendID(date, availableDates));
+          lookup.set(date, resolveScopedDateId(date, activeDateContextCohortId, availableDates));
       });
       return lookup;
-  }, [availableDates]);
+  }, [activeDateContextCohortId, availableDates, resolveScopedDateId]);
 
-  // 包裝 getWeekendID，自動傳入 availableDates，讓連續兩天的日期可以歸類為同一次測驗
+  // 依屆別決定是沿用連續兩天同考次，還是單日成績。
   const getTestDateID = useCallback((dateStr) => {
       const normalized = normalizeDateToken(dateStr);
       if (normalized && testDateIdLookup.has(normalized)) {
           return testDateIdLookup.get(normalized) || normalized;
       }
-      return getWeekendID(dateStr, availableDates);
-  }, [availableDates, testDateIdLookup]);
+      return resolveScopedDateId(dateStr, activeDateContextCohortId, availableDates);
+  }, [activeDateContextCohortId, availableDates, resolveScopedDateId, testDateIdLookup]);
 
   const weekendLabelByDate = useMemo(() => {
       const labels = {};
       sortedAvailableDatesDesc.forEach((date) => {
-          const weekendID = getTestDateID(date) || date;
-          labels[date] = getWeekendDisplayLabel(weekendID);
+          labels[date] = getScopedDateLabel(date, activeDateContextCohortId, availableDates);
       });
       return labels;
-  }, [sortedAvailableDatesDesc, getTestDateID]);
+  }, [activeDateContextCohortId, availableDates, getScopedDateLabel, sortedAvailableDatesDesc]);
 
   // 單人檢視改為以「考次(weekendID)」去重，避免同一週末出現兩列（例如 03/08 與 03/09）
   const singleViewDateEntries = useMemo(() => {
@@ -1437,11 +1507,11 @@ export default function App() {
               date,
               weekendID,
               gradeKey,
-              label: weekendLabelByDate[date] || getWeekendDisplayLabel(date)
+              label: weekendLabelByDate[date] || getScopedDateLabel(date, activeDateContextCohortId, availableDates)
           });
       });
       return entries;
-  }, [sortedAvailableDatesDesc, grades, getTestDateID, weekendLabelByDate]);
+  }, [activeDateContextCohortId, availableDates, grades, getScopedDateLabel, getTestDateID, sortedAvailableDatesDesc, weekendLabelByDate]);
 
   const singleViewDateKeys = useMemo(
       () => singleViewDateEntries.map((entry) => entry.gradeKey),
@@ -1465,7 +1535,7 @@ export default function App() {
           cards.push({
               date,
               weekendID,
-              label: weekendLabelByDate[date] || getWeekendDisplayLabel(date),
+              label: weekendLabelByDate[date] || getScopedDateLabel(date, activeDateContextCohortId, availableDates),
               phaseId,
               phaseLabel,
               isLatest: cards.length === 0,
@@ -1473,7 +1543,7 @@ export default function App() {
           });
       });
       return cards;
-  }, [sortedAvailableDatesDesc, sortedAvailableDatesAsc, weekendLabelByDate, teacherViewMode, selectedBatchWeekendID, getTestDateID]);
+  }, [activeDateContextCohortId, availableDates, getScopedDateLabel, getTestDateID, selectedBatchWeekendID, sortedAvailableDatesAsc, sortedAvailableDatesDesc, teacherViewMode, weekendLabelByDate]);
 
   const latestAvailableDate = useMemo(() => {
       if (!sortedAvailableDatesAsc.length) return '';
@@ -1531,7 +1601,7 @@ export default function App() {
   useEffect(() => {
       if (typeof window === 'undefined') return;
       localStorage.setItem(TEACHER_ACTIVE_COHORT_STORAGE_KEY, activeTeacherCohortId);
-  }, [activeTeacherCohortId]);
+  }, [activeTeacherCohortId, cohortOptions]);
 
   useEffect(() => {
       const cachedOperationLogs = sanitizeOperationLogs(
@@ -1815,7 +1885,7 @@ export default function App() {
       }
 
       const runner = async () => {
-          const fallbackDates = sanitizeDateList(DEFAULT_EXAM_STARTS);
+          const fallbackDates = getDefaultDatesForCohort(cohortId, cohortOptions);
           const cacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.dates, cohortId);
           const cachedDates = sanitizeDateList(readLocalCache(cacheKey) || []);
           if (cachedDates.length && !force) {
@@ -1840,7 +1910,7 @@ export default function App() {
               const docSnap = await getDoc(docRef);
               const rawList = docSnap.exists() && Array.isArray(docSnap.data().list)
                   ? docSnap.data().list
-                  : DEFAULT_EXAM_STARTS;
+                  : fallbackDates;
               const cleanedDates = sanitizeDateList(rawList);
               const nextDates = cleanedDates.length ? cleanedDates : fallbackDates;
 
@@ -1879,7 +1949,7 @@ export default function App() {
       });
       datesLoadPromiseRef.current = { cohortId, promise };
       return promise;
-  }, [activeDataCohortId, availableDates, datesCohortId, getCohortCacheKey, getCohortSettingsDocRef]);
+  }, [activeDataCohortId, availableDates, cohortOptions, datesCohortId, getCohortCacheKey, getCohortSettingsDocRef]);
 
   const shouldResetQueryStats = useCallback((lastResetAt) => {
       if (!lastResetAt) return true;
@@ -2092,10 +2162,20 @@ export default function App() {
       }
   }, [activeDataCohortId, getCohortCacheKey, getCohortSettingsDocRef]);
 
-  const incrementQueryCount = useCallback((studentId) => {
+  const incrementQueryCount = useCallback((studentId, cohortIdOverride = '') => {
       const normalizedId = String(studentId || '').toUpperCase().trim();
       if (!normalizedId) return;
-      queryPendingCohortIdRef.current = activePublicCohortId || LEGACY_COHORT_ID;
+      const targetCohortId = String(cohortIdOverride || activePublicCohortId || LEGACY_COHORT_ID);
+      if (
+          queryPendingCohortIdRef.current
+          && queryPendingCohortIdRef.current !== targetCohortId
+          && (Object.keys(queryPendingCountsRef.current).length > 0 || queryPendingEventsRef.current.length > 0)
+      ) {
+          void flushPendingQueryStats({ force: true, cohortId: queryPendingCohortIdRef.current });
+          queryPendingCountsRef.current = {};
+          queryPendingEventsRef.current = [];
+      }
+      queryPendingCohortIdRef.current = targetCohortId;
       const nowTs = Date.now();
       const nowIso = new Date(nowTs).toISOString();
 
@@ -2109,7 +2189,7 @@ export default function App() {
       queryPendingCountsRef.current[normalizedId] = (Number(queryPendingCountsRef.current[normalizedId]) || 0) + 1;
       queryPendingEventsRef.current = [...(queryPendingEventsRef.current || []), { id: normalizedId, at: nowIso, ts: nowTs }].slice(-MAX_QUERY_EVENTS);
       scheduleQueryStatsFlush();
-  }, [activePublicCohortId, queryStatsLastResetAt, scheduleQueryStatsFlush]);
+  }, [activePublicCohortId, flushPendingQueryStats, queryStatsLastResetAt, scheduleQueryStatsFlush]);
 
   const handleResetQueryStats = useCallback(async () => {
       const nowIso = new Date().toISOString();
@@ -2151,9 +2231,10 @@ export default function App() {
 
   const normalizeGrades = useCallback((grades, options = {}) => {
       const scopedDatePool = sanitizeDateList(options.datePool || availableDates);
+      const targetCohortId = String(options?.cohortId || datesCohortId || activeDataCohortId || activeTeacherCohortId || LEGACY_COHORT_ID);
       const resolveDateId = typeof options.getDateID === 'function'
           ? options.getDateID
-          : (dateStr) => getWeekendID(dateStr, scopedDatePool);
+          : (dateStr) => resolveScopedDateId(dateStr, targetCohortId, scopedDatePool);
       const withMeta = Boolean(options.withMeta);
       if (!grades || typeof grades !== 'object') {
           return withMeta ? { normalized: {}, removedInvalidDates: 0, changed: false } : {};
@@ -2204,13 +2285,14 @@ export default function App() {
           return { normalized: deduped, removedInvalidDates, changed };
       }
       return deduped;
-  }, [availableDates]);
+  }, [activeDataCohortId, activeTeacherCohortId, availableDates, datesCohortId, resolveScopedDateId]);
 
   const loadAllStudents = useCallback(async (options = {}) => {
       const { forceRemote = false } = options;
       const cohortId = String(options?.cohortId || activeTeacherCohortId || LEGACY_COHORT_ID);
-      const datePool = sanitizeDateList(options?.datePool || (cohortId === datesCohortId ? availableDates : DEFAULT_EXAM_STARTS));
-      const getDateIDForCohort = (dateStr) => getWeekendID(dateStr, datePool);
+      const fallbackDates = getDefaultDatesForCohort(cohortId, cohortOptions);
+      const datePool = sanitizeDateList(options?.datePool || (cohortId === datesCohortId ? availableDates : fallbackDates));
+      const getDateIDForCohort = (dateStr) => resolveScopedDateId(dateStr, cohortId, datePool);
       if (
           !forceRemote
           && studentsLoadPromiseRef.current?.cohortId === cohortId
@@ -2342,12 +2424,14 @@ export default function App() {
       activePublicCohortId,
       activeTeacherCohortId,
       availableDates,
+      cohortOptions,
       datesCohortId,
       getCohortCacheKey,
       getCohortStudentDocRef,
       getCohortStudentsCollectionRef,
       getStudentSessionKey,
-      normalizeGrades
+      normalizeGrades,
+      resolveScopedDateId
   ]);
 
   useEffect(() => {
@@ -2402,13 +2486,13 @@ export default function App() {
       setStudentName('');
       setGrades({});
       setBatchDate('');
-      setAvailableDates(DEFAULT_EXAM_STARTS);
+      setAvailableDates(getDefaultDatesForCohort(activeTeacherCohortId, cohortOptions));
       setDatesCohortId('');
       setClassAverages({});
       setClassAveragesCohortId('');
       batchDirtyStudentIdsRef.current = new Set();
       setIsBatchDirty(false);
-  }, [activeTeacherCohortId]);
+  }, [activeTeacherCohortId, cohortOptions]);
 
   useEffect(() => {
       setCachedClassData([]);
@@ -2416,12 +2500,12 @@ export default function App() {
       setViewData(null);
       setSearchError('');
       if (mode === 'parent') {
-          setAvailableDates(DEFAULT_EXAM_STARTS);
+          setAvailableDates(getDefaultDatesForCohort(activePublicCohortId, cohortOptions));
           setDatesCohortId('');
           setClassAverages({});
           setClassAveragesCohortId('');
       }
-  }, [activePublicCohortId, mode]);
+  }, [activePublicCohortId, cohortOptions, mode]);
 
   useEffect(() => {
       if (typeof window === 'undefined') return;
@@ -2497,6 +2581,22 @@ export default function App() {
           closeSecurityModal();
       }
   };
+
+  const requestExcelImport = useCallback(() => {
+      if (!canImportExcel) {
+          notifyPermissionDenied('目前權限無法匯入 Excel');
+          return;
+      }
+      const openPicker = () => {
+          legacyImportUnlockUntilRef.current = Date.now() + 30 * 1000;
+          importFileInputRef.current?.click();
+      };
+      if (isLegacyCohort(activeTeacherCohortId)) {
+          executeWithSecurity(openPicker, { title: '上一屆匯入需安全驗證' });
+          return;
+      }
+      openPicker();
+  }, [activeTeacherCohortId, canImportExcel, executeWithSecurity, isLegacyCohort, notifyPermissionDenied]);
 
   const addDate = async () => {
       const normalizedInput = normalizeDateToken(newDateInput);
@@ -2597,8 +2697,9 @@ export default function App() {
   const loadClassAverages = useCallback(async (options = {}) => {
       const force = Boolean(options && options.force);
       const cohortId = String(options?.cohortId || activeDataCohortId || LEGACY_COHORT_ID);
-      const datePool = sanitizeDateList(options?.datePool || (cohortId === datesCohortId ? availableDates : DEFAULT_EXAM_STARTS));
-      const getDateIDForCohort = (dateStr) => getWeekendID(dateStr, datePool);
+      const fallbackDates = getDefaultDatesForCohort(cohortId, cohortOptions);
+      const datePool = sanitizeDateList(options?.datePool || (cohortId === datesCohortId ? availableDates : fallbackDates));
+      const getDateIDForCohort = (dateStr) => resolveScopedDateId(dateStr, cohortId, datePool);
       if (
           !force
           && classAveragesLoadPromiseRef.current?.cohortId === cohortId
@@ -2664,7 +2765,7 @@ export default function App() {
       });
       classAveragesLoadPromiseRef.current = { cohortId, promise };
       return promise;
-  }, [activeDataCohortId, activeTeacherCohortId, availableDates, datesCohortId, getCohortCacheKey, getCohortSettingsDocRef, localComputedAverages, teacherStudentsCohortId]);
+  }, [activeDataCohortId, activeTeacherCohortId, availableDates, cohortOptions, datesCohortId, getCohortCacheKey, getCohortSettingsDocRef, localComputedAverages, resolveScopedDateId, teacherStudentsCohortId]);
 
   useEffect(() => {
       if (!user || mode !== 'teacher' || !isAuthenticated) return;
@@ -3152,8 +3253,9 @@ export default function App() {
   const loadStudentForTeacher = async (id, options = {}) => {
     if (!user) return;
     const cohortId = String(options?.cohortId || activeTeacherCohortId || LEGACY_COHORT_ID);
-    const effectiveDates = sanitizeDateList(options?.datePool || (cohortId === datesCohortId ? availableDates : DEFAULT_EXAM_STARTS));
-    const getDateIDForCohort = (dateStr) => getWeekendID(dateStr, effectiveDates);
+    const fallbackDates = getDefaultDatesForCohort(cohortId, cohortOptions);
+    const effectiveDates = sanitizeDateList(options?.datePool || (cohortId === datesCohortId ? availableDates : fallbackDates));
+    const getDateIDForCohort = (dateStr) => resolveScopedDateId(dateStr, cohortId, effectiveDates);
     setLoading(true);
     try {
       let data = null;
@@ -3343,6 +3445,13 @@ export default function App() {
         notifyPermissionDenied('目前權限無法匯入 Excel');
         return;
     }
+    if (isLegacyCohort(activeTeacherCohortId) && Date.now() > legacyImportUnlockUntilRef.current) {
+        setStatusMsg('上一屆匯入已鎖定，請先輸入安全碼');
+        setTimeout(() => setStatusMsg(''), 2200);
+        if (e?.target) e.target.value = '';
+        return;
+    }
+    legacyImportUnlockUntilRef.current = 0;
     const file = e.target.files[0];
     if (!file) return;
     if (!window.XLSX) {
@@ -3474,7 +3583,7 @@ export default function App() {
           const importedClassName = parseImportedClass(colMap.class !== -1 ? row[colMap.class] : '');
 
           const weekendDatePool = [...availableDates, ...Array.from(newDates)];
-          const weekendID = getWeekendID(normalizedImportDate, weekendDatePool);
+          const weekendID = resolveScopedDateId(normalizedImportDate, activeTeacherCohortId, weekendDatePool);
           if (!weekendID) {
               skippedInvalidDateCount += 1;
               continue;
@@ -3502,7 +3611,7 @@ export default function App() {
                   if (!grade?.class || !validClassSet.has(grade.class)) return false;
                   const normalizedDate = normalizeDateToken(date);
                   if (!normalizedDate) return false;
-                  return getWeekendID(normalizedDate, weekendDatePool) === weekendID;
+                  return resolveScopedDateId(normalizedDate, activeTeacherCohortId, weekendDatePool) === weekendID;
               })?.[1]?.class;
               if (sameWeekendClass) return sameWeekendClass;
               if (teacherClassFilter && validClassSet.has(teacherClassFilter)) return teacherClassFilter;
@@ -3940,16 +4049,134 @@ export default function App() {
       const rawSearchKeyword = searchId.trim();
       const normalizedSearchId = rawSearchKeyword.toUpperCase();
       const matchFromList = (list) => findStudentByIdOrName(list, rawSearchKeyword);
-      const publicStudentCacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.students, activePublicCohortId);
+      const likelyStudentId = /^[A-Z0-9_-]{3,24}$/.test(normalizedSearchId);
+      let resolvedSearch = null;
 
-      const effectiveDates = datesCohortId === activePublicCohortId && sortedAvailableDatesAsc.length > 0
-          ? sortedAvailableDatesAsc
-          : await loadDates({ cohortId: activePublicCohortId });
-      const effectiveClassAverages = classAveragesCohortId === activePublicCohortId
-          ? classAverages
-          : await loadClassAverages({ cohortId: activePublicCohortId, datePool: effectiveDates });
+      for (const cohortId of parentSearchCohortOrder) {
+          const effectiveDates = datesCohortId === cohortId && sortedAvailableDatesAsc.length > 0
+              ? sortedAvailableDatesAsc
+              : await loadDates({ cohortId });
+          const effectiveClassAverages = classAveragesCohortId === cohortId
+              ? classAverages
+              : await loadClassAverages({ cohortId, datePool: effectiveDates });
+          const getSearchDateID = (dateStr) => resolveScopedDateId(dateStr, cohortId, effectiveDates);
+          const cohortStudentCacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.students, cohortId);
+          const hasPublicCachedStudents = publicStudentsCohortId === cohortId && cachedClassData.length > 0;
+          const hasTeacherStudentsForCohort = teacherStudentsCohortId === cohortId && allStudentsData.length > 0;
+          let data = null;
+          let fullClassData = [];
+          let duplicateName = false;
+
+          if (hasPublicCachedStudents) {
+              fullClassData = cachedClassData;
+              const matched = matchFromList(cachedClassData);
+              data = matched.student;
+              duplicateName = matched.duplicateName;
+          } else if (hasTeacherStudentsForCohort) {
+              fullClassData = allStudentsData;
+              const matched = matchFromList(allStudentsData);
+              data = matched.student;
+              duplicateName = matched.duplicateName;
+          }
+
+          if (!data && duplicateName) {
+              setSearchError('同名學生超過 1 位，請改用學號查詢');
+              updateParentQueryPerf(performance.now() - searchStartTs, false);
+              return;
+          }
+
+          if (db && !data && likelyStudentId) {
+              const docRef = getCohortStudentDocRef(cohortId, normalizedSearchId);
+              const docSnap = await getDoc(docRef);
+              if (docSnap.exists()) {
+                  const rawData = docSnap.data();
+                  const normalizedResult = normalizeGrades(rawData.grades, { withMeta: true, cohortId, datePool: effectiveDates, getDateID: getSearchDateID });
+                  data = { ...rawData, grades: normalizedResult.normalized };
+                  if (normalizedResult.changed && rawData.id) {
+                      void setDoc(
+                          getCohortStudentDocRef(cohortId, rawData.id),
+                          { ...rawData, grades: normalizedResult.normalized, lastUpdated: new Date().toISOString() }
+                      ).catch((err) => console.error('Parent search cleanup invalid date error:', err));
+                  }
+              }
+          }
+
+          if (db && fullClassData.length === 0) {
+              const cachedStudents = readLocalCache(cohortStudentCacheKey, STUDENT_CACHE_TTL_MS);
+              if (Array.isArray(cachedStudents) && cachedStudents.length > 0) {
+                  fullClassData = cachedStudents;
+              } else {
+                  const qSnap = await getDocs(getCohortStudentsCollectionRef(cohortId));
+                  fullClassData = [];
+                  const cleanupPayloads = [];
+                  qSnap.forEach((docItem) => {
+                      const rawData = docItem.data();
+                      const normalizedResult = normalizeGrades(rawData.grades, { withMeta: true, cohortId, datePool: effectiveDates, getDateID: getSearchDateID });
+                      fullClassData.push({ ...rawData, grades: normalizedResult.normalized });
+                      if (normalizedResult.changed && rawData.id) {
+                          cleanupPayloads.push({
+                              id: rawData.id,
+                              payload: { ...rawData, grades: normalizedResult.normalized, lastUpdated: new Date().toISOString() }
+                          });
+                      }
+                  });
+                  if (cleanupPayloads.length > 0) {
+                      void Promise.all(
+                          cleanupPayloads.map((item) =>
+                              setDoc(getCohortStudentDocRef(cohortId, item.id), item.payload)
+                          )
+                      ).catch((err) => console.error('Parent search cleanup invalid date error:', err));
+                  }
+                  writeLocalCache(cohortStudentCacheKey, fullClassData);
+              }
+          }
+
+          if (!data && fullClassData.length > 0) {
+              const matched = matchFromList(fullClassData);
+              if (matched.duplicateName) {
+                  setSearchError('同名學生超過 1 位，請改用學號查詢');
+                  updateParentQueryPerf(performance.now() - searchStartTs, false);
+                  return;
+              }
+              data = matched.student;
+          }
+
+          if (!data) continue;
+
+          resolvedSearch = {
+              cohortId,
+              data,
+              fullClassData,
+              effectiveDates,
+              effectiveClassAverages,
+              getSearchDateID,
+              hasPublicCachedStudents,
+              hasTeacherStudentsForCohort
+          };
+          break;
+      }
+
+      if (!resolvedSearch) {
+          setSearchError('查無此學號或姓名');
+          updateParentQueryPerf(performance.now() - searchStartTs, false);
+          return;
+      }
+
+      const {
+          cohortId: foundCohortId,
+          data,
+          fullClassData,
+          effectiveDates,
+          effectiveClassAverages,
+          getSearchDateID,
+          hasPublicCachedStudents,
+          hasTeacherStudentsForCohort
+      } = resolvedSearch;
+
       const sortedDates = effectiveDates;
-      const getSearchDateID = (dateStr) => getWeekendID(dateStr, effectiveDates);
+      const contextData = fullClassData.length > 0
+          ? fullClassData
+          : (hasPublicCachedStudents ? cachedClassData : (hasTeacherStudentsForCohort ? allStudentsData : []));
       const weekendOrder = new Map();
       sortedDates.forEach((date, index) => {
           const weekendID = getSearchDateID(date);
@@ -3957,234 +4184,143 @@ export default function App() {
               weekendOrder.set(weekendID, index);
           }
       });
-      let data = null;
-      let fullClassData = [];
-      let hasDuplicateName = false;
-      const hasPublicCachedStudents = publicStudentsCohortId === activePublicCohortId && cachedClassData.length > 0;
-      const hasTeacherStudentsForPublic = teacherStudentsCohortId === activePublicCohortId && allStudentsData.length > 0;
 
-      if (hasPublicCachedStudents) {
-          fullClassData = cachedClassData;
-          const matched = matchFromList(cachedClassData);
-          data = matched.student;
-          hasDuplicateName = matched.duplicateName;
-      } else if (hasTeacherStudentsForPublic) {
-          fullClassData = allStudentsData;
-          const matched = matchFromList(allStudentsData);
-          data = matched.student;
-          hasDuplicateName = matched.duplicateName;
-      }
+      setAvailableDates(sortedDates);
+      setDatesCohortId(foundCohortId);
+      setClassAverages(effectiveClassAverages);
+      setClassAveragesCohortId(foundCohortId);
+      await loadTeacherMessage({ cohortId: foundCohortId });
+      setCachedClassData(contextData);
+      setPublicStudentsCohortId(foundCohortId);
 
-      if (!data && hasDuplicateName) {
-          setSearchError('同名學生超過 1 位，請改用學號查詢');
-          updateParentQueryPerf(performance.now() - searchStartTs, false);
-          setLoading(false);
+      const cacheStudentId = String(data.id || '').toUpperCase();
+      const cacheStudentKey = `${foundCohortId}::${cacheStudentId}`;
+      const shouldReuseCachedVersionBase =
+          foundCohortId === activePublicCohortId
+          && hasPublicCachedStudents
+          && contextData === cachedClassData
+          && datesCohortId === activePublicCohortId
+          && classAveragesCohortId === activePublicCohortId
+          && sortedDates === sortedAvailableDatesAsc;
+      const parentQueryDataVersion = shouldReuseCachedVersionBase
+          ? hashFingerprint(`${cachedParentVersionBase}||${cachedParentStudentSignatureById[cacheStudentId] || buildStudentGradesSignature(data, getSearchDateID)}`)
+          : buildParentQueryDataVersion({
+              student: data,
+              classData: contextData,
+              dates: sortedDates,
+              classAveragesMap: effectiveClassAverages,
+              getDateID: getSearchDateID
+          });
+      const cachedView = readParentQueryCache(cacheStudentKey, parentQueryDataVersion);
+      if (cachedView) {
+          setViewData(cachedView);
+          incrementQueryCount(data.id, foundCohortId);
+          updateParentQueryPerf(performance.now() - searchStartTs, true);
           return;
       }
 
-      const likelyStudentId = /^[A-Z0-9_-]{3,24}$/.test(normalizedSearchId);
-      if (db && !data && likelyStudentId) {
-          const docRef = getCohortStudentDocRef(activePublicCohortId, normalizedSearchId);
-          const docSnap = await getDoc(docRef);
-          if (docSnap.exists()) {
-              const rawData = docSnap.data();
-              const normalizedResult = normalizeGrades(rawData.grades, { withMeta: true, datePool: effectiveDates, getDateID: getSearchDateID });
-              data = { ...rawData, grades: normalizedResult.normalized };
-              if (normalizedResult.changed && rawData.id) {
-                  void setDoc(
-                      getCohortStudentDocRef(activePublicCohortId, rawData.id),
-                      { ...rawData, grades: normalizedResult.normalized, lastUpdated: new Date().toISOString() }
-                  ).catch((err) => console.error('Parent search cleanup invalid date error:', err));
-              }
-          }
-      }
+      const allChartData = [];
+      const availableWeekendIDs = new Set(weekendOrder.keys());
 
-      if (db && fullClassData.length === 0) {
-          const cachedStudents = readLocalCache(publicStudentCacheKey, STUDENT_CACHE_TTL_MS);
-          if (Array.isArray(cachedStudents) && cachedStudents.length > 0) {
-              fullClassData = cachedStudents;
-              setCachedClassData(cachedStudents);
-              setPublicStudentsCohortId(activePublicCohortId);
-          } else {
-              const qSnap = await getDocs(getCohortStudentsCollectionRef(activePublicCohortId));
-              fullClassData = [];
-              const cleanupPayloads = [];
-              qSnap.forEach(d => {
-                  const rawData = d.data();
-                  const normalizedResult = normalizeGrades(rawData.grades, { withMeta: true, datePool: effectiveDates, getDateID: getSearchDateID });
-                  fullClassData.push({ ...rawData, grades: normalizedResult.normalized });
-                  if (normalizedResult.changed && rawData.id) {
-                      cleanupPayloads.push({
-                          id: rawData.id,
-                          payload: { ...rawData, grades: normalizedResult.normalized, lastUpdated: new Date().toISOString() }
-                      });
-                  }
-              });
-              if (cleanupPayloads.length > 0) {
-                  void Promise.all(
-                      cleanupPayloads.map((item) =>
-                          setDoc(getCohortStudentDocRef(activePublicCohortId, item.id), item.payload)
-                      )
-                  ).catch((err) => console.error('Parent search cleanup invalid date error:', err));
-              }
-              setCachedClassData(fullClassData);
-              setPublicStudentsCohortId(activePublicCohortId);
-              writeLocalCache(publicStudentCacheKey, fullClassData);
-          }
-
-      }
-
-      if (!data && fullClassData.length > 0) {
-          const matched = matchFromList(fullClassData);
-          if (matched.duplicateName) {
-              setSearchError('同名學生超過 1 位，請改用學號查詢');
-              updateParentQueryPerf(performance.now() - searchStartTs, false);
-              setLoading(false);
-              return;
-          }
-          data = matched.student;
-      }
-      if (data) {
-        const contextData = fullClassData.length > 0
-            ? fullClassData
-            : (hasPublicCachedStudents ? cachedClassData : (hasTeacherStudentsForPublic ? allStudentsData : []));
-        const cacheStudentId = String(data.id || '').toUpperCase();
-        const shouldReuseCachedVersionBase =
-            hasPublicCachedStudents
-            && contextData === cachedClassData
-            && datesCohortId === activePublicCohortId
-            && classAveragesCohortId === activePublicCohortId
-            && sortedDates === sortedAvailableDatesAsc;
-        const parentQueryDataVersion = shouldReuseCachedVersionBase
-            ? hashFingerprint(`${cachedParentVersionBase}||${cachedParentStudentSignatureById[cacheStudentId] || buildStudentGradesSignature(data, getSearchDateID)}`)
-            : buildParentQueryDataVersion({
-                student: data,
-                classData: contextData,
-                dates: sortedDates,
-                classAveragesMap: effectiveClassAverages,
-                getDateID: getSearchDateID
-            });
-        const cachedView = readParentQueryCache(cacheStudentId, parentQueryDataVersion);
-        if (cachedView) {
-            setViewData(cachedView);
-            incrementQueryCount(data.id);
-            updateParentQueryPerf(performance.now() - searchStartTs, true);
-            setLoading(false);
-            return;
-        }
-
-        const allChartData = [];
-        
-        // 建立 availableDates 的 weekendID Set，用於快速查找（使用新的連續日期邏輯）
-        const availableWeekendIDs = new Set(weekendOrder.keys());
-        
-        // 遍歷學生所有成績（同考次去重），確保連續日期的成績也能被找到
-        if (data.grades) {
+      if (data.grades) {
           const weekendGradeEntries = buildWeekendGradeEntryMap(data.grades, getSearchDateID);
           Object.entries(weekendGradeEntries).forEach(([weekendID, entry]) => {
-            const weekData = entry.grade;
-            if (!weekData || !weekData.total) return;
+              const weekData = entry.grade;
+              if (!weekData || !weekData.total) return;
+              if (!availableWeekendIDs.has(weekendID)) return;
 
-            // 只處理在 availableDates 範圍內的成績
-            if (!availableWeekendIDs.has(weekendID)) return;
-            
-            const t = parseFloat(weekData.total);
-            if (isNaN(t) || t <= 0) return;
-            
-            const weekClass = weekData.class || 'A班';
-            const avgData = (effectiveClassAverages[weekendID] && effectiveClassAverages[weekendID][weekClass]) 
-                          ? effectiveClassAverages[weekendID][weekClass] 
-                          : {};
-            const avgAllData = (effectiveClassAverages[weekendID] && effectiveClassAverages[weekendID].all)
-                          ? effectiveClassAverages[weekendID].all
-                          : {};
-            const resolveAverageValue = (primaryValue, fallbackValue) => {
-                const primaryNumber = toNumberOrNull(primaryValue);
-                if (primaryNumber !== null) return primaryNumber;
-                return toNumberOrNull(fallbackValue);
-            };
-            
-            // 決定顯示日期：日A班/日B班顯示週日，其他顯示週六
-            let displayDate = weekendID;
-            if (weekClass === '日A班' || weekClass === '日B班') {
-                displayDate = getSundayDate(weekendID);
-            } 
-            
-            allChartData.push({
-                date: displayDate, 
-                weekendID: weekendID, // 保存 weekendID 用於排序
-                total: t, 
-                chi: parseFloat(weekData.chi)||0, 
-                eng: parseFloat(weekData.eng)||0, 
-                math: parseFloat(weekData.math)||0,
-                avgTotal: resolveAverageValue(avgData.total, avgAllData.total), 
-                avgChi: resolveAverageValue(avgData.chi, avgAllData.chi), 
-                avgEng: resolveAverageValue(avgData.eng, avgAllData.eng), 
-                avgMath: resolveAverageValue(avgData.math, avgAllData.math),
-                avgAllTotal: toNumberOrNull(avgAllData.total),
-                avgAllChi: toNumberOrNull(avgAllData.chi),
-                avgAllEng: toNumberOrNull(avgAllData.eng),
-                avgAllMath: toNumberOrNull(avgAllData.math),
-                class: weekClass
-            });
+              const t = parseFloat(weekData.total);
+              if (isNaN(t) || t <= 0) return;
+
+              const weekClass = weekData.class || 'A班';
+              const avgData = (effectiveClassAverages[weekendID] && effectiveClassAverages[weekendID][weekClass])
+                  ? effectiveClassAverages[weekendID][weekClass]
+                  : {};
+              const avgAllData = (effectiveClassAverages[weekendID] && effectiveClassAverages[weekendID].all)
+                  ? effectiveClassAverages[weekendID].all
+                  : {};
+              const resolveAverageValue = (primaryValue, fallbackValue) => {
+                  const primaryNumber = toNumberOrNull(primaryValue);
+                  if (primaryNumber !== null) return primaryNumber;
+                  return toNumberOrNull(fallbackValue);
+              };
+
+              let displayDate = weekendID;
+              if (!isSingleDayCohort(foundCohortId) && (weekClass === '日A班' || weekClass === '日B班')) {
+                  displayDate = getSundayDate(weekendID);
+              }
+
+              allChartData.push({
+                  date: displayDate,
+                  weekendID,
+                  total: t,
+                  chi: parseFloat(weekData.chi) || 0,
+                  eng: parseFloat(weekData.eng) || 0,
+                  math: parseFloat(weekData.math) || 0,
+                  avgTotal: resolveAverageValue(avgData.total, avgAllData.total),
+                  avgChi: resolveAverageValue(avgData.chi, avgAllData.chi),
+                  avgEng: resolveAverageValue(avgData.eng, avgAllData.eng),
+                  avgMath: resolveAverageValue(avgData.math, avgAllData.math),
+                  avgAllTotal: toNumberOrNull(avgAllData.total),
+                  avgAllChi: toNumberOrNull(avgAllData.chi),
+                  avgAllEng: toNumberOrNull(avgAllData.eng),
+                  avgAllMath: toNumberOrNull(avgAllData.math),
+                  class: weekClass
+              });
           });
-        }
-        
-        // 依照 weekendID 在 sortedDates 中的位置排序，確保折線圖順序正確
-        allChartData.sort((a, b) => {
+      }
+
+      allChartData.sort((a, b) => {
           const indexA = weekendOrder.has(a.weekendID) ? weekendOrder.get(a.weekendID) : Number.POSITIVE_INFINITY;
           const indexB = weekendOrder.has(b.weekendID) ? weekendOrder.get(b.weekendID) : Number.POSITIVE_INFINITY;
           if (indexA === indexB) return 0;
           return indexA - indexB;
-        });
-        const avg = allChartData.length > 0 ? (allChartData.reduce((a,b)=>a+b.total,0)/allChartData.length).toFixed(1) : 0;
-        let studentProb = '-';
-        
-        if (contextData.length > 0) {
-            const shouldReuseParentContext =
-                sortedAvailableDatesAsc.length > 0
-                && effectiveDates === sortedAvailableDatesAsc
-                && publicStudentsCohortId === activePublicCohortId
-                && datesCohortId === activePublicCohortId;
-            const scoreContext = shouldReuseParentContext && parentSearchScoreContext
-                ? parentSearchScoreContext
-                : buildProbabilityContext(contextData, sortedDates, getSearchDateID);
-            
-            // Build simple grade map for target student
-            const studentGradeMap = {};
-            studentGradeMap[data.id] = {};
-            const weekendEntries = buildWeekendGradeEntryMap(data.grades, getSearchDateID);
-            Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
-                studentGradeMap[data.id][weekendID] = entry.grade;
-            });
-            
-            studentProb = calculateProbLogic(
-                data,
-                scoreContext.scoresByDate,
-                scoreContext.mathScoresByDate,
-                studentGradeMap,
-                scoreContext.normalizedDates,
-                scoreContext.probabilityProfiles,
-                scoreContext.totalPRLookupByDate,
-                scoreContext.mathPRLookupByDate
-            );
-        }
+      });
 
-        const nextViewData = { ...data, chartData: allChartData, average: avg, prob: studentProb };
-        setViewData(nextViewData);
-        writeParentQueryCache(cacheStudentId, parentQueryDataVersion, nextViewData);
-        incrementQueryCount(data.id);
-        updateParentQueryPerf(performance.now() - searchStartTs, false);
-      } else {
-        setSearchError('查無此學號或姓名');
-        updateParentQueryPerf(performance.now() - searchStartTs, false);
+      const avg = allChartData.length > 0 ? (allChartData.reduce((sum, item) => sum + item.total, 0) / allChartData.length).toFixed(1) : 0;
+      let studentProb = '-';
+
+      if (contextData.length > 0) {
+          const shouldReuseParentContext =
+              foundCohortId === activePublicCohortId
+              && sortedAvailableDatesAsc.length > 0
+              && effectiveDates === sortedAvailableDatesAsc
+              && publicStudentsCohortId === activePublicCohortId
+              && datesCohortId === activePublicCohortId;
+          const scoreContext = shouldReuseParentContext && parentSearchScoreContext
+              ? parentSearchScoreContext
+              : buildProbabilityContext(contextData, sortedDates, getSearchDateID);
+
+          const studentGradeMap = { [data.id]: {} };
+          const weekendEntries = buildWeekendGradeEntryMap(data.grades, getSearchDateID);
+          Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
+              studentGradeMap[data.id][weekendID] = entry.grade;
+          });
+
+          studentProb = calculateProbLogic(
+              data,
+              scoreContext.scoresByDate,
+              scoreContext.mathScoresByDate,
+              studentGradeMap,
+              scoreContext.normalizedDates,
+              scoreContext.probabilityProfiles,
+              scoreContext.totalPRLookupByDate,
+              scoreContext.mathPRLookupByDate
+          );
       }
+
+      const nextViewData = { ...data, chartData: allChartData, average: avg, prob: studentProb, cohortId: foundCohortId };
+      setViewData(nextViewData);
+      writeParentQueryCache(cacheStudentKey, parentQueryDataVersion, nextViewData);
+      incrementQueryCount(data.id, foundCohortId);
+      updateParentQueryPerf(performance.now() - searchStartTs, false);
     } catch (e) {
       console.error('Parent search error:', e);
       setSearchError('系統忙碌');
       updateParentQueryPerf(performance.now() - searchStartTs, false);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const shouldBuildParentAnalytics = mode === 'parent' && Boolean(viewData?.chartData);
@@ -5412,7 +5548,7 @@ export default function App() {
               }
               const weekendID = getTestDateID(normalizedDate);
               if (!weekendID) return;
-              const weekendLabel = getWeekendDisplayLabel(weekendID);
+              const weekendLabel = getScopedDateLabel(weekendID, activeDateContextCohortId, availableDates);
               const className = String(grade?.class || '').trim();
               if (className && !validClassSet.has(className)) {
                   invalidClassCount += 1;
@@ -5474,7 +5610,7 @@ export default function App() {
       Array.from(orphanWeekendIds).sort(customDateSort).forEach((weekendID) => {
           pushDetail('orphanDate', {
               key: `orphan-${weekendID}`,
-              primary: getWeekendDisplayLabel(weekendID),
+              primary: getScopedDateLabel(weekendID, activeDateContextCohortId, availableDates),
               secondary: '此考次目前沒有任何有效分數'
           });
       });
@@ -5501,7 +5637,7 @@ export default function App() {
           },
           details
       };
-  }, [deferredDatesForDerived, deferredStudentsForDerived, getTestDateID, shouldBuildQueryDeepInsights]);
+  }, [activeDateContextCohortId, availableDates, deferredDatesForDerived, deferredStudentsForDerived, getScopedDateLabel, getTestDateID, shouldBuildQueryDeepInsights]);
 
   const dataQualitySummary = dataQualityReport.summary;
   const dataQualityDetails = dataQualityReport.details;
@@ -5822,11 +5958,11 @@ export default function App() {
                                 屆別切換
                             </div>
                             <p className={`mt-1 text-[11px] font-semibold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                                老師端可切換新舊兩屆；家長端只會顯示目前公開屆別。
+                                老師端可切換新舊兩屆；家長端可跨屆查詢，若同名會優先最新一屆。
                             </p>
                         </div>
                         <div className={`text-[11px] font-bold ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>
-                            家長端目前：<span className={darkMode ? 'text-emerald-200' : 'text-emerald-700'}>{activePublicCohort?.label || getCohortLabel(activePublicCohortId)}</span>
+                            家長端預設快取：<span className={darkMode ? 'text-emerald-200' : 'text-emerald-700'}>{activePublicCohort?.label || getCohortLabel(activePublicCohortId)}</span>
                         </div>
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
@@ -5847,7 +5983,7 @@ export default function App() {
                                         </span>
                                         {isPublicSelected && (
                                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${darkMode ? 'bg-sky-500/15 text-sky-100' : 'bg-sky-100 text-sky-700'}`}>
-                                                家長端顯示
+                                                家長端預設
                                             </span>
                                         )}
                                     </div>
@@ -5863,7 +5999,7 @@ export default function App() {
                               disabled={publicCohortSaving || cohortRegistryLoading}
                               className={`btn-sheen rounded-xl px-3 py-2 text-[11px] font-bold transition-colors ${darkMode ? 'bg-slate-800 text-slate-100 border border-white/10 hover:bg-slate-700' : 'bg-slate-800 text-white hover:bg-slate-700 shadow-sm'} disabled:opacity-50 disabled:cursor-not-allowed`}
                             >
-                              {publicCohortSaving ? '切換中...' : `設為家長端：${activeTeacherCohort?.label || getCohortLabel(activeTeacherCohortId)}`}
+                              {publicCohortSaving ? '切換中...' : `設為家長端預設：${activeTeacherCohort?.label || getCohortLabel(activeTeacherCohortId)}`}
                             </button>
                         </div>
                     )}
@@ -5996,10 +6132,12 @@ export default function App() {
                         <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
                             <button onClick={() => setShowAddStudentModal(true)} className="btn-sheen bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all whitespace-nowrap"><UserPlus className="w-4 h-4"/> 新增學生</button>
                             {canImportExcel ? (
-                                <label className="btn-sheen cursor-pointer bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all whitespace-nowrap">
-                                    <FileSpreadsheet className="w-4 h-4" /> 匯入 Excel
-                                    <input type="file" accept=".xlsx, .xls" className="hidden" onChange={handleExcelUpload} />
-                                </label>
+                                <>
+                                    <button type="button" onClick={requestExcelImport} className="btn-sheen cursor-pointer bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all whitespace-nowrap">
+                                        <FileSpreadsheet className="w-4 h-4" /> {isLegacyCohort(activeTeacherCohortId) ? '匯入 Excel（需驗證）' : '匯入 Excel'}
+                                    </button>
+                                    <input ref={importFileInputRef} type="file" accept=".xlsx, .xls" className="hidden" onChange={handleExcelUpload} />
+                                </>
                             ) : (
                                 <button type="button" disabled className="bg-slate-300 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap cursor-not-allowed">
                                     <FileSpreadsheet className="w-4 h-4" /> 匯入 Excel（唯讀）
@@ -7234,7 +7372,7 @@ export default function App() {
                                   const avg = dateData[avgSettingsClassFilter] || { chi: '', eng: '', math: '', total: '' };
                                   return (
                                       <tr key={date} className={darkMode ? 'bg-transparent' : 'bg-white'}>
-                                          <td className="px-4 py-3 font-mono font-bold text-slate-500">{weekendLabelByDate[date] || getWeekendDisplayLabel(date)}</td>
+                                          <td className="px-4 py-3 font-mono font-bold text-slate-500">{weekendLabelByDate[date] || getScopedDateLabel(date, activeDateContextCohortId, availableDates)}</td>
                                           {['chi', 'eng', 'math', 'total'].map(sub => (
                                               <td key={sub} className="px-1 py-1.5">
                                                   <input id={`avg-${dateIndex}-${sub}`} type="number" className={`w-full text-center p-2 rounded-xl border outline-none transition-all font-bold ${darkMode ? 'bg-slate-900 border-transparent focus:bg-slate-800 focus:border-blue-500/50 text-slate-200' : 'bg-slate-50 border-slate-100 focus:bg-white focus:border-indigo-300 text-slate-600'} ${sub==='total'?'text-blue-500':''}`} value={avg[sub] || ''} onChange={(e) => handleManualAverageChange(date, avgSettingsClassFilter, sub, e.target.value)} onKeyDown={(e) => handleAvgKeyDown(e, dateIndex, sub)} onPaste={(e) => handleAvgPaste(e, dateIndex, sub)} placeholder="-" />

@@ -1768,11 +1768,31 @@ export default function App() {
       return buildProbabilityContext(probabilityContextStudents, orderedWeekendIds, (dateId) => dateId);
   }, [mode, orderedWeekendIds, probabilityContextStudents]);
 
+  const weekendScoreCountById = useMemo(() => {
+      const counts = {};
+      allStudentsData.forEach((student) => {
+          const weekendEntries = buildWeekendGradeEntryMap(student.grades, getTestDateID);
+          Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
+              if (!hasAnySubjectScore(entry.grade)) return;
+              counts[weekendID] = (counts[weekendID] || 0) + 1;
+          });
+      });
+      return counts;
+  }, [allStudentsData, getTestDateID]);
+
+  const latestPopulatedWeekendID = useMemo(() => {
+      for (let idx = orderedWeekendIds.length - 1; idx >= 0; idx -= 1) {
+          const weekendID = orderedWeekendIds[idx];
+          if ((weekendScoreCountById[weekendID] || 0) > 0) return weekendID;
+      }
+      return latestAvailableDate;
+  }, [latestAvailableDate, orderedWeekendIds, weekendScoreCountById]);
+
   const selectedTeacherDateMeta = useMemo(() => {
-      const targetId = selectedBatchWeekendID || latestAvailableDate;
+      const targetId = selectedBatchWeekendID || latestPopulatedWeekendID || latestAvailableDate;
       if (!targetId) return null;
       return teacherDateCards.find((item) => item.weekendID === targetId) || teacherDateCards[0] || null;
-  }, [latestAvailableDate, selectedBatchWeekendID, teacherDateCards]);
+  }, [latestAvailableDate, latestPopulatedWeekendID, selectedBatchWeekendID, teacherDateCards]);
 
   useEffect(() => {
       const storedAuth = localStorage.getItem('teacher_auth');
@@ -1984,12 +2004,12 @@ export default function App() {
 
   useEffect(() => {
       if (!orderedWeekendIds.length) return;
-      const latestWeekendID = orderedWeekendIds[orderedWeekendIds.length - 1];
+      const latestWeekendID = latestPopulatedWeekendID || orderedWeekendIds[orderedWeekendIds.length - 1];
       const currentWeekendID = batchDate ? getTestDateID(batchDate) : '';
       if (!currentWeekendID || !orderedWeekendIds.includes(currentWeekendID)) {
           setBatchDate(latestWeekendID);
       }
-  }, [orderedWeekendIds, batchDate, getTestDateID]);
+  }, [orderedWeekendIds, batchDate, getTestDateID, latestPopulatedWeekendID]);
 
   useEffect(() => {
       if (mode !== 'teacher') return;
@@ -1998,11 +2018,11 @@ export default function App() {
 
   useEffect(() => {
       if (mode !== 'teacher' || !shouldSnapTeacherEntryRef.current || !orderedWeekendIds.length) return;
-      const latestWeekendID = orderedWeekendIds[orderedWeekendIds.length - 1];
+      const latestWeekendID = latestPopulatedWeekendID || orderedWeekendIds[orderedWeekendIds.length - 1];
       setTeacherViewMode('batch');
       setBatchDate(latestWeekendID);
       shouldSnapTeacherEntryRef.current = false;
-  }, [mode, orderedWeekendIds]);
+  }, [latestPopulatedWeekendID, mode, orderedWeekendIds]);
 
   useEffect(() => {
       if (mode !== 'teacher' || loading || isBatchDirty) return;
@@ -4956,6 +4976,38 @@ export default function App() {
   ]);
   batchRowsForDisplayRef.current = batchRowsForDisplay;
 
+  const batchClassCounts = useMemo(() => {
+      if (!shouldBuildBatchAnalytics) return {};
+      const counts = {};
+      allStudentsData.forEach((student) => {
+          const grade = currentBatchGradeInfoByStudentId[student.id]?.grade;
+          if (!grade || !hasAnySubjectScore(grade)) return;
+          const classId = grade.class || defaultTeacherClassId;
+          counts[classId] = (counts[classId] || 0) + 1;
+      });
+      return counts;
+  }, [allStudentsData, currentBatchGradeInfoByStudentId, defaultTeacherClassId, shouldBuildBatchAnalytics]);
+
+  const fallbackBatchClassId = useMemo(() => {
+      let target = defaultTeacherClassId;
+      let maxCount = batchClassCounts[target] || 0;
+      activeTeacherClassDefs.forEach(({ id }) => {
+          const count = batchClassCounts[id] || 0;
+          if (count > maxCount) {
+              target = id;
+              maxCount = count;
+          }
+      });
+      return maxCount > 0 ? target : '';
+  }, [activeTeacherClassDefs, batchClassCounts, defaultTeacherClassId]);
+
+  useEffect(() => {
+      if (!shouldBuildBatchAnalytics || isBatchDirty) return;
+      if (batchRowsForDisplay.length > 0) return;
+      if (!fallbackBatchClassId || fallbackBatchClassId === teacherClassFilter) return;
+      setTeacherClassFilter(fallbackBatchClassId);
+  }, [batchRowsForDisplay.length, fallbackBatchClassId, isBatchDirty, shouldBuildBatchAnalytics, teacherClassFilter]);
+
   const handleExportBatchExcel = async () => {
       if (!window.XLSX) {
           setStatusMsg('Excel 模組載入中，請稍後');
@@ -6241,7 +6293,7 @@ export default function App() {
                             </span>
                             <select
                                 className={`min-w-[132px] rounded-xl px-3 py-2 text-[11px] font-bold outline-none transition-colors border shadow-sm ${darkMode ? 'bg-[#020617]/55 border-white/10 text-slate-200' : 'bg-white border-slate-200 text-slate-700'}`}
-                                value={selectedBatchWeekendID || latestAvailableDate || ''}
+                                value={selectedBatchWeekendID || latestPopulatedWeekendID || latestAvailableDate || ''}
                                 disabled={!teacherDateCards.length}
                                 onChange={(e) => {
                                     const nextValue = e.target.value;
@@ -6263,10 +6315,10 @@ export default function App() {
                             <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
                                 {orderedWeekendIds.length} 考次
                             </span>
-                            {teacherViewMode === 'batch' && latestAvailableDate && selectedBatchWeekendID !== latestAvailableDate && (
+                            {teacherViewMode === 'batch' && (latestPopulatedWeekendID || latestAvailableDate) && selectedBatchWeekendID !== (latestPopulatedWeekendID || latestAvailableDate) && (
                                 <button
                                     type="button"
-                                    onClick={() => applyBatchDateChange(latestAvailableDate)}
+                                    onClick={() => applyBatchDateChange(latestPopulatedWeekendID || latestAvailableDate)}
                                     className={`btn-sheen rounded-full px-2.5 py-1 text-[10px] font-bold transition-colors border ${darkMode ? 'bg-slate-800 text-slate-200 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 shadow-sm'}`}
                                 >
                                     最新

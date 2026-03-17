@@ -483,6 +483,12 @@ const buildTargetWeekendGradeEntryMap = (grades, targetWeekendIds, getDateID) =>
     return weekendEntryMap;
 };
 
+const deriveDatePoolFromStudents = (students = []) => sanitizeDateList(
+    students.flatMap((student) => Object.keys(student?.grades || {}))
+);
+
+const mergeDatePools = (...dateLists) => sanitizeDateList(dateLists.flatMap((list) => Array.isArray(list) ? list : []));
+
 const normalizeAverageGrade = (gradeObj) => {
     const normalized = {
         chi: gradeObj?.chi ?? '',
@@ -2542,14 +2548,28 @@ export default function App() {
           loadingReleased = true;
           setLoading(false);
       };
+      const syncDatesFromStudents = (students) => {
+          const derivedDates = deriveDatePoolFromStudents(students);
+          if (!derivedDates.length) return;
+          const nextDates = mergeDatePools(datePool, derivedDates);
+          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, cohortId), nextDates);
+          if (cohortId !== activeDataCohortId) return;
+          if (nextDates.join('|') === sanitizeDateList(availableDates).join('|')) return;
+          startTransition(() => {
+              setAvailableDates(nextDates);
+              setDatesCohortId(cohortId);
+          });
+      };
       try {
           const cacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.students, cohortId);
           const sessionKey = getStudentSessionKey(cohortId);
           const cachedStudents = readLocalCache(cacheKey, STUDENT_CACHE_TTL_MS);
+          const hasCachedStudents = Array.isArray(cachedStudents) && cachedStudents.length > 0;
           const hasSessionSynced =
               typeof window !== 'undefined'
               && sessionStorage.getItem(sessionKey) === '1';
-          if (!forceRemote && Array.isArray(cachedStudents)) {
+          if (!forceRemote && hasCachedStudents) {
+              syncDatesFromStudents(cachedStudents);
               startTransition(() => {
                   setAllStudentsData(cachedStudents);
                   setTeacherStudentsCohortId(cohortId);
@@ -2602,6 +2622,7 @@ export default function App() {
               });
           }
           const sortedStudents = Object.values(studentsMap).sort((a,b) => a.id.localeCompare(b.id));
+          syncDatesFromStudents(sortedStudents);
           startTransition(() => {
               setAllStudentsData(sortedStudents);
               setTeacherStudentsCohortId(cohortId);
@@ -2652,6 +2673,7 @@ export default function App() {
       studentsLoadPromiseRef.current = { cohortId, promise };
       return promise;
   }, [
+      activeDataCohortId,
       activePublicCohortId,
       activeTeacherCohortId,
       availableDates,

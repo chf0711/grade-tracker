@@ -2153,7 +2153,7 @@ export default function App() {
               const cleanedDates = sanitizeDateList(rawList);
               const nextDates = cleanedDates.length ? cleanedDates : fallbackDates;
 
-              if (cohortId === activeDataCohortId) {
+              if (cohortId === activeDataCohortId && nextDates.join('|') !== availableDates.join('|')) {
                   setAvailableDates(nextDates);
                   setDatesCohortId(cohortId);
               }
@@ -2169,7 +2169,7 @@ export default function App() {
               console.error('Error loading dates:', e);
               const cleanedFallback = cohortId === datesCohortId ? sanitizeDateList(availableDates) : [];
               const nextDates = cleanedFallback.length ? cleanedFallback : fallbackDates;
-              if (cohortId === activeDataCohortId) {
+              if (cohortId === activeDataCohortId && nextDates.join('|') !== availableDates.join('|')) {
                   setAvailableDates(nextDates);
                   setDatesCohortId(cohortId);
               }
@@ -3020,6 +3020,34 @@ export default function App() {
       return promise;
   }, [activeDataCohortId, activeTeacherCohortId, availableDates, cohortOptions, datesCohortId, getCohortCacheKey, getCohortSettingsDocRef, localComputedAverages, resolveScopedDateId, teacherStudentsCohortId]);
 
+  const teacherHydrationFnsRef = useRef({
+      loadDates,
+      loadClassAverages,
+      loadAllStudents,
+      loadTeacherMessage,
+      loadQueryStats
+  });
+  const publicHydrationFnsRef = useRef({
+      loadDates,
+      loadClassAverages,
+      loadTeacherMessage
+  });
+
+  useEffect(() => {
+      teacherHydrationFnsRef.current = {
+          loadDates,
+          loadClassAverages,
+          loadAllStudents,
+          loadTeacherMessage,
+          loadQueryStats
+      };
+      publicHydrationFnsRef.current = {
+          loadDates,
+          loadClassAverages,
+          loadTeacherMessage
+      };
+  }, [loadAllStudents, loadClassAverages, loadDates, loadQueryStats, loadTeacherMessage]);
+
   useEffect(() => {
       if (!user || mode !== 'teacher' || !isAuthenticated) return;
       let cancelled = false;
@@ -3041,17 +3069,24 @@ export default function App() {
           idleHandle = null;
       };
       const hydrateTeacherCohort = async () => {
-          const cohortDates = await loadDates({ cohortId: activeTeacherCohortId });
+          const {
+              loadDates: hydrateDates,
+              loadClassAverages: hydrateClassAverages,
+              loadAllStudents: hydrateStudents,
+              loadTeacherMessage: hydrateMessage,
+              loadQueryStats: hydrateStats
+          } = teacherHydrationFnsRef.current;
+          const cohortDates = await hydrateDates({ cohortId: activeTeacherCohortId });
           if (cancelled) return;
           await Promise.all([
-              loadClassAverages({ cohortId: activeTeacherCohortId, datePool: cohortDates }),
-              loadAllStudents({ cohortId: activeTeacherCohortId, datePool: cohortDates })
+              hydrateClassAverages({ cohortId: activeTeacherCohortId, datePool: cohortDates }),
+              hydrateStudents({ cohortId: activeTeacherCohortId, datePool: cohortDates })
           ]);
           if (cancelled) return;
           idleHandle = scheduleSecondaryHydration(() => {
               if (cancelled) return;
-              void loadTeacherMessage({ cohortId: activeTeacherCohortId });
-              void loadQueryStats({ cohortId: activeTeacherCohortId });
+              void hydrateMessage({ cohortId: activeTeacherCohortId });
+              void hydrateStats({ cohortId: activeTeacherCohortId });
           });
       };
       void hydrateTeacherCohort();
@@ -3059,24 +3094,29 @@ export default function App() {
           cancelled = true;
           cancelSecondaryHydration();
       };
-  }, [activeTeacherCohortId, isAuthenticated, loadAllStudents, loadClassAverages, loadDates, loadQueryStats, loadTeacherMessage, mode, user]);
+  }, [activeTeacherCohortId, isAuthenticated, mode, user]);
 
   useEffect(() => {
       if (!user || mode !== 'parent') return;
       let cancelled = false;
       const hydratePublicCohort = async () => {
-          const cohortDates = await loadDates({ cohortId: activePublicCohortId });
+          const {
+              loadDates: hydrateDates,
+              loadClassAverages: hydrateClassAverages,
+              loadTeacherMessage: hydrateMessage
+          } = publicHydrationFnsRef.current;
+          const cohortDates = await hydrateDates({ cohortId: activePublicCohortId });
           if (cancelled) return;
           await Promise.all([
-              loadClassAverages({ cohortId: activePublicCohortId, datePool: cohortDates }),
-              loadTeacherMessage({ cohortId: activePublicCohortId })
+              hydrateClassAverages({ cohortId: activePublicCohortId, datePool: cohortDates }),
+              hydrateMessage({ cohortId: activePublicCohortId })
           ]);
       };
       void hydratePublicCohort();
       return () => {
           cancelled = true;
       };
-  }, [activePublicCohortId, loadClassAverages, loadDates, loadTeacherMessage, mode, user]);
+  }, [activePublicCohortId, mode, user]);
 
   useEffect(() => {
       if (deferredStudentsForDerived.length === 0) return undefined;

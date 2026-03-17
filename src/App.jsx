@@ -805,7 +805,18 @@ const calculateProbLogic = (
     const myGrades = studentGradeMaps[targetStudent.id] || {};
 
     availableDates.forEach((date) => {
-         const weekendID = normalizeDateToken(date) || getWeekendID(date, availableDates);
+         const normalizedDate = normalizeDateToken(date);
+         const weekendID = (
+             normalizedDate
+             && (
+                 myGrades[normalizedDate]
+                 || scoresByDate[normalizedDate]
+                 || mathScoresByDate[normalizedDate]
+                 || probabilityProfiles?.[normalizedDate]
+             )
+         )
+             ? normalizedDate
+             : getWeekendID(date, availableDates);
          if (!weekendID) return;
          const grade = myGrades[weekendID];
          let myTotal = null;
@@ -968,9 +979,65 @@ const buildProbabilityContext = (students, availableDates, getDateID) => {
 };
 
 // --- Components ---
-const SingleSubjectChart = React.lazy(() => import('./components/charts/SingleSubjectChart'));
-const DistributionChart = React.lazy(() => import('./components/charts/DistributionChart'));
-const ParentAbilityRadar = React.lazy(() => import('./components/charts/ParentAbilityRadar'));
+const CHART_CHUNK_RELOAD_GUARD_KEY = 'grade_tracker_chart_chunk_reload_once';
+
+const isChunkImportError = (error) => {
+    const message = String(error?.message || error || '').toLowerCase();
+    return (
+        message.includes('failed to fetch dynamically imported module')
+        || message.includes('chunkloaderror')
+        || message.includes('loading chunk')
+        || message.includes('importing a module script failed')
+    );
+};
+
+const safePreloadImport = async (loader) => {
+    try {
+        const mod = await loader();
+        if (typeof window !== 'undefined') {
+            sessionStorage.removeItem(CHART_CHUNK_RELOAD_GUARD_KEY);
+        }
+        return mod;
+    } catch (error) {
+        if (isChunkImportError(error)) {
+            console.warn('Chart chunk preload skipped:', error);
+            return null;
+        }
+        console.error('Chart preload error:', error);
+        return null;
+    }
+};
+
+const ChartModuleErrorFallback = () => (
+    <div className="h-60 rounded-2xl border border-white/85 bg-white/80 px-4 py-3 text-xs font-bold text-slate-500 shadow-[0_14px_32px_rgba(15,23,42,0.08)] flex items-center justify-center">
+        圖表載入中，請稍後再試
+    </div>
+);
+
+const lazyWithChunkRecovery = (loader, label) => React.lazy(async () => {
+    try {
+        const mod = await loader();
+        if (typeof window !== 'undefined') {
+            sessionStorage.removeItem(CHART_CHUNK_RELOAD_GUARD_KEY);
+        }
+        return mod;
+    } catch (error) {
+        if (typeof window !== 'undefined' && isChunkImportError(error)) {
+            const alreadyRetried = sessionStorage.getItem(CHART_CHUNK_RELOAD_GUARD_KEY) === '1';
+            if (!alreadyRetried) {
+                sessionStorage.setItem(CHART_CHUNK_RELOAD_GUARD_KEY, '1');
+                window.location.reload();
+                return new Promise(() => {});
+            }
+        }
+        console.error(`${label} lazy load error:`, error);
+        return { default: ChartModuleErrorFallback };
+    }
+});
+
+const SingleSubjectChart = lazyWithChunkRecovery(() => import('./components/charts/SingleSubjectChart'), 'SingleSubjectChart');
+const DistributionChart = lazyWithChunkRecovery(() => import('./components/charts/DistributionChart'), 'DistributionChart');
+const ParentAbilityRadar = lazyWithChunkRecovery(() => import('./components/charts/ParentAbilityRadar'), 'ParentAbilityRadar');
 
 const ChartFallback = ({ heightClass = 'h-60' }) => (
     <div className={`${heightClass} rounded-2xl border border-white/85 brand-skeleton flex flex-col justify-end px-4 py-3 text-xs font-bold text-slate-500`}>
@@ -1580,10 +1647,16 @@ export default function App() {
       return gradeMaps;
   }, [deferredStudentsForDerived, getTestDateID]);
 
-  const deferredStudentsById = useMemo(
-      () => Object.fromEntries(deferredStudentsForDerived.map((student) => [student.id, student])),
-      [deferredStudentsForDerived]
+  const allStudentsById = useMemo(
+      () => Object.fromEntries(allStudentsData.map((student) => [student.id, student])),
+      [allStudentsData]
   );
+
+  const probabilityContextStudents = useMemo(() => (
+      deferredStudentsForDerived.length === allStudentsData.length
+          ? deferredStudentsForDerived
+          : allStudentsData
+  ), [allStudentsData, deferredStudentsForDerived]);
 
   const avgSettingsDateKeysDesc = useMemo(
       () => [...orderedWeekendIds].slice().reverse(),
@@ -1597,15 +1670,41 @@ export default function App() {
       if (!shouldBuildBatchAnalytics) return [];
       const weekendID = getTestDateID(batchDate);
       if (!weekendID) return [];
-      return deferredStudentsForDerived
+      return allStudentsData
           .filter((student) => {
-              const dateGrades = deferredStudentGradeMapsByStudentId[student.id]?.[weekendID];
+              const weekendEntries = buildTargetWeekendGradeEntryMap(student.grades, new Set([weekendID]), getTestDateID);
+              const dateGrades = weekendEntries[weekendID]?.grade;
               if (!dateGrades) return false;
               if ((dateGrades.class || 'A班') !== teacherClassFilter) return false;
               return hasAnySubjectScore(dateGrades);
           })
           .map((student) => student.id);
-  }, [batchDate, deferredStudentGradeMapsByStudentId, deferredStudentsForDerived, getTestDateID, shouldBuildBatchAnalytics, teacherClassFilter]);
+  }, [allStudentsData, batchDate, getTestDateID, shouldBuildBatchAnalytics, teacherClassFilter]);
+
+  const batchProbStudentGradeMapsByStudentId = useMemo(() => {
+      if (!shouldBuildBatchAnalytics || batchProbCandidateIds.length === 0) return {};
+      const targetIds = new Set(batchProbCandidateIds);
+      const gradeMaps = {};
+
+      allStudentsData.forEach((student) => {
+          if (!targetIds.has(student.id)) return;
+          const weekendGrades = {};
+          const weekendEntries = buildWeekendGradeEntryMap(student.grades, getTestDateID);
+          Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
+              weekendGrades[weekendID] = entry.grade;
+          });
+          gradeMaps[student.id] = weekendGrades;
+      });
+
+      return gradeMaps;
+  }, [allStudentsData, batchProbCandidateIds, getTestDateID, shouldBuildBatchAnalytics]);
+
+  const teacherProbabilityContext = useMemo(() => {
+      if (mode !== 'teacher' || orderedWeekendIds.length === 0 || probabilityContextStudents.length === 0) {
+          return null;
+      }
+      return buildProbabilityContext(probabilityContextStudents, orderedWeekendIds, (dateId) => dateId);
+  }, [mode, orderedWeekendIds, probabilityContextStudents]);
 
   const selectedTeacherDateMeta = useMemo(() => {
       const targetId = selectedBatchWeekendID || latestAvailableDate;
@@ -1646,14 +1745,14 @@ export default function App() {
           setAdmissionProbabilities({});
           return;
       }
+      if (!teacherProbabilityContext) return;
 
       let rafId = null;
       let cancelled = false;
-      const debounceMs = batchProbCandidateIds.length > 80 ? 220 : batchProbCandidateIds.length > 40 ? 160 : 90;
+      const debounceMs = batchProbCandidateIds.length > 120 ? 90 : batchProbCandidateIds.length > 60 ? 40 : 0;
       const timer = setTimeout(() => {
           if (cancelled) return;
 
-          const context = buildProbabilityContext(deferredStudentsForDerived, orderedWeekendIds, (dateId) => dateId);
           const {
               scoresByDate,
               mathScoresByDate,
@@ -1661,15 +1760,15 @@ export default function App() {
               totalPRLookupByDate,
               mathPRLookupByDate,
               normalizedDates
-          } = context;
+          } = teacherProbabilityContext;
 
-          const studentGradeMaps = deferredStudentGradeMapsByStudentId;
+          const studentGradeMaps = batchProbStudentGradeMapsByStudentId;
           const students = batchProbCandidateIds
-              .map((studentId) => deferredStudentsById[studentId])
+              .map((studentId) => allStudentsById[studentId])
               .filter(Boolean);
           const probs = {};
           let index = 0;
-          const chunkSize = students.length > 120 ? 18 : students.length > 60 ? 28 : 42;
+          const chunkSize = students.length > 120 ? 26 : students.length > 60 ? 38 : 56;
 
           const processChunk = () => {
               if (cancelled) return;
@@ -1710,7 +1809,7 @@ export default function App() {
           clearTimeout(timer);
           if (rafId) cancelAnimationFrame(rafId);
       };
-  }, [batchProbCandidateIds, deferredStudentGradeMapsByStudentId, deferredStudentsById, deferredStudentsForDerived, mode, orderedWeekendIds, teacherViewMode]);
+  }, [allStudentsById, batchProbCandidateIds, batchProbStudentGradeMapsByStudentId, mode, orderedWeekendIds, teacherProbabilityContext, teacherViewMode]);
 
   useEffect(() => {
       if (mode !== 'parent' || !viewData?.chartData?.length) return;
@@ -1731,11 +1830,6 @@ export default function App() {
           setBatchInsightTab('grades');
       }
   }, [teacherViewMode, batchInsightTab]);
-
-  useEffect(() => {
-      if (mode !== 'teacher') return;
-      ensureXlsxReady().catch(() => {});
-  }, [mode, ensureXlsxReady]);
 
   useEffect(() => {
       if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined;
@@ -1771,9 +1865,11 @@ export default function App() {
       if (typeof window === 'undefined') return undefined;
 
       const preloadCharts = () => {
-          void import('./components/charts/SingleSubjectChart');
-          void import('./components/charts/DistributionChart');
-          void import('./components/charts/ParentAbilityRadar');
+          void Promise.allSettled([
+              safePreloadImport(() => import('./components/charts/SingleSubjectChart')),
+              safePreloadImport(() => import('./components/charts/DistributionChart')),
+              safePreloadImport(() => import('./components/charts/ParentAbilityRadar'))
+          ]);
       };
 
       if ('requestIdleCallback' in window) {
@@ -2800,19 +2896,41 @@ export default function App() {
   useEffect(() => {
       if (!user || mode !== 'teacher' || !isAuthenticated) return;
       let cancelled = false;
+      let idleHandle = null;
+      const scheduleSecondaryHydration = (task) => {
+          if (typeof window === 'undefined') return null;
+          if (typeof window.requestIdleCallback === 'function') {
+              return window.requestIdleCallback(task, { timeout: 1200 });
+          }
+          return window.setTimeout(task, 180);
+      };
+      const cancelSecondaryHydration = () => {
+          if (idleHandle === null || typeof window === 'undefined') return;
+          if (typeof window.cancelIdleCallback === 'function') {
+              window.cancelIdleCallback(idleHandle);
+          } else {
+              window.clearTimeout(idleHandle);
+          }
+          idleHandle = null;
+      };
       const hydrateTeacherCohort = async () => {
           const cohortDates = await loadDates({ cohortId: activeTeacherCohortId });
           if (cancelled) return;
           await Promise.all([
               loadClassAverages({ cohortId: activeTeacherCohortId, datePool: cohortDates }),
-              loadTeacherMessage({ cohortId: activeTeacherCohortId }),
-              loadQueryStats({ cohortId: activeTeacherCohortId }),
               loadAllStudents({ cohortId: activeTeacherCohortId, datePool: cohortDates })
           ]);
+          if (cancelled) return;
+          idleHandle = scheduleSecondaryHydration(() => {
+              if (cancelled) return;
+              void loadTeacherMessage({ cohortId: activeTeacherCohortId });
+              void loadQueryStats({ cohortId: activeTeacherCohortId });
+          });
       };
       void hydrateTeacherCohort();
       return () => {
           cancelled = true;
+          cancelSecondaryHydration();
       };
   }, [activeTeacherCohortId, isAuthenticated, loadAllStudents, loadClassAverages, loadDates, loadQueryStats, loadTeacherMessage, mode, user]);
 
@@ -4640,7 +4758,7 @@ export default function App() {
       const targetWeekendIds = new Set(relevantWeekendIdsForPR);
       const gradeMaps = {};
 
-      deferredStudentsForDerived.forEach((student) => {
+      allStudentsData.forEach((student) => {
           const weekendEntries = buildTargetWeekendGradeEntryMap(student.grades, targetWeekendIds, getTestDateID);
           const weekendGrades = {};
           Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
@@ -4652,7 +4770,7 @@ export default function App() {
       });
 
       return gradeMaps;
-  }, [deferredStudentsForDerived, getTestDateID, relevantWeekendIdsForPR, shouldBuildBatchAnalytics]);
+  }, [allStudentsData, getTestDateID, relevantWeekendIdsForPR, shouldBuildBatchAnalytics]);
 
   const globalPRByStudentAndWeekend = useMemo(() => {
       if (!shouldBuildBatchAnalytics || relevantWeekendIdsForPR.length === 0) return {};
@@ -4691,7 +4809,7 @@ export default function App() {
       const weekendID = getTestDateID(batchDate);
       const rows = [];
 
-      deferredStudentsForDerived.forEach(student => {
+      allStudentsData.forEach(student => {
           const dateGrades = batchRelevantGradeMapsByStudentId[student.id]?.[weekendID];
           if (!dateGrades) return;
 
@@ -4727,7 +4845,7 @@ export default function App() {
       return computedRows;
   }, [
       shouldBuildBatchAnalytics,
-      deferredStudentsForDerived,
+      allStudentsData,
       batchDate,
       teacherClassFilter,
       getTestDateID,

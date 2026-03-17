@@ -68,6 +68,18 @@ const LOCAL_CACHE_KEYS = Object.freeze({
     snapshots: 'grade_tracker_cache_snapshots_v1'
 });
 const STUDENTS_SESSION_SYNC_KEY = 'grade_tracker_students_session_synced_v1';
+const COHORT_STORAGE_MODE = Object.freeze({
+    LEGACY: 'legacy',
+    SCOPED: 'scoped'
+});
+const LEGACY_COHORT_ID = '2025-2026';
+const NEXT_COHORT_ID = '2026-2027';
+const COHORT_REGISTRY_DOC_ID = 'cohorts_v1';
+const TEACHER_ACTIVE_COHORT_STORAGE_KEY = 'grade_tracker_teacher_active_cohort_v1';
+const DEFAULT_COHORT_OPTIONS = Object.freeze([
+    { id: LEGACY_COHORT_ID, label: '2025-2026', storageMode: COHORT_STORAGE_MODE.LEGACY },
+    { id: NEXT_COHORT_ID, label: '2026-2027', storageMode: COHORT_STORAGE_MODE.SCOPED }
+]);
 
 const runtimeFirebaseConfig =
   typeof window !== 'undefined' ? window.__firebase_config : undefined;
@@ -121,6 +133,40 @@ const writeLocalCache = (key, data) => {
     } catch {
         return;
     }
+};
+
+const getScopedCacheKey = (baseKey, scope = 'global') => `${baseKey}::${scope || 'global'}`;
+
+const normalizeCohortOptions = (rawCohorts) => {
+    const normalized = [];
+    const seen = new Set();
+    const candidates = [...DEFAULT_COHORT_OPTIONS, ...(Array.isArray(rawCohorts) ? rawCohorts : [])];
+
+    candidates.forEach((rawCohort) => {
+        const id = String(rawCohort?.id || '').trim();
+        if (!id || seen.has(id)) return;
+        seen.add(id);
+        normalized.push({
+            id,
+            label: String(rawCohort?.label || id).trim() || id,
+            storageMode: rawCohort?.storageMode === COHORT_STORAGE_MODE.SCOPED
+                ? COHORT_STORAGE_MODE.SCOPED
+                : COHORT_STORAGE_MODE.LEGACY
+        });
+    });
+
+    return normalized.length ? normalized : [...DEFAULT_COHORT_OPTIONS];
+};
+
+const resolvePreferredPublicCohortId = (cohorts, requestedId = '') => {
+    const normalizedCohorts = normalizeCohortOptions(cohorts);
+    if (normalizedCohorts.some((cohort) => cohort.id === requestedId)) {
+        return requestedId;
+    }
+    if (normalizedCohorts.some((cohort) => cohort.id === NEXT_COHORT_ID)) {
+        return NEXT_COHORT_ID;
+    }
+    return normalizedCohorts[normalizedCohorts.length - 1]?.id || LEGACY_COHORT_ID;
 };
 
 const hashFingerprint = (value) => {
@@ -1029,6 +1075,21 @@ export default function App() {
   const [teacherAuthRole, setTeacherAuthRole] = useState(TEACHER_ROLE.FULL);
   const [passwordInput, setPasswordInput] = useState('');
   const [loginError, setLoginError] = useState(false);
+  const [cohortOptions, setCohortOptions] = useState(DEFAULT_COHORT_OPTIONS);
+  const [activeTeacherCohortId, setActiveTeacherCohortId] = useState(() => {
+      if (typeof window === 'undefined') return NEXT_COHORT_ID;
+      const stored = String(localStorage.getItem(TEACHER_ACTIVE_COHORT_STORAGE_KEY) || '').trim();
+      return stored || NEXT_COHORT_ID;
+  });
+  const [activePublicCohortId, setActivePublicCohortId] = useState(NEXT_COHORT_ID);
+  const [datesCohortId, setDatesCohortId] = useState('');
+  const [classAveragesCohortId, setClassAveragesCohortId] = useState('');
+  const [teacherStudentsCohortId, setTeacherStudentsCohortId] = useState('');
+  const [publicStudentsCohortId, setPublicStudentsCohortId] = useState('');
+  const [, setQueryStatsCohortId] = useState('');
+  const [, setTeacherMessageCohortId] = useState('');
+  const [cohortRegistryLoading, setCohortRegistryLoading] = useState(false);
+  const [publicCohortSaving, setPublicCohortSaving] = useState(false);
     
   const [studentName, setStudentName] = useState('');
   const [currentStudentId, setCurrentStudentId] = useState(null);
@@ -1094,12 +1155,14 @@ export default function App() {
   const batchDirtyStudentIdsRef = useRef(new Set());
   const queryPendingCountsRef = useRef({});
   const queryPendingEventsRef = useRef([]);
+  const queryPendingCohortIdRef = useRef(LEGACY_COHORT_ID);
   const queryFlushTimerRef = useRef(null);
   const queryFlushInFlightRef = useRef(false);
   const shouldSnapTeacherEntryRef = useRef(false);
   const datesLoadPromiseRef = useRef(null);
   const classAveragesLoadPromiseRef = useRef(null);
   const studentsLoadPromiseRef = useRef(null);
+  const cohortRegistryLoadPromiseRef = useRef(null);
   const pendingImportPayloadRef = useRef(null);
   const parentQueryPerfRef = useRef({
       cacheHit: 0,
@@ -1137,6 +1200,54 @@ export default function App() {
   const canEditStudentGrades = !isLimitedTeacherRole;
   const canImportExcel = canEditStudentGrades || isLimitedTeacherRole;
   const canDeleteDates = !isLimitedTeacherRole;
+  const cohortOptionsById = useMemo(
+      () => Object.fromEntries(cohortOptions.map((cohort) => [cohort.id, cohort])),
+      [cohortOptions]
+  );
+  const activeTeacherCohort = cohortOptionsById[activeTeacherCohortId] || DEFAULT_COHORT_OPTIONS[1];
+  const activePublicCohort = cohortOptionsById[activePublicCohortId] || DEFAULT_COHORT_OPTIONS[0];
+  const activeDataCohortId = mode === 'parent' ? activePublicCohortId : activeTeacherCohortId;
+  const getCohortLabel = useCallback(
+      (cohortId) => cohortOptionsById[cohortId]?.label || String(cohortId || ''),
+      [cohortOptionsById]
+  );
+  const isLegacyCohort = useCallback(
+      (cohortId) => (cohortOptionsById[cohortId]?.storageMode || COHORT_STORAGE_MODE.LEGACY) === COHORT_STORAGE_MODE.LEGACY,
+      [cohortOptionsById]
+  );
+  const getCohortCacheKey = useCallback(
+      (baseKey, cohortId) => getScopedCacheKey(baseKey, cohortId || 'global'),
+      []
+  );
+  const getStudentSessionKey = useCallback(
+      (cohortId) => getScopedCacheKey(STUDENTS_SESSION_SYNC_KEY, cohortId || 'global'),
+      []
+  );
+  const getCohortRegistryDocRef = useCallback(
+      () => (db ? doc(db, 'artifacts', appId, 'public', 'data', 'settings', COHORT_REGISTRY_DOC_ID) : null),
+      []
+  );
+  const getCohortSettingsDocRef = useCallback((cohortId, docId) => {
+      if (!db || !docId) return null;
+      if (isLegacyCohort(cohortId)) {
+          return doc(db, 'artifacts', appId, 'public', 'data', 'settings', docId);
+      }
+      return doc(db, 'artifacts', appId, 'public', 'data', 'cohorts', cohortId, 'settings', docId);
+  }, [isLegacyCohort]);
+  const getCohortStudentsCollectionRef = useCallback((cohortId) => {
+      if (!db) return null;
+      if (isLegacyCohort(cohortId)) {
+          return collection(db, 'artifacts', appId, 'public', 'data', 'students');
+      }
+      return collection(db, 'artifacts', appId, 'public', 'data', 'cohorts', cohortId, 'students');
+  }, [isLegacyCohort]);
+  const getCohortStudentDocRef = useCallback((cohortId, studentId) => {
+      if (!db || !studentId) return null;
+      if (isLegacyCohort(cohortId)) {
+          return doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${studentId}`);
+      }
+      return doc(db, 'artifacts', appId, 'public', 'data', 'cohorts', cohortId, 'students', `student_${studentId}`);
+  }, [isLegacyCohort]);
 
   const appendOperationLog = useCallback((entry) => {
       const title = String(entry?.title || '').trim();
@@ -1182,6 +1293,68 @@ export default function App() {
           latestMs
       });
   }, []);
+
+  const loadCohortRegistry = useCallback(async (options = {}) => {
+      const force = Boolean(options && options.force);
+      if (!force && cohortRegistryLoadPromiseRef.current) return cohortRegistryLoadPromiseRef.current;
+
+      const runner = async () => {
+          const fallbackCohorts = normalizeCohortOptions(DEFAULT_COHORT_OPTIONS);
+          const fallbackPublicCohortId = resolvePreferredPublicCohortId(fallbackCohorts);
+          if (!db) {
+              setCohortOptions(fallbackCohorts);
+              setActivePublicCohortId(fallbackPublicCohortId);
+              return { cohorts: fallbackCohorts, publicCohortId: fallbackPublicCohortId };
+          }
+
+          setCohortRegistryLoading(true);
+          try {
+              const registryRef = getCohortRegistryDocRef();
+              const docSnap = await getDoc(registryRef);
+              const raw = docSnap.exists() ? docSnap.data() : {};
+              const cohorts = normalizeCohortOptions(raw?.cohorts);
+              const publicCohortId = resolvePreferredPublicCohortId(cohorts, raw?.publicCohortId);
+              const fingerprint = JSON.stringify({ cohorts, publicCohortId });
+              const persistedFingerprint = JSON.stringify({
+                  cohorts: normalizeCohortOptions(raw?.cohorts),
+                  publicCohortId: raw?.publicCohortId || ''
+              });
+
+              setCohortOptions(cohorts);
+              setActivePublicCohortId(publicCohortId);
+              setActiveTeacherCohortId((prev) => (
+                  cohorts.some((cohort) => cohort.id === prev)
+                      ? prev
+                      : (cohorts.find((cohort) => cohort.id === NEXT_COHORT_ID)?.id || cohorts[cohorts.length - 1]?.id || LEGACY_COHORT_ID)
+              ));
+
+              if (!docSnap.exists() || fingerprint !== persistedFingerprint) {
+                  await setDoc(registryRef, {
+                      cohorts,
+                      publicCohortId,
+                      updatedAt: new Date().toISOString()
+                  }, { merge: true });
+              }
+
+              return { cohorts, publicCohortId };
+          } catch (error) {
+              console.error('Load cohort registry error:', error);
+              setCohortOptions(fallbackCohorts);
+              setActivePublicCohortId(fallbackPublicCohortId);
+              return { cohorts: fallbackCohorts, publicCohortId: fallbackPublicCohortId };
+          } finally {
+              setCohortRegistryLoading(false);
+          }
+      };
+
+      const promise = runner().finally(() => {
+          if (cohortRegistryLoadPromiseRef.current === promise) {
+              cohortRegistryLoadPromiseRef.current = null;
+          }
+      });
+      cohortRegistryLoadPromiseRef.current = promise;
+      return promise;
+  }, [getCohortRegistryDocRef]);
 
   const ensureXlsxReady = useCallback(async () => {
       if (typeof window === 'undefined') return false;
@@ -1354,6 +1527,11 @@ export default function App() {
           setTeacherAuthRole(storedRole === TEACHER_ROLE.LIMITED ? TEACHER_ROLE.LIMITED : TEACHER_ROLE.FULL);
       }
   }, []);
+
+  useEffect(() => {
+      if (typeof window === 'undefined') return;
+      localStorage.setItem(TEACHER_ACTIVE_COHORT_STORAGE_KEY, activeTeacherCohortId);
+  }, [activeTeacherCohortId]);
 
   useEffect(() => {
       const cachedOperationLogs = sanitizeOperationLogs(
@@ -1529,13 +1707,13 @@ export default function App() {
         const unsubscribe = onAuthStateChanged(auth, (u) => {
           setAuthReady(true);
           setUser(u);
-          if (u) { loadDates(); loadClassAverages(); }
+          if (u) { loadCohortRegistry(); }
         });
         return () => unsubscribe();
     } else {
         setAuthReady(true);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loadCohortRegistry]);
 
   useEffect(() => {
       if (!orderedWeekendIds.length) return;
@@ -1584,16 +1762,17 @@ export default function App() {
       if (!nextDates.length || nextDates.length === availableDates.length) return;
 
       setAvailableDates(nextDates);
-      writeLocalCache(LOCAL_CACHE_KEYS.dates, nextDates);
+      setDatesCohortId(activeTeacherCohortId);
+      writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, activeTeacherCohortId), nextDates);
       if (db && user) {
-          setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: nextDates }, { merge: true })
+          setDoc(getCohortSettingsDocRef(activeTeacherCohortId, 'dates'), { list: nextDates }, { merge: true })
               .catch((err) => console.error('Auto prune empty dates error:', err));
       }
       const removedCount = availableDates.length - nextDates.length;
       setStatusMsg(`已自動刪除 ${removedCount} 個無學生資料日期`);
       const timer = setTimeout(() => setStatusMsg(''), 2200);
       return () => clearTimeout(timer);
-  }, [mode, loading, isBatchDirty, availableDates, allStudentsData.length, deferredStudentGradeMapsByStudentId, getTestDateID, user]);
+  }, [activeTeacherCohortId, allStudentsData.length, availableDates, deferredStudentGradeMapsByStudentId, getCohortCacheKey, getCohortSettingsDocRef, getTestDateID, isBatchDirty, loading, mode, user]);
 
   const hasPendingBatchChanges = mode === 'teacher' && teacherViewMode === 'batch' && isBatchDirty;
 
@@ -1626,28 +1805,38 @@ export default function App() {
 
   const loadDates = useCallback(async (options = {}) => {
       const force = Boolean(options && options.force);
-      if (!force && datesLoadPromiseRef.current) return datesLoadPromiseRef.current;
+      const cohortId = String(options?.cohortId || activeDataCohortId || LEGACY_COHORT_ID);
+      if (
+          !force
+          && datesLoadPromiseRef.current?.cohortId === cohortId
+          && datesLoadPromiseRef.current?.promise
+      ) {
+          return datesLoadPromiseRef.current.promise;
+      }
 
       const runner = async () => {
           const fallbackDates = sanitizeDateList(DEFAULT_EXAM_STARTS);
-          const cachedDates = sanitizeDateList(readLocalCache(LOCAL_CACHE_KEYS.dates) || []);
+          const cacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.dates, cohortId);
+          const cachedDates = sanitizeDateList(readLocalCache(cacheKey) || []);
           if (cachedDates.length && !force) {
-              if (cachedDates.join('|') !== availableDates.join('|')) {
+              if (cohortId === activeDataCohortId && cachedDates.join('|') !== availableDates.join('|')) {
                   setAvailableDates(cachedDates);
+                  setDatesCohortId(cohortId);
               }
               return cachedDates;
           }
           if (!db) {
-              const cleanedLocalDates = sanitizeDateList(availableDates);
+              const cleanedLocalDates = cohortId === datesCohortId ? sanitizeDateList(availableDates) : [];
               const nextDates = cleanedLocalDates.length ? cleanedLocalDates : fallbackDates;
-              if (nextDates.join('|') !== availableDates.join('|')) {
+              if (cohortId === activeDataCohortId && nextDates.join('|') !== availableDates.join('|')) {
                   setAvailableDates(nextDates);
+                  setDatesCohortId(cohortId);
               }
-              writeLocalCache(LOCAL_CACHE_KEYS.dates, nextDates);
+              writeLocalCache(cacheKey, nextDates);
               return nextDates;
           }
           try {
-              const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates');
+              const docRef = getCohortSettingsDocRef(cohortId, 'dates');
               const docSnap = await getDoc(docRef);
               const rawList = docSnap.exists() && Array.isArray(docSnap.data().list)
                   ? docSnap.data().list
@@ -1655,8 +1844,11 @@ export default function App() {
               const cleanedDates = sanitizeDateList(rawList);
               const nextDates = cleanedDates.length ? cleanedDates : fallbackDates;
 
-              setAvailableDates(nextDates);
-              writeLocalCache(LOCAL_CACHE_KEYS.dates, nextDates);
+              if (cohortId === activeDataCohortId) {
+                  setAvailableDates(nextDates);
+                  setDatesCohortId(cohortId);
+              }
+              writeLocalCache(cacheKey, nextDates);
 
               const rawFingerprint = (Array.isArray(rawList) ? rawList : []).map((date) => String(date || '')).join('|');
               const cleanedFingerprint = nextDates.join('|');
@@ -1666,22 +1858,28 @@ export default function App() {
               return nextDates;
           } catch (e) {
               console.error('Error loading dates:', e);
-              const cleanedFallback = sanitizeDateList(availableDates);
+              const cleanedFallback = cohortId === datesCohortId ? sanitizeDateList(availableDates) : [];
               const nextDates = cleanedFallback.length ? cleanedFallback : fallbackDates;
-              setAvailableDates(nextDates);
-              writeLocalCache(LOCAL_CACHE_KEYS.dates, nextDates);
+              if (cohortId === activeDataCohortId) {
+                  setAvailableDates(nextDates);
+                  setDatesCohortId(cohortId);
+              }
+              writeLocalCache(cacheKey, nextDates);
               return nextDates;
           }
       };
 
       const promise = runner().finally(() => {
-          if (datesLoadPromiseRef.current === promise) {
+          if (
+              datesLoadPromiseRef.current?.cohortId === cohortId
+              && datesLoadPromiseRef.current?.promise === promise
+          ) {
               datesLoadPromiseRef.current = null;
           }
       });
-      datesLoadPromiseRef.current = promise;
+      datesLoadPromiseRef.current = { cohortId, promise };
       return promise;
-  }, [availableDates]);
+  }, [activeDataCohortId, availableDates, datesCohortId, getCohortCacheKey, getCohortSettingsDocRef]);
 
   const shouldResetQueryStats = useCallback((lastResetAt) => {
       if (!lastResetAt) return true;
@@ -1709,6 +1907,7 @@ export default function App() {
 
   const flushPendingQueryStats = useCallback(async (options = {}) => {
       const force = Boolean(options && options.force);
+      const cohortId = String(options?.cohortId || queryPendingCohortIdRef.current || activeTeacherCohortId || LEGACY_COHORT_ID);
       if (!db) return;
       if (queryFlushInFlightRef.current && !force) return;
 
@@ -1725,7 +1924,7 @@ export default function App() {
 
       try {
           const nowIso = new Date().toISOString();
-          const queryStatsDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'query_stats_v1');
+          const queryStatsDocRef = getCohortSettingsDocRef(cohortId, 'query_stats_v1');
           const docSnap = await getDoc(queryStatsDocRef);
           const raw = docSnap.exists() ? docSnap.data() : {};
           let counts = (raw.counts && typeof raw.counts === 'object') ? raw.counts : {};
@@ -1748,10 +1947,13 @@ export default function App() {
           await setDoc(queryStatsDocRef, { counts, events, lastResetAt, updatedAt: nowIso }, { merge: true });
 
           const merged = applyPendingQueryStats(counts, events, lastResetAt);
-          setQueryStatsById(merged.counts);
-          setQueryEvents(merged.events);
-          setQueryStatsLastResetAt(lastResetAt);
-          writeLocalCache(LOCAL_CACHE_KEYS.queryStats, { counts: merged.counts, events: merged.events, lastResetAt });
+          if (cohortId === activeTeacherCohortId) {
+              setQueryStatsById(merged.counts);
+              setQueryEvents(merged.events);
+              setQueryStatsLastResetAt(lastResetAt);
+              setQueryStatsCohortId(cohortId);
+          }
+          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.queryStats, cohortId), { counts: merged.counts, events: merged.events, lastResetAt });
       } catch (e) {
           Object.entries(pendingCounts).forEach(([id, delta]) => {
               const nextDelta = Number(delta) || 0;
@@ -1768,39 +1970,44 @@ export default function App() {
           if (hasPendingAfterFlush && !queryFlushTimerRef.current) {
               queryFlushTimerRef.current = setTimeout(() => {
                   queryFlushTimerRef.current = null;
-                  void flushPendingQueryStats();
+                  void flushPendingQueryStats({ cohortId });
               }, QUERY_STATS_FLUSH_DELAY_MS);
           }
       }
-  }, [shouldResetQueryStats, applyPendingQueryStats]);
+  }, [activeTeacherCohortId, applyPendingQueryStats, getCohortCacheKey, getCohortSettingsDocRef, shouldResetQueryStats]);
 
   const scheduleQueryStatsFlush = useCallback(() => {
       if (!db || queryFlushTimerRef.current) return;
       queryFlushTimerRef.current = setTimeout(() => {
           queryFlushTimerRef.current = null;
-          void flushPendingQueryStats();
+          void flushPendingQueryStats({ cohortId: queryPendingCohortIdRef.current || activeTeacherCohortId });
       }, QUERY_STATS_FLUSH_DELAY_MS);
-  }, [flushPendingQueryStats]);
+  }, [activeTeacherCohortId, flushPendingQueryStats]);
 
   const loadQueryStats = useCallback(async (options = {}) => {
       const force = Boolean(options && options.force);
+      const cohortId = String(options?.cohortId || activeTeacherCohortId || LEGACY_COHORT_ID);
       if (!db) {
           setQueryStatsById({});
           setQueryEvents([]);
           setQueryStatsLastResetAt('');
+          setQueryStatsCohortId(cohortId);
           return;
       }
 
       if (!force) {
-          const cachedStats = readLocalCache(LOCAL_CACHE_KEYS.queryStats, QUERY_STATS_CACHE_TTL_MS);
+          const cachedStats = readLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.queryStats, cohortId), QUERY_STATS_CACHE_TTL_MS);
           const cachedLastResetAt = String(cachedStats?.lastResetAt || '');
           if (cachedStats && cachedLastResetAt && !shouldResetQueryStats(cachedLastResetAt)) {
               const cachedCounts = (cachedStats.counts && typeof cachedStats.counts === 'object') ? cachedStats.counts : {};
               const cachedEvents = sanitizeQueryEvents(cachedStats.events, cachedLastResetAt);
               const merged = applyPendingQueryStats(cachedCounts, cachedEvents, cachedLastResetAt);
-              setQueryStatsById(merged.counts);
-              setQueryEvents(merged.events);
-              setQueryStatsLastResetAt(cachedLastResetAt);
+              if (cohortId === activeTeacherCohortId) {
+                  setQueryStatsById(merged.counts);
+                  setQueryEvents(merged.events);
+                  setQueryStatsLastResetAt(cachedLastResetAt);
+                  setQueryStatsCohortId(cohortId);
+              }
               return;
           }
       }
@@ -1808,7 +2015,7 @@ export default function App() {
       setQueryStatsLoading(true);
       try {
           const nowIso = new Date().toISOString();
-          const queryStatsDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'query_stats_v1');
+          const queryStatsDocRef = getCohortSettingsDocRef(cohortId, 'query_stats_v1');
           const docSnap = await getDoc(queryStatsDocRef);
           const raw = docSnap.exists() ? docSnap.data() : {};
           let counts = (raw.counts && typeof raw.counts === 'object') ? raw.counts : {};
@@ -1823,19 +2030,23 @@ export default function App() {
           }
 
           const merged = applyPendingQueryStats(counts, events, lastResetAt);
-          setQueryStatsById(merged.counts);
-          setQueryEvents(merged.events);
-          setQueryStatsLastResetAt(lastResetAt);
-          writeLocalCache(LOCAL_CACHE_KEYS.queryStats, { counts: merged.counts, events: merged.events, lastResetAt });
+          if (cohortId === activeTeacherCohortId) {
+              setQueryStatsById(merged.counts);
+              setQueryEvents(merged.events);
+              setQueryStatsLastResetAt(lastResetAt);
+              setQueryStatsCohortId(cohortId);
+          }
+          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.queryStats, cohortId), { counts: merged.counts, events: merged.events, lastResetAt });
       } catch (e) {
           console.error('Load query stats error:', e);
       } finally {
           setQueryStatsLoading(false);
       }
-  }, [shouldResetQueryStats, applyPendingQueryStats]);
+  }, [activeTeacherCohortId, shouldResetQueryStats, applyPendingQueryStats, getCohortCacheKey, getCohortSettingsDocRef]);
 
   const loadTeacherMessage = useCallback(async (options = {}) => {
       const force = Boolean(options && options.force);
+      const cohortId = String(options?.cohortId || activeDataCohortId || LEGACY_COHORT_ID);
       const hydrateMessageState = (raw) => {
           const nextGlobalMessage = String(raw?.globalMessage ?? raw?.message ?? '').trim();
           const nextByStudentMessages = normalizeTeacherStudentMessages(raw?.byStudent);
@@ -1843,10 +2054,11 @@ export default function App() {
           setTeacherGlobalMessageDraft(nextGlobalMessage);
           setTeacherStudentMessages(nextByStudentMessages);
           setTeacherStudentMessageDrafts(nextByStudentMessages);
+          setTeacherMessageCohortId(cohortId);
       };
 
       if (!force) {
-          const cachedMessage = readLocalCache(LOCAL_CACHE_KEYS.teacherMessage, TEACHER_MESSAGE_CACHE_TTL_MS);
+          const cachedMessage = readLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.teacherMessage, cohortId), TEACHER_MESSAGE_CACHE_TTL_MS);
           if (cachedMessage && typeof cachedMessage === 'object') {
               hydrateMessageState(cachedMessage);
               return;
@@ -1858,12 +2070,13 @@ export default function App() {
           setTeacherGlobalMessageDraft('');
           setTeacherStudentMessages({});
           setTeacherStudentMessageDrafts({});
+          setTeacherMessageCohortId(cohortId);
           return;
       }
 
       setTeacherMessageLoading(true);
       try {
-          const messageDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', TEACHER_MESSAGE_DOC_ID);
+          const messageDocRef = getCohortSettingsDocRef(cohortId, TEACHER_MESSAGE_DOC_ID);
           const docSnap = await getDoc(messageDocRef);
           const raw = docSnap.exists() ? docSnap.data() : {};
           const payload = {
@@ -1871,17 +2084,18 @@ export default function App() {
               byStudent: normalizeTeacherStudentMessages(raw?.byStudent)
           };
           hydrateMessageState(payload);
-          writeLocalCache(LOCAL_CACHE_KEYS.teacherMessage, payload);
+          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.teacherMessage, cohortId), payload);
       } catch (e) {
           console.error('Load teacher message error:', e);
       } finally {
           setTeacherMessageLoading(false);
       }
-  }, []);
+  }, [activeDataCohortId, getCohortCacheKey, getCohortSettingsDocRef]);
 
   const incrementQueryCount = useCallback((studentId) => {
       const normalizedId = String(studentId || '').toUpperCase().trim();
       if (!normalizedId) return;
+      queryPendingCohortIdRef.current = activePublicCohortId || LEGACY_COHORT_ID;
       const nowTs = Date.now();
       const nowIso = new Date(nowTs).toISOString();
 
@@ -1895,7 +2109,7 @@ export default function App() {
       queryPendingCountsRef.current[normalizedId] = (Number(queryPendingCountsRef.current[normalizedId]) || 0) + 1;
       queryPendingEventsRef.current = [...(queryPendingEventsRef.current || []), { id: normalizedId, at: nowIso, ts: nowTs }].slice(-MAX_QUERY_EVENTS);
       scheduleQueryStatsFlush();
-  }, [queryStatsLastResetAt, scheduleQueryStatsFlush]);
+  }, [activePublicCohortId, queryStatsLastResetAt, scheduleQueryStatsFlush]);
 
   const handleResetQueryStats = useCallback(async () => {
       const nowIso = new Date().toISOString();
@@ -1903,19 +2117,21 @@ export default function App() {
       try {
           queryPendingCountsRef.current = {};
           queryPendingEventsRef.current = [];
+          queryPendingCohortIdRef.current = activeTeacherCohortId;
           if (queryFlushTimerRef.current) {
               clearTimeout(queryFlushTimerRef.current);
               queryFlushTimerRef.current = null;
           }
           if (db) {
-              const queryStatsDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'query_stats_v1');
+              const queryStatsDocRef = getCohortSettingsDocRef(activeTeacherCohortId, 'query_stats_v1');
               await setDoc(queryStatsDocRef, { counts: {}, events: [], lastResetAt: nowIso, updatedAt: nowIso }, { merge: true });
           }
 
           setQueryStatsById({});
           setQueryEvents([]);
           setQueryStatsLastResetAt(nowIso);
-          writeLocalCache(LOCAL_CACHE_KEYS.queryStats, { counts: {}, events: [], lastResetAt: nowIso });
+          setQueryStatsCohortId(activeTeacherCohortId);
+          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.queryStats, activeTeacherCohortId), { counts: {}, events: [], lastResetAt: nowIso });
           setStatusMsg('查詢次數已重置');
           appendOperationLog({
               kind: 'query',
@@ -1931,13 +2147,43 @@ export default function App() {
       } finally {
           setQueryStatsLoading(false);
       }
-  }, [appendOperationLog]);
+  }, [activeTeacherCohortId, appendOperationLog, getCohortCacheKey, getCohortSettingsDocRef]);
 
   useEffect(() => {
-      if (mode === 'teacher' && isAuthenticated) {
-          loadQueryStats();
-      }
-  }, [mode, isAuthenticated, loadQueryStats]);
+      if (!user || mode !== 'teacher' || !isAuthenticated) return;
+      let cancelled = false;
+      const hydrateTeacherCohort = async () => {
+          const cohortDates = await loadDates({ cohortId: activeTeacherCohortId });
+          if (cancelled) return;
+          await Promise.all([
+              loadClassAverages({ cohortId: activeTeacherCohortId, datePool: cohortDates }),
+              loadTeacherMessage({ cohortId: activeTeacherCohortId }),
+              loadQueryStats({ cohortId: activeTeacherCohortId }),
+              loadAllStudents({ cohortId: activeTeacherCohortId, datePool: cohortDates })
+          ]);
+      };
+      void hydrateTeacherCohort();
+      return () => {
+          cancelled = true;
+      };
+  }, [activeTeacherCohortId, isAuthenticated, loadAllStudents, loadClassAverages, loadDates, loadQueryStats, loadTeacherMessage, mode, user]);
+
+  useEffect(() => {
+      if (!user || mode !== 'parent') return;
+      let cancelled = false;
+      const hydratePublicCohort = async () => {
+          const cohortDates = await loadDates({ cohortId: activePublicCohortId });
+          if (cancelled) return;
+          await Promise.all([
+              loadClassAverages({ cohortId: activePublicCohortId, datePool: cohortDates }),
+              loadTeacherMessage({ cohortId: activePublicCohortId })
+          ]);
+      };
+      void hydratePublicCohort();
+      return () => {
+          cancelled = true;
+      };
+  }, [activePublicCohortId, loadClassAverages, loadDates, loadTeacherMessage, mode, user]);
 
   useEffect(() => {
       if (typeof document === 'undefined') return;
@@ -1947,11 +2193,11 @@ export default function App() {
               clearTimeout(queryFlushTimerRef.current);
               queryFlushTimerRef.current = null;
           }
-          void flushPendingQueryStats({ force: true });
+          void flushPendingQueryStats({ force: true, cohortId: activeTeacherCohortId });
       };
       document.addEventListener('visibilitychange', handleVisibilityChange);
       return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [flushPendingQueryStats]);
+  }, [activeTeacherCohortId, flushPendingQueryStats]);
 
   useEffect(() => {
       return () => {
@@ -1968,28 +2214,79 @@ export default function App() {
   }, [mode]);
 
   useEffect(() => {
-      if (!user) return;
-      loadTeacherMessage();
-  }, [user, loadTeacherMessage]);
+      queryPendingCountsRef.current = {};
+      queryPendingEventsRef.current = [];
+      queryPendingCohortIdRef.current = activeTeacherCohortId || LEGACY_COHORT_ID;
+      queryFlushInFlightRef.current = false;
+      if (queryFlushTimerRef.current) {
+          clearTimeout(queryFlushTimerRef.current);
+          queryFlushTimerRef.current = null;
+      }
+      setQueryStatsById({});
+      setQueryEvents([]);
+      setQueryStatsLastResetAt('');
+      setQueryStatsCohortId('');
+      setTeacherGlobalMessage('');
+      setTeacherGlobalMessageDraft('');
+      setTeacherStudentMessages({});
+      setTeacherStudentMessageDrafts({});
+      setTeacherMessageCohortId('');
+      setAllStudentsData([]);
+      setTeacherStudentsCohortId('');
+      setCurrentStudentId(null);
+      setStudentName('');
+      setGrades({});
+      setBatchDate('');
+      setAvailableDates(DEFAULT_EXAM_STARTS);
+      setDatesCohortId('');
+      setClassAverages({});
+      setClassAveragesCohortId('');
+      batchDirtyStudentIdsRef.current = new Set();
+      setIsBatchDirty(false);
+  }, [activeTeacherCohortId]);
+
+  useEffect(() => {
+      setCachedClassData([]);
+      setPublicStudentsCohortId('');
+      setViewData(null);
+      setSearchError('');
+      if (mode === 'parent') {
+          setAvailableDates(DEFAULT_EXAM_STARTS);
+          setDatesCohortId('');
+          setClassAverages({});
+          setClassAveragesCohortId('');
+      }
+  }, [activePublicCohortId, mode]);
 
   useEffect(() => {
       if (typeof window === 'undefined') return;
+      const teacherStudentsCacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.students, activeTeacherCohortId);
+      const publicStudentsCacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.students, activePublicCohortId);
+      const activeQueryStatsCacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.queryStats, activeTeacherCohortId);
       const handleStorage = (event) => {
           if (!event.key) return;
 
-          if (event.key === LOCAL_CACHE_KEYS.students) {
-              const cachedStudents = readLocalCache(LOCAL_CACHE_KEYS.students, STUDENT_CACHE_TTL_MS);
+          if (event.key === teacherStudentsCacheKey && mode === 'teacher') {
+              const cachedStudents = readLocalCache(teacherStudentsCacheKey, STUDENT_CACHE_TTL_MS);
               if (!Array.isArray(cachedStudents) || cachedStudents.length === 0) return;
-              setCachedClassData(cachedStudents);
               if (mode === 'teacher' && teacherViewMode === 'batch' && !isBatchDirty) {
                   batchDirtyStudentIdsRef.current = new Set();
                   setAllStudentsData(cachedStudents);
+                  setTeacherStudentsCohortId(activeTeacherCohortId);
               }
               return;
           }
 
-          if (event.key === LOCAL_CACHE_KEYS.queryStats && mode === 'teacher' && !queryStatsLoading) {
-              const cachedStats = readLocalCache(LOCAL_CACHE_KEYS.queryStats, QUERY_STATS_CACHE_TTL_MS);
+          if (event.key === publicStudentsCacheKey && mode === 'parent') {
+              const cachedStudents = readLocalCache(publicStudentsCacheKey, STUDENT_CACHE_TTL_MS);
+              if (!Array.isArray(cachedStudents) || cachedStudents.length === 0) return;
+              setCachedClassData(cachedStudents);
+              setPublicStudentsCohortId(activePublicCohortId);
+              return;
+          }
+
+          if (event.key === activeQueryStatsCacheKey && mode === 'teacher' && !queryStatsLoading) {
+              const cachedStats = readLocalCache(activeQueryStatsCacheKey, QUERY_STATS_CACHE_TTL_MS);
               if (!cachedStats || typeof cachedStats !== 'object') return;
               const lastResetAt = String(cachedStats.lastResetAt || '');
               if (!lastResetAt) return;
@@ -2001,12 +2298,13 @@ export default function App() {
               setQueryStatsById(merged.counts);
               setQueryEvents(merged.events);
               setQueryStatsLastResetAt(lastResetAt);
+              setQueryStatsCohortId(activeTeacherCohortId);
           }
       };
 
       window.addEventListener('storage', handleStorage);
       return () => window.removeEventListener('storage', handleStorage);
-  }, [mode, teacherViewMode, isBatchDirty, queryStatsLoading, applyPendingQueryStats]);
+  }, [activePublicCohortId, activeTeacherCohortId, applyPendingQueryStats, getCohortCacheKey, isBatchDirty, mode, queryStatsLoading, teacherViewMode]);
 
   const closeSecurityModal = useCallback(() => {
       setShowSecurityModal(false);
@@ -2045,9 +2343,10 @@ export default function App() {
       if (availableDates.includes(normalizedInput)) return;
       const newList = sanitizeDateList([...availableDates, normalizedInput]);
       setAvailableDates(newList);
-      writeLocalCache(LOCAL_CACHE_KEYS.dates, newList);
+      setDatesCohortId(activeTeacherCohortId);
+      writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, activeTeacherCohortId), newList);
       setNewDateInput('');
-      if (db) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: newList }, { merge: true });
+      if (db) await setDoc(getCohortSettingsDocRef(activeTeacherCohortId, 'dates'), { list: newList }, { merge: true });
       appendOperationLog({
           kind: 'date',
           title: '新增考次',
@@ -2132,60 +2431,90 @@ export default function App() {
 
   const loadClassAverages = useCallback(async (options = {}) => {
       const force = Boolean(options && options.force);
-      if (!force && classAveragesLoadPromiseRef.current) return classAveragesLoadPromiseRef.current;
+      const cohortId = String(options?.cohortId || activeDataCohortId || LEGACY_COHORT_ID);
+      const datePool = sanitizeDateList(options?.datePool || (cohortId === datesCohortId ? availableDates : DEFAULT_EXAM_STARTS));
+      const getDateIDForCohort = (dateStr) => getWeekendID(dateStr, datePool);
+      if (
+          !force
+          && classAveragesLoadPromiseRef.current?.cohortId === cohortId
+          && classAveragesLoadPromiseRef.current?.promise
+      ) {
+          return classAveragesLoadPromiseRef.current.promise;
+      }
 
       const runner = async () => {
-          const cachedAverages = readLocalCache(LOCAL_CACHE_KEYS.classAverages);
+          const cacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.classAverages, cohortId);
+          const computedAveragesForCohort =
+              cohortId === activeTeacherCohortId && teacherStudentsCohortId === cohortId
+                  ? localComputedAverages
+                  : {};
+          const cachedAverages = readLocalCache(cacheKey);
           if (cachedAverages && typeof cachedAverages === 'object' && !force) {
-              const normalizedCache = normalizeClassAveragesByWeekend(cachedAverages, getTestDateID);
-              const mergedAverages = { ...localComputedAverages, ...normalizedCache };
-              setClassAverages(mergedAverages);
-              writeLocalCache(LOCAL_CACHE_KEYS.classAverages, mergedAverages);
+              const normalizedCache = normalizeClassAveragesByWeekend(cachedAverages, getDateIDForCohort);
+              const mergedAverages = { ...computedAveragesForCohort, ...normalizedCache };
+              if (cohortId === activeDataCohortId) {
+                  setClassAverages(mergedAverages);
+                  setClassAveragesCohortId(cohortId);
+              }
+              writeLocalCache(cacheKey, mergedAverages);
               return mergedAverages;
           }
           if (!db) {
-              setClassAverages(localComputedAverages);
-              writeLocalCache(LOCAL_CACHE_KEYS.classAverages, localComputedAverages);
-              return localComputedAverages;
+              if (cohortId === activeDataCohortId) {
+                  setClassAverages(computedAveragesForCohort);
+                  setClassAveragesCohortId(cohortId);
+              }
+              writeLocalCache(cacheKey, computedAveragesForCohort);
+              return computedAveragesForCohort;
           }
           try {
-              const docSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'class_averages_v18'));
+              const docSnap = await getDoc(getCohortSettingsDocRef(cohortId, 'class_averages_v18'));
               let dbAverages = {};
-              if (docSnap.exists()) dbAverages = normalizeClassAveragesByWeekend(docSnap.data().averages || {}, getTestDateID);
-              const mergedAverages = { ...localComputedAverages, ...dbAverages };
-              setClassAverages(mergedAverages);
-              writeLocalCache(LOCAL_CACHE_KEYS.classAverages, mergedAverages);
+              if (docSnap.exists()) dbAverages = normalizeClassAveragesByWeekend(docSnap.data().averages || {}, getDateIDForCohort);
+              const mergedAverages = { ...computedAveragesForCohort, ...dbAverages };
+              if (cohortId === activeDataCohortId) {
+                  setClassAverages(mergedAverages);
+                  setClassAveragesCohortId(cohortId);
+              }
+              writeLocalCache(cacheKey, mergedAverages);
               return mergedAverages;
           } catch (e) {
               console.error('Load class averages error:', e);
-              setClassAverages(localComputedAverages);
-              writeLocalCache(LOCAL_CACHE_KEYS.classAverages, localComputedAverages);
-              return localComputedAverages;
+              if (cohortId === activeDataCohortId) {
+                  setClassAverages(computedAveragesForCohort);
+                  setClassAveragesCohortId(cohortId);
+              }
+              writeLocalCache(cacheKey, computedAveragesForCohort);
+              return computedAveragesForCohort;
           }
       };
 
       const promise = runner().finally(() => {
-          if (classAveragesLoadPromiseRef.current === promise) {
+          if (
+              classAveragesLoadPromiseRef.current?.cohortId === cohortId
+              && classAveragesLoadPromiseRef.current?.promise === promise
+          ) {
               classAveragesLoadPromiseRef.current = null;
           }
       });
-      classAveragesLoadPromiseRef.current = promise;
+      classAveragesLoadPromiseRef.current = { cohortId, promise };
       return promise;
-  }, [getTestDateID, localComputedAverages]);
+  }, [activeDataCohortId, activeTeacherCohortId, availableDates, datesCohortId, getCohortCacheKey, getCohortSettingsDocRef, localComputedAverages, teacherStudentsCohortId]);
 
   useEffect(() => {
       if (deferredStudentsForDerived.length === 0) return undefined;
+      if (classAveragesCohortId !== activeTeacherCohortId) return undefined;
       const timer = window.setTimeout(() => {
           startTransition(() => {
               setClassAverages(prev => {
                   const next = normalizeClassAveragesByWeekend({ ...prev, ...localComputedAverages }, getTestDateID);
-                  writeLocalCache(LOCAL_CACHE_KEYS.classAverages, next);
+                  writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.classAverages, classAveragesCohortId), next);
                   return next;
               });
           });
       }, 220);
       return () => window.clearTimeout(timer);
-  }, [localComputedAverages, deferredStudentsForDerived.length, getTestDateID]);
+  }, [activeTeacherCohortId, classAveragesCohortId, deferredStudentsForDerived.length, getCohortCacheKey, getTestDateID, localComputedAverages]);
 
   const handleManualAverageChange = (date, classId, subject, value) => {
       const weekendID = getTestDateID(date) || date;
@@ -2208,14 +2537,15 @@ export default function App() {
 
   const persistClassAverages = useCallback(async (nextAverages, options = {}) => {
       const { closeModal = false, showToast = false, toastMessage = '設定已儲存' } = options;
+      const cohortId = String(options?.cohortId || activeTeacherCohortId || LEGACY_COHORT_ID);
       const normalizedAverages = normalizeClassAveragesByWeekend(nextAverages, getTestDateID);
-      writeLocalCache(LOCAL_CACHE_KEYS.classAverages, normalizedAverages);
+      writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.classAverages, cohortId), normalizedAverages);
       if (!db) {
           if (closeModal) setShowAvgModal(false);
           return true;
       }
       try {
-          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'class_averages_v18'), { averages: normalizedAverages }, { merge: true });
+          await setDoc(getCohortSettingsDocRef(cohortId, 'class_averages_v18'), { averages: normalizedAverages }, { merge: true });
           if (showToast) {
               setStatusMsg(toastMessage);
               setTimeout(() => setStatusMsg(''), 2000);
@@ -2230,7 +2560,7 @@ export default function App() {
           }
           return false;
       }
-  }, [getTestDateID]);
+  }, [activeTeacherCohortId, getCohortCacheKey, getCohortSettingsDocRef, getTestDateID]);
 
   useEffect(() => {
       if (!isClassAveragesDirty) return undefined;
@@ -2246,16 +2576,17 @@ export default function App() {
       if (ok) setIsClassAveragesDirty(false);
   };
 
-  const persistTeacherMessages = useCallback(async (nextGlobalMessage, nextByStudentMessages) => {
+  const persistTeacherMessages = useCallback(async (nextGlobalMessage, nextByStudentMessages, options = {}) => {
+      const cohortId = String(options?.cohortId || activeTeacherCohortId || LEGACY_COHORT_ID);
       const normalizedGlobal = String(nextGlobalMessage || '').trim();
       const normalizedByStudent = normalizeTeacherStudentMessages(nextByStudentMessages);
       const payload = {
           globalMessage: normalizedGlobal,
           byStudent: normalizedByStudent
       };
-      writeLocalCache(LOCAL_CACHE_KEYS.teacherMessage, payload);
+      writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.teacherMessage, cohortId), payload);
       if (db) {
-          const messageDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', TEACHER_MESSAGE_DOC_ID);
+          const messageDocRef = getCohortSettingsDocRef(cohortId, TEACHER_MESSAGE_DOC_ID);
           await setDoc(messageDocRef, {
               globalMessage: normalizedGlobal,
               message: normalizedGlobal,
@@ -2265,7 +2596,7 @@ export default function App() {
           });
       }
       return { normalizedGlobal, normalizedByStudent };
-  }, [user]);
+  }, [activeTeacherCohortId, getCohortCacheKey, getCohortSettingsDocRef, user]);
 
   const handleSaveGlobalTeacherMessage = useCallback(async () => {
       if (!user) return;
@@ -2342,8 +2673,9 @@ export default function App() {
       const targetWeekendID = getTestDateID(deleteTarget);
       const newList = availableDates.filter((d) => getTestDateID(d) !== targetWeekendID);
       setAvailableDates(newList);
-      writeLocalCache(LOCAL_CACHE_KEYS.dates, newList);
-      if (db) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: newList }, { merge: true });
+      setDatesCohortId(activeTeacherCohortId);
+      writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, activeTeacherCohortId), newList);
+      if (db) await setDoc(getCohortSettingsDocRef(activeTeacherCohortId, 'dates'), { list: newList }, { merge: true });
       appendOperationLog({
           kind: 'danger',
           level: 'warn',
@@ -2366,7 +2698,6 @@ export default function App() {
           localStorage.setItem('teacher_auth', 'true');
           localStorage.setItem('teacher_role', nextRole);
           setMode('teacher');
-          loadAllStudents();
       } else { setLoginError(true); }
   };
 
@@ -2377,15 +2708,57 @@ export default function App() {
           localStorage.removeItem('teacher_auth');
           localStorage.removeItem('teacher_role');
           if (typeof window !== 'undefined') {
-              sessionStorage.removeItem(STUDENTS_SESSION_SYNC_KEY);
+              sessionStorage.removeItem(getStudentSessionKey(activeTeacherCohortId));
           }
           setMode('landing');
       });
   };
 
-  const loadAllStudents = async (options = {}) => {
+  const handleSwitchTeacherCohort = useCallback((nextCohortId) => {
+      const normalizedId = String(nextCohortId || '').trim();
+      if (!normalizedId || normalizedId === activeTeacherCohortId) return;
+      runWithBatchDiscardGuard(() => {
+          setTeacherViewMode('batch');
+          setBatchInsightTab('grades');
+          setActiveTeacherCohortId(normalizedId);
+      });
+  }, [activeTeacherCohortId, runWithBatchDiscardGuard]);
+
+  const handleSetPublicCohort = useCallback(async (nextCohortId) => {
+      const normalizedId = String(nextCohortId || '').trim();
+      if (!normalizedId || normalizedId === activePublicCohortId) return;
+      setPublicCohortSaving(true);
+      try {
+          if (db) {
+              await setDoc(getCohortRegistryDocRef(), {
+                  publicCohortId: normalizedId,
+                  updatedAt: new Date().toISOString()
+              }, { merge: true });
+          }
+          setActivePublicCohortId(normalizedId);
+          setStatusMsg(`家長端已切換至 ${getCohortLabel(normalizedId)}`);
+          setTimeout(() => setStatusMsg(''), 2200);
+      } catch (error) {
+          console.error('Set public cohort error:', error);
+          setStatusMsg('切換家長端屆別失敗');
+          setTimeout(() => setStatusMsg(''), 2200);
+      } finally {
+          setPublicCohortSaving(false);
+      }
+  }, [activePublicCohortId, getCohortLabel, getCohortRegistryDocRef]);
+
+  const loadAllStudents = useCallback(async (options = {}) => {
       const { forceRemote = false } = options;
-      if (!forceRemote && studentsLoadPromiseRef.current) return studentsLoadPromiseRef.current;
+      const cohortId = String(options?.cohortId || activeTeacherCohortId || LEGACY_COHORT_ID);
+      const datePool = sanitizeDateList(options?.datePool || (cohortId === datesCohortId ? availableDates : DEFAULT_EXAM_STARTS));
+      const getDateIDForCohort = (dateStr) => getWeekendID(dateStr, datePool);
+      if (
+          !forceRemote
+          && studentsLoadPromiseRef.current?.cohortId === cohortId
+          && studentsLoadPromiseRef.current?.promise
+      ) {
+          return studentsLoadPromiseRef.current.promise;
+      }
 
       const runner = async () => {
       setLoading(true);
@@ -2396,14 +2769,20 @@ export default function App() {
           setLoading(false);
       };
       try {
-          const cachedStudents = readLocalCache(LOCAL_CACHE_KEYS.students, STUDENT_CACHE_TTL_MS);
+          const cacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.students, cohortId);
+          const sessionKey = getStudentSessionKey(cohortId);
+          const cachedStudents = readLocalCache(cacheKey, STUDENT_CACHE_TTL_MS);
           const hasSessionSynced =
               typeof window !== 'undefined'
-              && sessionStorage.getItem(STUDENTS_SESSION_SYNC_KEY) === '1';
+              && sessionStorage.getItem(sessionKey) === '1';
           if (!forceRemote && Array.isArray(cachedStudents)) {
               startTransition(() => {
                   setAllStudentsData(cachedStudents);
-                  setCachedClassData(cachedStudents);
+                  setTeacherStudentsCohortId(cohortId);
+                  if (cohortId === activePublicCohortId) {
+                      setCachedClassData(cachedStudents);
+                      setPublicStudentsCohortId(cohortId);
+                  }
               });
               batchDirtyStudentIdsRef.current = new Set();
               setIsBatchDirty(false);
@@ -2414,14 +2793,20 @@ export default function App() {
           }
 
           let studentsMap = {};
-          RAW_STUDENT_RECORDS.forEach(s => { studentsMap[s.id] = { ...s, grades: normalizeGrades(s.grades) }; });
+          RAW_STUDENT_RECORDS.forEach(s => {
+              studentsMap[s.id] = {
+                  ...s,
+                  grades: normalizeGrades(s.grades, { datePool, getDateID: getDateIDForCohort })
+              };
+          });
           let cleanedInvalidDateCount = 0;
           const cleanupPayloads = [];
           if (db) {
-              const querySnapshot = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'students'));
-              querySnapshot.forEach(doc => {
-                  const data = doc.data();
-                  const normalizedResult = normalizeGrades(data.grades, { withMeta: true });
+              const studentsCollectionRef = getCohortStudentsCollectionRef(cohortId);
+              const querySnapshot = await getDocs(studentsCollectionRef);
+              querySnapshot.forEach((studentDoc) => {
+                  const data = studentDoc.data();
+                  const normalizedResult = normalizeGrades(data.grades, { withMeta: true, datePool, getDateID: getDateIDForCohort });
                   const sanitizedData = { ...data, grades: normalizedResult.normalized };
 
                   if (normalizedResult.changed && data.id) {
@@ -2446,11 +2831,15 @@ export default function App() {
           const sortedStudents = Object.values(studentsMap).sort((a,b) => a.id.localeCompare(b.id));
           startTransition(() => {
               setAllStudentsData(sortedStudents);
-              setCachedClassData(sortedStudents);
+              setTeacherStudentsCohortId(cohortId);
+              if (cohortId === activePublicCohortId) {
+                  setCachedClassData(sortedStudents);
+                  setPublicStudentsCohortId(cohortId);
+              }
           });
-          writeLocalCache(LOCAL_CACHE_KEYS.students, sortedStudents);
+          writeLocalCache(cacheKey, sortedStudents);
           if (typeof window !== 'undefined') {
-              sessionStorage.setItem(STUDENTS_SESSION_SYNC_KEY, '1');
+              sessionStorage.setItem(sessionKey, '1');
           }
           batchDirtyStudentIdsRef.current = new Set();
           setIsBatchDirty(false);
@@ -2459,7 +2848,7 @@ export default function App() {
           if (db && cleanupPayloads.length > 0) {
               void Promise.all(
                   cleanupPayloads.map((item) =>
-                      setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${item.id}`), item.payload)
+                      setDoc(getCohortStudentDocRef(cohortId, item.id), item.payload)
                   )
               ).then(() => {
                   setStatusMsg(
@@ -2481,32 +2870,50 @@ export default function App() {
       };
 
       const promise = runner().finally(() => {
-          if (studentsLoadPromiseRef.current === promise) {
+          if (
+              studentsLoadPromiseRef.current?.cohortId === cohortId
+              && studentsLoadPromiseRef.current?.promise === promise
+          ) {
               studentsLoadPromiseRef.current = null;
           }
       });
-      studentsLoadPromiseRef.current = promise;
+      studentsLoadPromiseRef.current = { cohortId, promise };
       return promise;
-  };
+  }, [
+      activePublicCohortId,
+      activeTeacherCohortId,
+      availableDates,
+      datesCohortId,
+      getCohortCacheKey,
+      getCohortStudentDocRef,
+      getCohortStudentsCollectionRef,
+      getStudentSessionKey,
+      normalizeGrades
+  ]);
 
   useEffect(() => {
-      if (mode !== 'parent' || !user || !db || cachedClassData.length > 0) return;
+      if (mode !== 'parent' || !user || !db || (publicStudentsCohortId === activePublicCohortId && cachedClassData.length > 0)) return;
       let cancelled = false;
 
       const preloadClassData = async () => {
-          const cachedStudents = readLocalCache(LOCAL_CACHE_KEYS.students, STUDENT_CACHE_TTL_MS);
+          const effectiveDates = datesCohortId === activePublicCohortId
+              ? availableDates
+              : await loadDates({ cohortId: activePublicCohortId });
+          const cacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.students, activePublicCohortId);
+          const cachedStudents = readLocalCache(cacheKey, STUDENT_CACHE_TTL_MS);
           if (Array.isArray(cachedStudents) && cachedStudents.length > 0) {
               setCachedClassData(cachedStudents);
+              setPublicStudentsCohortId(activePublicCohortId);
               return;
           }
           try {
-              const qSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'students'));
+              const qSnap = await getDocs(getCohortStudentsCollectionRef(activePublicCohortId));
               if (cancelled) return;
               const preloaded = [];
               const cleanupPayloads = [];
               qSnap.forEach((d) => {
                   const rawData = d.data();
-                  const normalizedResult = normalizeGrades(rawData.grades, { withMeta: true });
+                  const normalizedResult = normalizeGrades(rawData.grades, { withMeta: true, datePool: effectiveDates });
                   preloaded.push({ ...rawData, grades: normalizedResult.normalized });
                   if (normalizedResult.changed && rawData.id) {
                       cleanupPayloads.push({
@@ -2518,13 +2925,14 @@ export default function App() {
               if (cleanupPayloads.length > 0) {
                   void Promise.all(
                       cleanupPayloads.map((item) =>
-                          setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${item.id}`), item.payload)
+                          setDoc(getCohortStudentDocRef(activePublicCohortId, item.id), item.payload)
                       )
                   ).catch((err) => console.error('Preload cleanup invalid date error:', err));
               }
               if (cancelled) return;
               setCachedClassData(preloaded);
-              writeLocalCache(LOCAL_CACHE_KEYS.students, preloaded);
+              setPublicStudentsCohortId(activePublicCohortId);
+              writeLocalCache(cacheKey, preloaded);
           } catch (e) {
               console.error('Preload class data error:', e);
           }
@@ -2536,9 +2944,13 @@ export default function App() {
       };
   // normalizeGrades 依賴 getTestDateID，這裡保持最小觸發條件避免重複預載。
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, user, cachedClassData.length]);
+  }, [activePublicCohortId, availableDates, cachedClassData.length, datesCohortId, loadDates, mode, normalizeGrades, publicStudentsCohortId, user]);
 
   const normalizeGrades = useCallback((grades, options = {}) => {
+      const scopedDatePool = sanitizeDateList(options.datePool || availableDates);
+      const resolveDateId = typeof options.getDateID === 'function'
+          ? options.getDateID
+          : (dateStr) => getWeekendID(dateStr, scopedDatePool);
       const withMeta = Boolean(options.withMeta);
       if (!grades || typeof grades !== 'object') {
           return withMeta ? { normalized: {}, removedInvalidDates: 0, changed: false } : {};
@@ -2577,7 +2989,7 @@ export default function App() {
           normalized[normalizedDate] = normalizedG;
       });
 
-      const weekendEntries = buildWeekendGradeEntryMap(normalized, getTestDateID);
+      const weekendEntries = buildWeekendGradeEntryMap(normalized, resolveDateId);
       const deduped = {};
       Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
           deduped[weekendID] = { ...entry.grade };
@@ -2589,7 +3001,7 @@ export default function App() {
           return { normalized: deduped, removedInvalidDates, changed };
       }
       return deduped;
-  }, [getTestDateID]);
+  }, [availableDates]);
 
   const persistLocalSnapshots = useCallback((nextSnapshots) => {
       const sanitized = sanitizeSnapshotList(nextSnapshots);
@@ -2679,34 +3091,41 @@ export default function App() {
 
       if (restoredDates.length) {
           setAvailableDates(restoredDates);
-          writeLocalCache(LOCAL_CACHE_KEYS.dates, restoredDates);
+          setDatesCohortId(activeTeacherCohortId);
+          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, activeTeacherCohortId), restoredDates);
       }
       if (restoredStudents.length) {
           setAllStudentsData(restoredStudents);
-          setCachedClassData(restoredStudents);
-          writeLocalCache(LOCAL_CACHE_KEYS.students, restoredStudents);
+          setTeacherStudentsCohortId(activeTeacherCohortId);
+          if (activeTeacherCohortId === activePublicCohortId) {
+              setCachedClassData(restoredStudents);
+              setPublicStudentsCohortId(activeTeacherCohortId);
+          }
+          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.students, activeTeacherCohortId), restoredStudents);
           batchDirtyStudentIdsRef.current = new Set(restoredStudents.map((student) => String(student.id)));
           setIsBatchDirty(true);
       }
       if (Object.keys(restoredAverages).length) {
           setClassAverages(restoredAverages);
-          writeLocalCache(LOCAL_CACHE_KEYS.classAverages, restoredAverages);
+          setClassAveragesCohortId(activeTeacherCohortId);
+          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.classAverages, activeTeacherCohortId), restoredAverages);
       }
       setTeacherGlobalMessage(restoredGlobalMessage);
       setTeacherGlobalMessageDraft(restoredGlobalMessage);
       setTeacherStudentMessages(restoredStudentMessages);
       setTeacherStudentMessageDrafts(restoredStudentMessages);
+      setTeacherMessageCohortId(activeTeacherCohortId);
 
       if (db && user) {
           try {
               if (restoredDates.length) {
-                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: restoredDates }, { merge: true });
+                  await setDoc(getCohortSettingsDocRef(activeTeacherCohortId, 'dates'), { list: restoredDates }, { merge: true });
               }
               if (Object.keys(restoredAverages).length) {
-                  await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'class_averages_v18'), { averages: restoredAverages }, { merge: true });
+                  await setDoc(getCohortSettingsDocRef(activeTeacherCohortId, 'class_averages_v18'), { averages: restoredAverages }, { merge: true });
               }
               await setDoc(
-                  doc(db, 'artifacts', appId, 'public', 'data', 'settings', TEACHER_MESSAGE_DOC_ID),
+                  getCohortSettingsDocRef(activeTeacherCohortId, TEACHER_MESSAGE_DOC_ID),
                   {
                       globalMessage: restoredGlobalMessage,
                       message: restoredGlobalMessage,
@@ -2728,30 +3147,33 @@ export default function App() {
       });
       setStatusMsg('已還原快照（成績請按儲存變更同步）');
       setTimeout(() => setStatusMsg(''), 2200);
-  }, [localSnapshots, normalizeGrades, getTestDateID, user, appendOperationLog]);
+  }, [activePublicCohortId, activeTeacherCohortId, appendOperationLog, getCohortCacheKey, getCohortSettingsDocRef, getTestDateID, localSnapshots, normalizeGrades, user]);
 
-  const loadStudentForTeacher = async (id) => {
+  const loadStudentForTeacher = async (id, options = {}) => {
     if (!user) return;
+    const cohortId = String(options?.cohortId || activeTeacherCohortId || LEGACY_COHORT_ID);
+    const effectiveDates = sanitizeDateList(options?.datePool || (cohortId === datesCohortId ? availableDates : DEFAULT_EXAM_STARTS));
+    const getDateIDForCohort = (dateStr) => getWeekendID(dateStr, effectiveDates);
     setLoading(true);
     try {
       let data = null;
       if (db) {
-          const docSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${id}`));
+          const docSnap = await getDoc(getCohortStudentDocRef(cohortId, id));
           if (docSnap.exists()) data = docSnap.data();
       }
       if (data) {
         setCurrentStudentId(data.id); setStudentName(data.name);
-        const normalizedResult = normalizeGrades(data.grades, { withMeta: true });
+        const normalizedResult = normalizeGrades(data.grades, { withMeta: true, datePool: effectiveDates, getDateID: getDateIDForCohort });
         let loadedGrades = { ...normalizedResult.normalized };
         if (normalizedResult.changed && db) {
             setDoc(
-                doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${data.id}`),
+                getCohortStudentDocRef(cohortId, data.id),
                 { ...data, grades: normalizedResult.normalized, lastUpdated: new Date().toISOString() }
             ).catch((err) => console.error('Cleanup invalid student date error:', err));
         }
-        availableDates.forEach(d => { 
-             const weekendID = getTestDateID(d);
-             const existingGradeKey = Object.keys(loadedGrades).find(k => getTestDateID(k) === weekendID);
+        effectiveDates.forEach(d => { 
+             const weekendID = getDateIDForCohort(d);
+             const existingGradeKey = Object.keys(loadedGrades).find(k => getDateIDForCohort(k) === weekendID);
              if (!existingGradeKey) {
                  loadedGrades[d] = { chi: '', eng: '', math: '', total: '', class: 'A班' }; 
              }
@@ -2764,7 +3186,7 @@ export default function App() {
         );
       } else {
         setCurrentStudentId(id); setStudentName('');
-        const gradesObj = {}; availableDates.forEach(d => gradesObj[d] = { chi: '', eng: '', math: '', total: '', class: 'A班' });
+        const gradesObj = {}; effectiveDates.forEach(d => gradesObj[d] = { chi: '', eng: '', math: '', total: '', class: 'A班' });
         setGrades(gradesObj); setStatusMsg('新學生模式');
       }
     } catch (e) {
@@ -2848,9 +3270,10 @@ export default function App() {
 
       if (sortedDates.length) {
           setAvailableDates(sortedDates);
-          writeLocalCache(LOCAL_CACHE_KEYS.dates, sortedDates);
+          setDatesCohortId(activeTeacherCohortId);
+          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, activeTeacherCohortId), sortedDates);
           if (db) {
-              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: sortedDates }, { merge: true });
+              await setDoc(getCohortSettingsDocRef(activeTeacherCohortId, 'dates'), { list: sortedDates }, { merge: true });
           }
       }
 
@@ -2863,8 +3286,12 @@ export default function App() {
 
       const sortedStudents = Object.values(studentsMap).sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
       setAllStudentsData(sortedStudents);
-      setCachedClassData(sortedStudents);
-      writeLocalCache(LOCAL_CACHE_KEYS.students, sortedStudents);
+      setTeacherStudentsCohortId(activeTeacherCohortId);
+      if (activeTeacherCohortId === activePublicCohortId) {
+          setCachedClassData(sortedStudents);
+          setPublicStudentsCohortId(activeTeacherCohortId);
+      }
+      writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.students, activeTeacherCohortId), sortedStudents);
 
       if (touchedStudentIds.length > 0) {
           touchedStudentIds.forEach((id) => batchDirtyStudentIdsRef.current.add(String(id)));
@@ -2879,7 +3306,7 @@ export default function App() {
       });
       setStatusMsg(`匯入 ${importCount} 筆資料${invalidDateSuffix} (最新日期: ${lastImportedDate})`);
       setTimeout(() => setStatusMsg(''), 2200);
-  }, [batchDate, getTestDateID, appendOperationLog]);
+  }, [activePublicCohortId, activeTeacherCohortId, appendOperationLog, batchDate, getCohortCacheKey, getCohortSettingsDocRef, getTestDateID]);
 
   const handleConfirmImportPreview = useCallback(async () => {
       const payload = pendingImportPayloadRef.current;
@@ -3350,11 +3777,15 @@ export default function App() {
     }
     if (!studentToDelete) return;
     try {
-        if (db) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${studentToDelete.id}`));
+        if (db) await deleteDoc(getCohortStudentDocRef(activeTeacherCohortId, studentToDelete.id));
         const nextStudents = allStudentsData.filter((s) => s.id !== studentToDelete.id);
         setAllStudentsData(nextStudents);
-        setCachedClassData(nextStudents);
-        writeLocalCache(LOCAL_CACHE_KEYS.students, nextStudents);
+        setTeacherStudentsCohortId(activeTeacherCohortId);
+        if (activeTeacherCohortId === activePublicCohortId) {
+            setCachedClassData(nextStudents);
+            setPublicStudentsCohortId(activeTeacherCohortId);
+        }
+        writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.students, activeTeacherCohortId), nextStudents);
         setCurrentStudentId(null); setStudentName(''); setGrades({});
         appendOperationLog({
             kind: 'danger',
@@ -3378,15 +3809,19 @@ export default function App() {
     if (!studentName.trim()) { setStatusMsg('請輸入姓名'); return; }
     setStatusMsg('儲存中...');
     try {
-      if (db) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${currentStudentId}`), { id: currentStudentId, name: studentName, grades: grades, lastUpdated: new Date().toISOString() }, { merge: true });
+      if (db) await setDoc(getCohortStudentDocRef(activeTeacherCohortId, currentStudentId), { id: currentStudentId, name: studentName, grades: grades, lastUpdated: new Date().toISOString() }, { merge: true });
       const savedStudent = { id: currentStudentId, name: studentName, grades };
       const exists = allStudentsData.find((s) => s.id === currentStudentId);
       const nextStudents = exists
           ? allStudentsData.map((s) => (s.id === currentStudentId ? { ...s, name: studentName, grades } : s))
           : [...allStudentsData, savedStudent].sort((a, b) => a.id.localeCompare(b.id));
       setAllStudentsData(nextStudents);
-      setCachedClassData(nextStudents);
-      writeLocalCache(LOCAL_CACHE_KEYS.students, nextStudents);
+      setTeacherStudentsCohortId(activeTeacherCohortId);
+      if (activeTeacherCohortId === activePublicCohortId) {
+          setCachedClassData(nextStudents);
+          setPublicStudentsCohortId(activeTeacherCohortId);
+      }
+      writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.students, activeTeacherCohortId), nextStudents);
       appendOperationLog({
           kind: 'save',
           title: '儲存個人檔案',
@@ -3424,15 +3859,19 @@ export default function App() {
           if (db) {
               const batchPromises = dirtyStudents.map((student) =>
                   setDoc(
-                      doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${student.id}`),
+                      getCohortStudentDocRef(activeTeacherCohortId, student.id),
                       { id: student.id, name: student.name, grades: student.grades, lastUpdated: nowIso },
                       { merge: true }
                   )
               );
               await Promise.all(batchPromises);
           }
-          setCachedClassData(allStudentsData);
-          writeLocalCache(LOCAL_CACHE_KEYS.students, allStudentsData);
+          setTeacherStudentsCohortId(activeTeacherCohortId);
+          if (activeTeacherCohortId === activePublicCohortId) {
+              setCachedClassData(allStudentsData);
+              setPublicStudentsCohortId(activeTeacherCohortId);
+          }
+          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.students, activeTeacherCohortId), allStudentsData);
           batchDirtyStudentIdsRef.current = new Set();
           setIsBatchDirty(false);
           appendOperationLog({
@@ -3548,10 +3987,14 @@ export default function App() {
       const rawSearchKeyword = searchId.trim();
       const normalizedSearchId = rawSearchKeyword.toUpperCase();
       const matchFromList = (list) => findStudentByIdOrName(list, rawSearchKeyword);
+      const publicStudentCacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.students, activePublicCohortId);
 
-      const effectiveDates = sortedAvailableDatesAsc.length > 0
+      const effectiveDates = datesCohortId === activePublicCohortId && sortedAvailableDatesAsc.length > 0
           ? sortedAvailableDatesAsc
-          : await loadDates();
+          : await loadDates({ cohortId: activePublicCohortId });
+      const effectiveClassAverages = classAveragesCohortId === activePublicCohortId
+          ? classAverages
+          : await loadClassAverages({ cohortId: activePublicCohortId, datePool: effectiveDates });
       const sortedDates = effectiveDates;
       const getSearchDateID = (dateStr) => getWeekendID(dateStr, effectiveDates);
       const weekendOrder = new Map();
@@ -3564,13 +4007,15 @@ export default function App() {
       let data = null;
       let fullClassData = [];
       let hasDuplicateName = false;
+      const hasPublicCachedStudents = publicStudentsCohortId === activePublicCohortId && cachedClassData.length > 0;
+      const hasTeacherStudentsForPublic = teacherStudentsCohortId === activePublicCohortId && allStudentsData.length > 0;
 
-      if (cachedClassData.length > 0) {
+      if (hasPublicCachedStudents) {
           fullClassData = cachedClassData;
           const matched = matchFromList(cachedClassData);
           data = matched.student;
           hasDuplicateName = matched.duplicateName;
-      } else if (allStudentsData.length > 0) {
+      } else if (hasTeacherStudentsForPublic) {
           fullClassData = allStudentsData;
           const matched = matchFromList(allStudentsData);
           data = matched.student;
@@ -3586,15 +4031,15 @@ export default function App() {
 
       const likelyStudentId = /^[A-Z0-9_-]{3,24}$/.test(normalizedSearchId);
       if (db && !data && likelyStudentId) {
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${normalizedSearchId}`);
+          const docRef = getCohortStudentDocRef(activePublicCohortId, normalizedSearchId);
           const docSnap = await getDoc(docRef);
           if (docSnap.exists()) {
               const rawData = docSnap.data();
-              const normalizedResult = normalizeGrades(rawData.grades, { withMeta: true });
+              const normalizedResult = normalizeGrades(rawData.grades, { withMeta: true, datePool: effectiveDates, getDateID: getSearchDateID });
               data = { ...rawData, grades: normalizedResult.normalized };
               if (normalizedResult.changed && rawData.id) {
                   void setDoc(
-                      doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${rawData.id}`),
+                      getCohortStudentDocRef(activePublicCohortId, rawData.id),
                       { ...rawData, grades: normalizedResult.normalized, lastUpdated: new Date().toISOString() }
                   ).catch((err) => console.error('Parent search cleanup invalid date error:', err));
               }
@@ -3602,17 +4047,18 @@ export default function App() {
       }
 
       if (db && fullClassData.length === 0) {
-          const cachedStudents = readLocalCache(LOCAL_CACHE_KEYS.students, STUDENT_CACHE_TTL_MS);
+          const cachedStudents = readLocalCache(publicStudentCacheKey, STUDENT_CACHE_TTL_MS);
           if (Array.isArray(cachedStudents) && cachedStudents.length > 0) {
               fullClassData = cachedStudents;
               setCachedClassData(cachedStudents);
+              setPublicStudentsCohortId(activePublicCohortId);
           } else {
-              const qSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'students'));
+              const qSnap = await getDocs(getCohortStudentsCollectionRef(activePublicCohortId));
               fullClassData = [];
               const cleanupPayloads = [];
               qSnap.forEach(d => {
                   const rawData = d.data();
-                  const normalizedResult = normalizeGrades(rawData.grades, { withMeta: true });
+                  const normalizedResult = normalizeGrades(rawData.grades, { withMeta: true, datePool: effectiveDates, getDateID: getSearchDateID });
                   fullClassData.push({ ...rawData, grades: normalizedResult.normalized });
                   if (normalizedResult.changed && rawData.id) {
                       cleanupPayloads.push({
@@ -3624,12 +4070,13 @@ export default function App() {
               if (cleanupPayloads.length > 0) {
                   void Promise.all(
                       cleanupPayloads.map((item) =>
-                          setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${item.id}`), item.payload)
+                          setDoc(getCohortStudentDocRef(activePublicCohortId, item.id), item.payload)
                       )
                   ).catch((err) => console.error('Parent search cleanup invalid date error:', err));
               }
               setCachedClassData(fullClassData);
-              writeLocalCache(LOCAL_CACHE_KEYS.students, fullClassData);
+              setPublicStudentsCohortId(activePublicCohortId);
+              writeLocalCache(publicStudentCacheKey, fullClassData);
           }
 
       }
@@ -3647,10 +4094,13 @@ export default function App() {
       if (data) {
         const contextData = fullClassData.length > 0
             ? fullClassData
-            : (cachedClassData.length > 0 ? cachedClassData : allStudentsData);
+            : (hasPublicCachedStudents ? cachedClassData : (hasTeacherStudentsForPublic ? allStudentsData : []));
         const cacheStudentId = String(data.id || '').toUpperCase();
         const shouldReuseCachedVersionBase =
-            contextData === cachedClassData
+            hasPublicCachedStudents
+            && contextData === cachedClassData
+            && datesCohortId === activePublicCohortId
+            && classAveragesCohortId === activePublicCohortId
             && sortedDates === sortedAvailableDatesAsc;
         const parentQueryDataVersion = shouldReuseCachedVersionBase
             ? hashFingerprint(`${cachedParentVersionBase}||${cachedParentStudentSignatureById[cacheStudentId] || buildStudentGradesSignature(data, getSearchDateID)}`)
@@ -3658,7 +4108,7 @@ export default function App() {
                 student: data,
                 classData: contextData,
                 dates: sortedDates,
-                classAveragesMap: classAverages,
+                classAveragesMap: effectiveClassAverages,
                 getDateID: getSearchDateID
             });
         const cachedView = readParentQueryCache(cacheStudentId, parentQueryDataVersion);
@@ -3689,11 +4139,11 @@ export default function App() {
             if (isNaN(t) || t <= 0) return;
             
             const weekClass = weekData.class || 'A班';
-            const avgData = (classAverages[weekendID] && classAverages[weekendID][weekClass]) 
-                          ? classAverages[weekendID][weekClass] 
+            const avgData = (effectiveClassAverages[weekendID] && effectiveClassAverages[weekendID][weekClass]) 
+                          ? effectiveClassAverages[weekendID][weekClass] 
                           : {};
-            const avgAllData = (classAverages[weekendID] && classAverages[weekendID].all)
-                          ? classAverages[weekendID].all
+            const avgAllData = (effectiveClassAverages[weekendID] && effectiveClassAverages[weekendID].all)
+                          ? effectiveClassAverages[weekendID].all
                           : {};
             const resolveAverageValue = (primaryValue, fallbackValue) => {
                 const primaryNumber = toNumberOrNull(primaryValue);
@@ -3738,7 +4188,11 @@ export default function App() {
         let studentProb = '-';
         
         if (contextData.length > 0) {
-            const shouldReuseParentContext = sortedAvailableDatesAsc.length > 0 && effectiveDates === sortedAvailableDatesAsc;
+            const shouldReuseParentContext =
+                sortedAvailableDatesAsc.length > 0
+                && effectiveDates === sortedAvailableDatesAsc
+                && publicStudentsCohortId === activePublicCohortId
+                && datesCohortId === activePublicCohortId;
             const scoreContext = shouldReuseParentContext && parentSearchScoreContext
                 ? parentSearchScoreContext
                 : buildProbabilityContext(contextData, sortedDates, getSearchDateID);
@@ -5261,7 +5715,6 @@ export default function App() {
                     if (isAuthenticated) {
                       if (!user) return;
                       setMode('teacher');
-                      if (!allStudentsData.length) loadAllStudents();
                     } else {
                       setMode('teacher_login');
                     }
@@ -5307,7 +5760,6 @@ export default function App() {
                         if (isAuthenticated) {
                           if (!user) return;
                           setMode('teacher');
-                          if (!allStudentsData.length) loadAllStudents();
                         } else {
                           setMode('teacher_login');
                         }
@@ -5362,6 +5814,60 @@ export default function App() {
                         2491212 權限：唯讀成績
                     </div>
                 )}
+                <div className={`mb-4 rounded-2xl border p-3.5 sm:p-4 backdrop-blur-md ${darkMode ? 'bg-[#020617]/35 border-white/10' : 'bg-white/82 border-white/85 ring-1 ring-white/55 shadow-[0_12px_30px_rgba(15,23,42,0.08)]'}`}>
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div>
+                            <div className={`flex items-center gap-2 font-black tracking-wide ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>
+                                <GraduationCap className="w-4 h-4 text-emerald-500" />
+                                屆別切換
+                            </div>
+                            <p className={`mt-1 text-[11px] font-semibold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                老師端可切換新舊兩屆；家長端只會顯示目前公開屆別。
+                            </p>
+                        </div>
+                        <div className={`text-[11px] font-bold ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                            家長端目前：<span className={darkMode ? 'text-emerald-200' : 'text-emerald-700'}>{activePublicCohort?.label || getCohortLabel(activePublicCohortId)}</span>
+                        </div>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                        {cohortOptions.map((cohort) => {
+                            const isTeacherSelected = cohort.id === activeTeacherCohortId;
+                            const isPublicSelected = cohort.id === activePublicCohortId;
+                            return (
+                                <button
+                                  key={cohort.id}
+                                  type="button"
+                                  onClick={() => handleSwitchTeacherCohort(cohort.id)}
+                                  className={`btn-sheen rounded-2xl border px-3 py-2 text-left transition-all ${isTeacherSelected ? (darkMode ? 'bg-emerald-500/12 border-emerald-300/35 ring-1 ring-emerald-300/25' : 'bg-emerald-50 border-emerald-300/70 shadow-sm shadow-emerald-200/40') : (darkMode ? 'bg-slate-900/45 border-white/10 hover:border-emerald-200/20' : 'bg-white border-slate-200 hover:border-emerald-200')}`}
+                                >
+                                    <div className={`text-xs font-black ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>{cohort.label}</div>
+                                    <div className="mt-1 flex items-center gap-1.5">
+                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isTeacherSelected ? (darkMode ? 'bg-emerald-500/15 text-emerald-100' : 'bg-emerald-100 text-emerald-700') : (darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-500')}`}>
+                                            {isTeacherSelected ? '目前編輯' : '切換到此屆'}
+                                        </span>
+                                        {isPublicSelected && (
+                                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${darkMode ? 'bg-sky-500/15 text-sky-100' : 'bg-sky-100 text-sky-700'}`}>
+                                                家長端顯示
+                                            </span>
+                                        )}
+                                    </div>
+                                </button>
+                            );
+                        })}
+                    </div>
+                    {activeTeacherCohortId !== activePublicCohortId && (
+                        <div className="mt-3 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => handleSetPublicCohort(activeTeacherCohortId)}
+                              disabled={publicCohortSaving || cohortRegistryLoading}
+                              className={`btn-sheen rounded-xl px-3 py-2 text-[11px] font-bold transition-colors ${darkMode ? 'bg-slate-800 text-slate-100 border border-white/10 hover:bg-slate-700' : 'bg-slate-800 text-white hover:bg-slate-700 shadow-sm'} disabled:opacity-50 disabled:cursor-not-allowed`}
+                            >
+                              {publicCohortSaving ? '切換中...' : `設為家長端：${activeTeacherCohort?.label || getCohortLabel(activeTeacherCohortId)}`}
+                            </button>
+                        </div>
+                    )}
+                </div>
                 <div className={`mb-6 rounded-2xl border p-3.5 sm:p-4 backdrop-blur-md ${darkMode ? 'bg-[#020617]/35 border-white/10' : 'bg-white/80 border-white/85 ring-1 ring-white/55 shadow-[0_12px_30px_rgba(15,23,42,0.08)]'}`}>
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div>

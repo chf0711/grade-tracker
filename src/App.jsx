@@ -22,13 +22,24 @@ const DEFAULT_EXAM_STARTS = [
   "12/27", "01/03", "01/10", "01/17", "01/24", "01/31", "02/02", "02/07", "02/13", "02/28"
 ];
 
-const CLASS_DEFS = [
+const LEGACY_CLASS_DEFS = Object.freeze([
     { id: 'A班', label: 'A' },
     { id: 'B班', label: 'B' },
     { id: 'C班', label: 'C' },
     { id: '日A班', label: '日A' },
     { id: '日B班', label: '日B' }
-];
+]);
+
+const NEXT_CLASS_DEFS = Object.freeze([
+    { id: 'A班', label: 'A' },
+    { id: 'B班', label: 'B' },
+    { id: 'C班', label: 'C' },
+    { id: '東興', label: '東興' }
+]);
+
+const getClassDefsForCohort = (cohortId) => (
+    String(cohortId || '').trim() === NEXT_COHORT_ID ? NEXT_CLASS_DEFS : LEGACY_CLASS_DEFS
+);
 
 const RAW_STUDENT_RECORDS = [];
 const FULL_ACCESS_PASSWORD_ENCODED = 'QmVuMTEwNzA1';
@@ -258,8 +269,10 @@ const buildClassAveragesSignature = (dates, classAveragesMap, getDateID) => {
         .map((weekendID) => {
             const avgData = classAveragesMap?.[weekendID] || {};
             const all = avgData.all || {};
-            const classTokens = CLASS_DEFS
-                .map(({ id }) => {
+            const classTokens = Object.keys(avgData)
+                .filter((id) => id !== 'all')
+                .sort((a, b) => a.localeCompare(b, 'zh-Hant'))
+                .map((id) => {
                     const classAvg = avgData[id] || {};
                     return `${id}:${classAvg.total || ''},${classAvg.chi || ''},${classAvg.eng || ''},${classAvg.math || ''}`;
                 })
@@ -1051,7 +1064,7 @@ const ChartFallback = ({ heightClass = 'h-60' }) => (
     </div>
 );
 
-const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, darkMode, canEdit, handleBatchGradeChange, handleKeyDown, handlePaste }) => {
+const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, darkMode, canEdit, classDefs, handleBatchGradeChange, handleKeyDown, handlePaste }) => {
     const probVisual = getProbabilityVisual(probValue, darkMode);
 
     return (
@@ -1068,7 +1081,7 @@ const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, 
                     onChange={(e) => handleBatchGradeChange(student.id, 'class', e.target.value)}
                     className={`w-full text-center text-xs font-bold py-1.5 rounded-lg opacity-70 border-none outline-none appearance-none transition-opacity ${canEdit ? 'cursor-pointer hover:opacity-100' : 'cursor-not-allowed opacity-55'} ${darkMode ? 'bg-slate-900/50 text-slate-400 focus:text-slate-200' : 'bg-slate-100 text-slate-600 focus:text-slate-900'}`}
                 >
-                    {CLASS_DEFS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                    {classDefs.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
                 </select>
             </td>
             {['chi', 'eng', 'math'].map((sub) => (
@@ -1104,6 +1117,7 @@ const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, 
     if (prevProps.handleBatchGradeChange !== nextProps.handleBatchGradeChange) return false;
     if (prevProps.handleKeyDown !== nextProps.handleKeyDown) return false;
     if (prevProps.handlePaste !== nextProps.handlePaste) return false;
+    if (prevProps.classDefs !== nextProps.classDefs) return false;
     if (prevProps.student.id !== nextProps.student.id || prevProps.student.name !== nextProps.student.name) return false;
 
     const prevGrade = prevProps.dateGrades || EMPTY_GRADE;
@@ -1231,6 +1245,7 @@ export default function App() {
   const [batchDate, setBatchDate] = useState(''); 
   const [batchInsightTab, setBatchInsightTab] = useState('grades');
   const [isBatchDirty, setIsBatchDirty] = useState(false);
+  const [batchDraftGradesByStudentId, setBatchDraftGradesByStudentId] = useState({});
   const [visibleBatchRowCount, setVisibleBatchRowCount] = useState(INITIAL_BATCH_RENDER_ROWS);
   const [allStudentsData, setAllStudentsData] = useState([]); 
   const [cachedClassData, setCachedClassData] = useState([]); 
@@ -1279,6 +1294,8 @@ export default function App() {
   const pendingImportPayloadRef = useRef(null);
   const importFileInputRef = useRef(null);
   const legacyImportUnlockUntilRef = useRef(0);
+  const currentBatchGradeInfoRef = useRef({});
+  const batchRowsForDisplayRef = useRef([]);
   const parentQueryPerfRef = useRef({
       cacheHit: 0,
       cacheMiss: 0,
@@ -1334,6 +1351,15 @@ export default function App() {
       (cohortId) => resolveCohortDateMode(cohortId, cohortOptions),
       [cohortOptions]
   );
+  const activeTeacherClassDefs = useMemo(
+      () => getClassDefsForCohort(activeTeacherCohortId),
+      [activeTeacherCohortId]
+  );
+  const activeTeacherClassIdSet = useMemo(
+      () => new Set(activeTeacherClassDefs.map(({ id }) => id)),
+      [activeTeacherClassDefs]
+  );
+  const defaultTeacherClassId = activeTeacherClassDefs[0]?.id || 'A班';
   const isSingleDayCohort = useCallback(
       (cohortId) => getCohortDateMode(cohortId) === COHORT_DATE_MODE.SINGLE,
       [getCohortDateMode]
@@ -1666,20 +1692,52 @@ export default function App() {
   const shouldBuildBatchAnalytics =
       mode === 'teacher' && teacherViewMode === 'batch' && Boolean(batchDate);
 
+  const currentBatchGradeInfoByStudentId = useMemo(() => {
+      if (!shouldBuildBatchAnalytics) return {};
+      const batchDateID = getTestDateID(batchDate);
+      if (!batchDateID) return {};
+
+      const nextInfo = {};
+      allStudentsData.forEach((student) => {
+          const currentGrades = student.grades || {};
+          const existingKey = Object.keys(currentGrades).find((key) => getTestDateID(key) === batchDateID);
+          const sourceDate = existingKey || batchDateID || batchDate;
+          const persistedGrade = currentGrades[sourceDate] || {
+              chi: '',
+              eng: '',
+              math: '',
+              total: '',
+              class: teacherClassFilter || defaultTeacherClassId
+          };
+          const draftEntry = batchDraftGradesByStudentId[student.id];
+          const mergedGrade =
+              draftEntry?.sourceDate === sourceDate
+                  ? { ...persistedGrade, ...draftEntry.grade }
+                  : persistedGrade;
+
+          nextInfo[student.id] = {
+              sourceDate,
+              grade: mergedGrade
+          };
+      });
+
+      return nextInfo;
+  }, [allStudentsData, batchDate, batchDraftGradesByStudentId, defaultTeacherClassId, getTestDateID, shouldBuildBatchAnalytics, teacherClassFilter]);
+  currentBatchGradeInfoRef.current = currentBatchGradeInfoByStudentId;
+
   const batchProbCandidateIds = useMemo(() => {
       if (!shouldBuildBatchAnalytics) return [];
       const weekendID = getTestDateID(batchDate);
       if (!weekendID) return [];
       return allStudentsData
           .filter((student) => {
-              const weekendEntries = buildTargetWeekendGradeEntryMap(student.grades, new Set([weekendID]), getTestDateID);
-              const dateGrades = weekendEntries[weekendID]?.grade;
+              const dateGrades = currentBatchGradeInfoByStudentId[student.id]?.grade;
               if (!dateGrades) return false;
               if ((dateGrades.class || 'A班') !== teacherClassFilter) return false;
               return hasAnySubjectScore(dateGrades);
           })
           .map((student) => student.id);
-  }, [allStudentsData, batchDate, getTestDateID, shouldBuildBatchAnalytics, teacherClassFilter]);
+  }, [allStudentsData, batchDate, currentBatchGradeInfoByStudentId, getTestDateID, shouldBuildBatchAnalytics, teacherClassFilter]);
 
   const batchProbStudentGradeMapsByStudentId = useMemo(() => {
       if (!shouldBuildBatchAnalytics || batchProbCandidateIds.length === 0) return {};
@@ -1693,11 +1751,15 @@ export default function App() {
           Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
               weekendGrades[weekendID] = entry.grade;
           });
+          const currentBatchInfo = currentBatchGradeInfoByStudentId[student.id];
+          if (currentBatchInfo && selectedBatchWeekendID) {
+              weekendGrades[selectedBatchWeekendID] = currentBatchInfo.grade;
+          }
           gradeMaps[student.id] = weekendGrades;
       });
 
       return gradeMaps;
-  }, [allStudentsData, batchProbCandidateIds, getTestDateID, shouldBuildBatchAnalytics]);
+  }, [allStudentsData, batchProbCandidateIds, currentBatchGradeInfoByStudentId, getTestDateID, selectedBatchWeekendID, shouldBuildBatchAnalytics]);
 
   const teacherProbabilityContext = useMemo(() => {
       if (mode !== 'teacher' || orderedWeekendIds.length === 0 || probabilityContextStudents.length === 0) {
@@ -1725,6 +1787,15 @@ export default function App() {
       if (typeof window === 'undefined') return;
       localStorage.setItem(TEACHER_ACTIVE_COHORT_STORAGE_KEY, activeTeacherCohortId);
   }, [activeTeacherCohortId, cohortOptions]);
+
+  useEffect(() => {
+      if (!activeTeacherClassIdSet.has(teacherClassFilter)) {
+          setTeacherClassFilter(defaultTeacherClassId);
+      }
+      if (!activeTeacherClassIdSet.has(avgSettingsClassFilter)) {
+          setAvgSettingsClassFilter(defaultTeacherClassId);
+      }
+  }, [activeTeacherClassIdSet, avgSettingsClassFilter, defaultTeacherClassId, teacherClassFilter]);
 
   useEffect(() => {
       const cachedOperationLogs = sanitizeOperationLogs(
@@ -1972,6 +2043,21 @@ export default function App() {
 
   const hasPendingBatchChanges = mode === 'teacher' && teacherViewMode === 'batch' && isBatchDirty;
 
+  const resetBatchDraftState = useCallback(() => {
+      batchDirtyStudentIdsRef.current = new Set();
+      setBatchDraftGradesByStudentId({});
+      setIsBatchDirty(false);
+  }, []);
+
+  const applyBatchDateChange = useCallback((nextBatchDate) => {
+      if (!nextBatchDate) return;
+      if (hasPendingBatchChanges && !window.confirm('批量成績尚未儲存，確定要切換考次嗎？')) return;
+      if (hasPendingBatchChanges) resetBatchDraftState();
+      startTransition(() => {
+          setBatchDate(nextBatchDate);
+      });
+  }, [hasPendingBatchChanges, resetBatchDraftState]);
+
   const confirmDiscardBatchChanges = useCallback(() => {
       if (!hasPendingBatchChanges) return true;
       return window.confirm('批量成績尚未儲存，確定要離開目前頁面嗎？');
@@ -1979,8 +2065,9 @@ export default function App() {
 
   const runWithBatchDiscardGuard = useCallback((action) => {
       if (!confirmDiscardBatchChanges()) return;
+      if (hasPendingBatchChanges) resetBatchDraftState();
       action();
-  }, [confirmDiscardBatchChanges]);
+  }, [confirmDiscardBatchChanges, hasPendingBatchChanges, resetBatchDraftState]);
 
   const notifyPermissionDenied = useCallback((message) => {
       setStatusMsg(message);
@@ -2451,8 +2538,7 @@ export default function App() {
                       setPublicStudentsCohortId(cohortId);
                   }
               });
-              batchDirtyStudentIdsRef.current = new Set();
-              setIsBatchDirty(false);
+              resetBatchDraftState();
               releaseLoading();
               if (hasSessionSynced || !db) {
                   return cachedStudents;
@@ -2508,8 +2594,7 @@ export default function App() {
           if (typeof window !== 'undefined') {
               sessionStorage.setItem(sessionKey, '1');
           }
-          batchDirtyStudentIdsRef.current = new Set();
-          setIsBatchDirty(false);
+          resetBatchDraftState();
           releaseLoading();
 
           if (db && cleanupPayloads.length > 0) {
@@ -2557,6 +2642,7 @@ export default function App() {
       getCohortStudentsCollectionRef,
       getStudentSessionKey,
       normalizeGrades,
+      resetBatchDraftState,
       resolveScopedDateId
   ]);
 
@@ -2616,9 +2702,8 @@ export default function App() {
       setDatesCohortId('');
       setClassAverages({});
       setClassAveragesCohortId('');
-      batchDirtyStudentIdsRef.current = new Set();
-      setIsBatchDirty(false);
-  }, [activeTeacherCohortId, cohortOptions]);
+      resetBatchDraftState();
+  }, [activeTeacherCohortId, cohortOptions, resetBatchDraftState]);
 
   useEffect(() => {
       setCachedClassData([]);
@@ -2645,7 +2730,7 @@ export default function App() {
               const cachedStudents = readLocalCache(teacherStudentsCacheKey, STUDENT_CACHE_TTL_MS);
               if (!Array.isArray(cachedStudents) || cachedStudents.length === 0) return;
               if (mode === 'teacher' && teacherViewMode === 'batch' && !isBatchDirty) {
-                  batchDirtyStudentIdsRef.current = new Set();
+                  setBatchDraftGradesByStudentId({});
                   setAllStudentsData(cachedStudents);
                   setTeacherStudentsCohortId(activeTeacherCohortId);
               }
@@ -2748,11 +2833,11 @@ export default function App() {
 
   const localComputedAverages = useMemo(() => {
       const avgs = {};
-      const validClassSet = new Set(CLASS_DEFS.map(c => c.id));
+      const validClassSet = activeTeacherClassIdSet;
 
       const createBuckets = () => {
           const buckets = { all: { t:0, c:0, e:0, m:0, count:0 } };
-          CLASS_DEFS.forEach(c => {
+          activeTeacherClassDefs.forEach(c => {
               buckets[c.id] = { t:0, c:0, e:0, m:0, count:0 };
           });
           return buckets;
@@ -2818,7 +2903,7 @@ export default function App() {
           });
       });
       return avgs;
-  }, [deferredDatesForDerived, deferredStudentsForDerived, getTestDateID]);
+  }, [activeTeacherClassDefs, activeTeacherClassIdSet, deferredDatesForDerived, deferredStudentsForDerived, getTestDateID]);
 
   const loadClassAverages = useCallback(async (options = {}) => {
       const force = Boolean(options && options.force);
@@ -3351,6 +3436,7 @@ export default function App() {
               setPublicStudentsCohortId(activeTeacherCohortId);
           }
           writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.students, activeTeacherCohortId), restoredStudents);
+          setBatchDraftGradesByStudentId({});
           batchDirtyStudentIdsRef.current = new Set(restoredStudents.map((student) => String(student.id)));
           setIsBatchDirty(true);
       }
@@ -3471,37 +3557,32 @@ export default function App() {
           notifyPermissionDenied('2491212 權限無法修改學生成績');
           return;
       }
-      setAllStudentsData(prev => {
-          const index = prev.findIndex((s) => s.id === studentId);
-          if (index < 0) return prev;
 
-          const student = prev[index];
-          const currentGrades = student.grades || {};
-          let targetDate = batchDate;
-          const batchDateID = getTestDateID(batchDate);
-          const existingKey = Object.keys(currentGrades).find((k) => getTestDateID(k) === batchDateID);
-          if (existingKey) targetDate = existingKey;
+      const currentBatchInfo = currentBatchGradeInfoRef.current[studentId];
+      const targetDate = currentBatchInfo?.sourceDate || selectedBatchWeekendID || batchDate;
+      const currentDateGrades = currentBatchInfo?.grade || { chi: '', eng: '', math: '', total: '', class: teacherClassFilter || defaultTeacherClassId };
+      let updatedDateGrades;
+      if (subject === 'class') {
+          updatedDateGrades = { ...currentDateGrades, class: value };
+      } else {
+          updatedDateGrades = { ...currentDateGrades, [subject]: value };
+          updatedDateGrades.total = calculateTotal(
+              subject === 'chi' ? value : updatedDateGrades.chi,
+              subject === 'eng' ? value : updatedDateGrades.eng,
+              subject === 'math' ? value : updatedDateGrades.math
+          );
+      }
 
-          const currentDateGrades = currentGrades[targetDate] || { chi: '', eng: '', math: '', total: '', class: teacherClassFilter };
-          let updatedDateGrades;
-          if (subject === 'class') {
-              updatedDateGrades = { ...currentDateGrades, class: value };
-          } else {
-              updatedDateGrades = { ...currentDateGrades, [subject]: value };
-              updatedDateGrades.total = calculateTotal(
-                  subject === 'chi' ? value : updatedDateGrades.chi,
-                  subject === 'eng' ? value : updatedDateGrades.eng,
-                  subject === 'math' ? value : updatedDateGrades.math
-              );
+      setBatchDraftGradesByStudentId((prev) => ({
+          ...prev,
+          [studentId]: {
+              sourceDate: targetDate,
+              grade: updatedDateGrades
           }
-
-          const next = [...prev];
-          next[index] = { ...student, grades: { ...currentGrades, [targetDate]: updatedDateGrades } };
-          return next;
-      });
+      }));
       batchDirtyStudentIdsRef.current.add(String(studentId));
       setIsBatchDirty(true);
-  }, [batchDate, teacherClassFilter, getTestDateID, canEditStudentGrades, notifyPermissionDenied]); 
+  }, [batchDate, canEditStudentGrades, defaultTeacherClassId, notifyPermissionDenied, selectedBatchWeekendID, teacherClassFilter]); 
 
   const applyPreparedImportPayload = useCallback(async (payload) => {
       if (!payload || typeof payload !== 'object') return;
@@ -3542,6 +3623,7 @@ export default function App() {
           setPublicStudentsCohortId(activeTeacherCohortId);
       }
       writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.students, activeTeacherCohortId), sortedStudents);
+      setBatchDraftGradesByStudentId({});
 
       if (touchedStudentIds.length > 0) {
           touchedStudentIds.forEach((id) => batchDirtyStudentIdsRef.current.add(String(id)));
@@ -3660,11 +3742,13 @@ export default function App() {
              colMap.id = 0; colMap.name = 1; colMap.date = 2; colMap.chi = 3; colMap.eng = 4; colMap.math = 5;
         }
 
-        const validClassSet = new Set(CLASS_DEFS.map(({ id }) => id));
+        const validClassSet = activeTeacherClassIdSet;
         const parseImportedClass = (rawValue) => {
             const rawClass = String(rawValue || '').trim().toUpperCase();
             if (!rawClass) return '';
-            if (rawClass.includes('日') || rawClass.includes('SUN')) return rawClass.includes('B') ? '日B班' : '日A班';
+            if (validClassSet.has(rawClass)) return rawClass;
+            if (activeTeacherCohortId === NEXT_COHORT_ID && (rawClass.includes('東') || rawClass.includes('DONG') || rawClass.includes('EAST'))) return '東興';
+            if (activeTeacherCohortId !== NEXT_COHORT_ID && (rawClass.includes('日') || rawClass.includes('SUN'))) return rawClass.includes('B') ? '日B班' : '日A班';
             if (rawClass.includes('C')) return 'C班';
             if (rawClass.includes('B')) return 'B班';
             if (rawClass.includes('A')) return 'A班';
@@ -3763,7 +3847,7 @@ export default function App() {
               })?.[1]?.class;
               if (sameWeekendClass) return sameWeekendClass;
               if (teacherClassFilter && validClassSet.has(teacherClassFilter)) return teacherClassFilter;
-              return 'A班';
+              return defaultTeacherClassId;
           };
           const className = importedClassName || resolveFallbackClass();
           const total = calculateTotal(chi, eng, math);
@@ -3873,7 +3957,7 @@ export default function App() {
     }
   }, []);
 
-  const handleKeyDown = useCallback((e, studentIndex, subject) => handleGridKeyDown(e, studentIndex, subject, 'batch', allStudentsData.length), [allStudentsData.length, handleGridKeyDown]);
+  const handleKeyDown = useCallback((e, studentIndex, subject) => handleGridKeyDown(e, studentIndex, subject, 'batch', batchRowsForDisplayRef.current.length), [handleGridKeyDown]);
   const handleSingleKeyDown = useCallback(
       (e, dateIndex, subject) => handleGridKeyDown(e, dateIndex, subject, 'single', singleViewDateEntries.length),
       [singleViewDateEntries.length, handleGridKeyDown]
@@ -3893,46 +3977,46 @@ export default function App() {
       const rows = pasteData.trim().split(/\r\n|\n|\r/);
       const subjects = ['chi', 'eng', 'math'];
       const startSubjectIndex = subjects.indexOf(startSubject);
-      const batchDateID = getTestDateID(batchDate);
-      
-      setAllStudentsData(prev => {
-          const newData = [...prev];
-          let updated = false;
-          const changedIds = new Set();
-          rows.forEach((row, rIndex) => {
-              const studentIndex = startStudentIndex + rIndex;
-              if (studentIndex >= newData.length) return;
-              const cols = row.split('\t');
-              const student = { ...newData[studentIndex] };
-              const currentGrades = student.grades || {};
-              const existingKey = Object.keys(currentGrades).find((key) => getTestDateID(key) === batchDateID);
-              const targetDate = existingKey || batchDateID || batchDate;
-              const currentDateGrades = { ...(currentGrades[targetDate] || { chi: '', eng: '', math: '', total: '', class: 'A班' }) };
-              let rowUpdated = false;
-              cols.forEach((val, cIndex) => {
-                  const subjectIndex = startSubjectIndex + cIndex;
-                  if (subjectIndex >= 3) return;
-                  const subject = subjects[subjectIndex];
-                  currentDateGrades[subject] = val.trim();
-                  rowUpdated = true;
-              });
-              if (rowUpdated) {
-                  currentDateGrades.total = calculateTotal(currentDateGrades.chi, currentDateGrades.eng, currentDateGrades.math);
-                  student.grades = { ...currentGrades, [targetDate]: currentDateGrades };
-                  newData[studentIndex] = student;
-                  changedIds.add(student.id);
-                  updated = true;
-              }
+
+      const nextDrafts = {};
+      const changedIds = new Set();
+      rows.forEach((row, rIndex) => {
+          const studentIndex = startStudentIndex + rIndex;
+          if (studentIndex >= batchRowsForDisplayRef.current.length) return;
+          const targetRow = batchRowsForDisplayRef.current[studentIndex];
+          if (!targetRow?.student?.id) return;
+
+          const cols = row.split('\t');
+          const currentBatchInfo = currentBatchGradeInfoRef.current[targetRow.student.id];
+          const targetDate = currentBatchInfo?.sourceDate || selectedBatchWeekendID || batchDate;
+          const currentDateGrades = { ...(currentBatchInfo?.grade || targetRow.dateGrades || { chi: '', eng: '', math: '', total: '', class: teacherClassFilter || defaultTeacherClassId }) };
+          let rowUpdated = false;
+
+          cols.forEach((val, cIndex) => {
+              const subjectIndex = startSubjectIndex + cIndex;
+              if (subjectIndex >= 3) return;
+              const subject = subjects[subjectIndex];
+              currentDateGrades[subject] = val.trim();
+              rowUpdated = true;
           });
-          if(updated) {
-              changedIds.forEach((id) => batchDirtyStudentIdsRef.current.add(String(id)));
-              setStatusMsg(`已貼上 ${rows.length} 筆資料`);
-              setTimeout(() => setStatusMsg(''), 2000);
-              setIsBatchDirty(true);
-          }
-          return newData;
+
+          if (!rowUpdated) return;
+          currentDateGrades.total = calculateTotal(currentDateGrades.chi, currentDateGrades.eng, currentDateGrades.math);
+          nextDrafts[targetRow.student.id] = {
+              sourceDate: targetDate,
+              grade: currentDateGrades
+          };
+          changedIds.add(targetRow.student.id);
       });
-  }, [batchDate, getTestDateID, canEditStudentGrades, notifyPermissionDenied]);
+
+      if (!changedIds.size) return;
+
+      setBatchDraftGradesByStudentId((prev) => ({ ...prev, ...nextDrafts }));
+      changedIds.forEach((id) => batchDirtyStudentIdsRef.current.add(String(id)));
+      setStatusMsg(`已貼上 ${changedIds.size} 筆資料`);
+      setTimeout(() => setStatusMsg(''), 2000);
+      setIsBatchDirty(true);
+  }, [batchDate, canEditStudentGrades, defaultTeacherClassId, notifyPermissionDenied, selectedBatchWeekendID, teacherClassFilter]);
 
   const handleSinglePaste = (e, startDateIndex, startSubject) => {
       if (!canEditStudentGrades) {
@@ -4103,9 +4187,20 @@ export default function App() {
           return;
       }
       const dirtyIdSet = new Set(Array.from(batchDirtyStudentIdsRef.current));
-      const dirtyStudents = allStudentsData.filter((student) => dirtyIdSet.has(String(student.id)));
+      const nextStudents = allStudentsData.map((student) => {
+          const draft = batchDraftGradesByStudentId[student.id];
+          if (!draft) return student;
+          return {
+              ...student,
+              grades: {
+                  ...(student.grades || {}),
+                  [draft.sourceDate]: draft.grade
+              }
+          };
+      });
+      const dirtyStudents = nextStudents.filter((student) => dirtyIdSet.has(String(student.id)));
       if (dirtyStudents.length === 0) {
-          setIsBatchDirty(false);
+          resetBatchDraftState();
           setStatusMsg('沒有變更需要儲存');
           setTimeout(() => setStatusMsg(''), 1800);
           return;
@@ -4123,14 +4218,14 @@ export default function App() {
               );
               await Promise.all(batchPromises);
           }
+          setAllStudentsData(nextStudents);
           setTeacherStudentsCohortId(activeTeacherCohortId);
           if (activeTeacherCohortId === activePublicCohortId) {
-              setCachedClassData(allStudentsData);
+              setCachedClassData(nextStudents);
               setPublicStudentsCohortId(activeTeacherCohortId);
           }
-          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.students, activeTeacherCohortId), allStudentsData);
-          batchDirtyStudentIdsRef.current = new Set();
-          setIsBatchDirty(false);
+          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.students, activeTeacherCohortId), nextStudents);
+          resetBatchDraftState();
           appendOperationLog({
               kind: 'save',
               title: '批次儲存完成',
@@ -4764,13 +4859,17 @@ export default function App() {
           Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
               weekendGrades[weekendID] = entry.grade;
           });
+          const currentBatchInfo = currentBatchGradeInfoByStudentId[student.id];
+          if (currentBatchInfo && selectedBatchWeekendID && targetWeekendIds.has(selectedBatchWeekendID)) {
+              weekendGrades[selectedBatchWeekendID] = currentBatchInfo.grade;
+          }
           if (Object.keys(weekendGrades).length > 0) {
               gradeMaps[student.id] = weekendGrades;
           }
       });
 
       return gradeMaps;
-  }, [allStudentsData, getTestDateID, relevantWeekendIdsForPR, shouldBuildBatchAnalytics]);
+  }, [allStudentsData, currentBatchGradeInfoByStudentId, getTestDateID, relevantWeekendIdsForPR, selectedBatchWeekendID, shouldBuildBatchAnalytics]);
 
   const globalPRByStudentAndWeekend = useMemo(() => {
       if (!shouldBuildBatchAnalytics || relevantWeekendIdsForPR.length === 0) return {};
@@ -4855,6 +4954,7 @@ export default function App() {
       batchRelevantGradeMapsByStudentId,
       globalPRByStudentAndWeekend
   ]);
+  batchRowsForDisplayRef.current = batchRowsForDisplay;
 
   const handleExportBatchExcel = async () => {
       if (!window.XLSX) {
@@ -5637,7 +5737,7 @@ export default function App() {
           return { summary: emptySummary, details: emptyDetails };
       }
 
-      const validClassSet = new Set(CLASS_DEFS.map((item) => item.id));
+      const validClassSet = activeTeacherClassIdSet;
       const duplicateNameMap = {};
       const usedWeekendIds = new Set();
       const details = {
@@ -5785,7 +5885,7 @@ export default function App() {
           },
           details
       };
-  }, [activeDateContextCohortId, availableDates, deferredDatesForDerived, deferredStudentsForDerived, getScopedDateLabel, getTestDateID, shouldBuildQueryDeepInsights]);
+  }, [activeDateContextCohortId, activeTeacherClassIdSet, availableDates, deferredDatesForDerived, deferredStudentsForDerived, getScopedDateLabel, getTestDateID, shouldBuildQueryDeepInsights]);
 
   const dataQualitySummary = dataQualityReport.summary;
   const dataQualityDetails = dataQualityReport.details;
@@ -6145,10 +6245,7 @@ export default function App() {
                                 disabled={!teacherDateCards.length}
                                 onChange={(e) => {
                                     const nextValue = e.target.value;
-                                    if (!nextValue) return;
-                                    startTransition(() => {
-                                        setBatchDate(nextValue);
-                                    });
+                                    applyBatchDateChange(nextValue);
                                 }}
                             >
                                 {!teacherDateCards.length && <option value="">尚無考次</option>}
@@ -6169,11 +6266,7 @@ export default function App() {
                             {teacherViewMode === 'batch' && latestAvailableDate && selectedBatchWeekendID !== latestAvailableDate && (
                                 <button
                                     type="button"
-                                    onClick={() => {
-                                        startTransition(() => {
-                                            setBatchDate(latestAvailableDate);
-                                        });
-                                    }}
+                                    onClick={() => applyBatchDateChange(latestAvailableDate)}
                                     className={`btn-sheen rounded-full px-2.5 py-1 text-[10px] font-bold transition-colors border ${darkMode ? 'bg-slate-800 text-slate-200 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 shadow-sm'}`}
                                 >
                                     最新
@@ -6306,7 +6399,7 @@ export default function App() {
                         </div>
 
                         <div className={`flex p-1 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
-                            {CLASS_DEFS.map(c => (
+                            {activeTeacherClassDefs.map(c => (
                                 <button key={c.id} onClick={() => {
                                     startTransition(() => {
                                         setTeacherClassFilter(c.id);
@@ -6395,6 +6488,7 @@ export default function App() {
                                                 probValue={row.probValue}
                                                 darkMode={darkMode} 
                                                 canEdit={canEditStudentGrades}
+                                                classDefs={activeTeacherClassDefs}
                                                 handleBatchGradeChange={handleBatchGradeChange} 
                                                 handleKeyDown={handleKeyDown} 
                                                 handlePaste={handlePaste} 
@@ -7235,7 +7329,7 @@ export default function App() {
                                                     onChange={(e) => handleGradeChange(entry.gradeKey, 'class', e.target.value)}
                                                     className={`w-full text-center p-2 rounded-lg bg-transparent border border-transparent outline-none text-base font-bold transition-all ${canEditStudentGrades ? 'cursor-pointer hover:bg-black/5 dark:hover:bg-white/5' : 'cursor-not-allowed opacity-70'} ${darkMode ? 'text-slate-200 focus:bg-slate-800' : 'text-slate-700 focus:bg-white'}`}
                                                 >
-                                                    {CLASS_DEFS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                                                    {activeTeacherClassDefs.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
                                                 </select>
                                             </td>
                                             {['chi', 'eng', 'math'].map(sub => (
@@ -7452,7 +7546,7 @@ export default function App() {
                   </div>
                   <div className={`px-6 pt-6 pb-2`}>
                       <div className={`flex p-1 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
-                          {CLASS_DEFS.map(c => (
+                          {activeTeacherClassDefs.map(c => (
                               <button key={c.id} onClick={() => setAvgSettingsClassFilter(c.id)} className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${avgSettingsClassFilter === c.id ? (darkMode ? 'bg-slate-800 text-white shadow-md border border-white/5' : 'bg-white text-slate-800 shadow-sm border border-slate-200') : 'text-slate-500 hover:text-slate-400'}`}>{c.label}</button>
                           ))}
                       </div>
@@ -7460,7 +7554,7 @@ export default function App() {
                   <div className={`px-6 pb-6 overflow-y-auto flex-1 ${darkMode ? 'bg-[#020617]/30' : 'bg-slate-50/50'}`}>
                       <div className="mb-4 text-xs font-bold text-amber-500 bg-amber-500/10 p-3 rounded-xl border border-amber-500/20 flex items-center gap-2">
                         <Sparkles className="w-4 h-4" />
-                        系統已自動計算 <span className="font-black text-amber-600 dark:text-amber-400 mx-1">{CLASS_DEFS.find(c=>c.id===avgSettingsClassFilter)?.label}</span> 班平均。若需調整，請直接修改。
+                        系統已自動計算 <span className="font-black text-amber-600 dark:text-amber-400 mx-1">{activeTeacherClassDefs.find(c=>c.id===avgSettingsClassFilter)?.label}</span> 班平均。若需調整，請直接修改。
                       </div>
                       <table className="w-full text-sm text-left">
                           <thead className={`text-xs uppercase sticky top-0 backdrop-blur z-10 ${darkMode ? 'text-slate-500 bg-slate-800/95' : 'text-slate-400 bg-slate-50/95'}`}>

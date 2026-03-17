@@ -2351,42 +2351,6 @@ export default function App() {
   ]);
 
   useEffect(() => {
-      if (!user || mode !== 'teacher' || !isAuthenticated) return;
-      let cancelled = false;
-      const hydrateTeacherCohort = async () => {
-          const cohortDates = await loadDates({ cohortId: activeTeacherCohortId });
-          if (cancelled) return;
-          await Promise.all([
-              loadClassAverages({ cohortId: activeTeacherCohortId, datePool: cohortDates }),
-              loadTeacherMessage({ cohortId: activeTeacherCohortId }),
-              loadQueryStats({ cohortId: activeTeacherCohortId }),
-              loadAllStudents({ cohortId: activeTeacherCohortId, datePool: cohortDates })
-          ]);
-      };
-      void hydrateTeacherCohort();
-      return () => {
-          cancelled = true;
-      };
-  }, [activeTeacherCohortId, isAuthenticated, loadAllStudents, loadClassAverages, loadDates, loadQueryStats, loadTeacherMessage, mode, user]);
-
-  useEffect(() => {
-      if (!user || mode !== 'parent') return;
-      let cancelled = false;
-      const hydratePublicCohort = async () => {
-          const cohortDates = await loadDates({ cohortId: activePublicCohortId });
-          if (cancelled) return;
-          await Promise.all([
-              loadClassAverages({ cohortId: activePublicCohortId, datePool: cohortDates }),
-              loadTeacherMessage({ cohortId: activePublicCohortId })
-          ]);
-      };
-      void hydratePublicCohort();
-      return () => {
-          cancelled = true;
-      };
-  }, [activePublicCohortId, loadClassAverages, loadDates, loadTeacherMessage, mode, user]);
-
-  useEffect(() => {
       if (typeof document === 'undefined') return;
       const handleVisibilityChange = () => {
           if (document.visibilityState !== 'hidden') return;
@@ -2701,6 +2665,42 @@ export default function App() {
       classAveragesLoadPromiseRef.current = { cohortId, promise };
       return promise;
   }, [activeDataCohortId, activeTeacherCohortId, availableDates, datesCohortId, getCohortCacheKey, getCohortSettingsDocRef, localComputedAverages, teacherStudentsCohortId]);
+
+  useEffect(() => {
+      if (!user || mode !== 'teacher' || !isAuthenticated) return;
+      let cancelled = false;
+      const hydrateTeacherCohort = async () => {
+          const cohortDates = await loadDates({ cohortId: activeTeacherCohortId });
+          if (cancelled) return;
+          await Promise.all([
+              loadClassAverages({ cohortId: activeTeacherCohortId, datePool: cohortDates }),
+              loadTeacherMessage({ cohortId: activeTeacherCohortId }),
+              loadQueryStats({ cohortId: activeTeacherCohortId }),
+              loadAllStudents({ cohortId: activeTeacherCohortId, datePool: cohortDates })
+          ]);
+      };
+      void hydrateTeacherCohort();
+      return () => {
+          cancelled = true;
+      };
+  }, [activeTeacherCohortId, isAuthenticated, loadAllStudents, loadClassAverages, loadDates, loadQueryStats, loadTeacherMessage, mode, user]);
+
+  useEffect(() => {
+      if (!user || mode !== 'parent') return;
+      let cancelled = false;
+      const hydratePublicCohort = async () => {
+          const cohortDates = await loadDates({ cohortId: activePublicCohortId });
+          if (cancelled) return;
+          await Promise.all([
+              loadClassAverages({ cohortId: activePublicCohortId, datePool: cohortDates }),
+              loadTeacherMessage({ cohortId: activePublicCohortId })
+          ]);
+      };
+      void hydratePublicCohort();
+      return () => {
+          cancelled = true;
+      };
+  }, [activePublicCohortId, loadClassAverages, loadDates, loadTeacherMessage, mode, user]);
 
   useEffect(() => {
       if (deferredStudentsForDerived.length === 0) return undefined;
@@ -3893,53 +3893,6 @@ export default function App() {
       }
   };
 
-  const handleExportBatchExcel = async () => {
-      if (!window.XLSX) {
-          setStatusMsg('Excel 模組載入中，請稍後');
-          try {
-              await ensureXlsxReady();
-          } catch (error) {
-              console.error('XLSX load error:', error);
-              setStatusMsg('Excel 模組載入失敗');
-              setTimeout(() => setStatusMsg(''), 2000);
-              return;
-          }
-      }
-      if (!batchRowsForDisplay.length) {
-          setStatusMsg('目前沒有可匯出的資料');
-          setTimeout(() => setStatusMsg(''), 2000);
-          return;
-      }
-
-      const rows = batchRowsForDisplay.map((row, index) => ({
-          '序號': index + 1,
-          '學號': row.student.id,
-          '姓名': row.student.name || '',
-          '班級': row.dateGrades.class || '',
-          '國文': row.dateGrades.chi ?? '',
-          '英文': row.dateGrades.eng ?? '',
-          '數學': row.dateGrades.math ?? '',
-          '總分': row.dateGrades.total ?? '',
-          'PR': row.prValue === '-' ? '' : row.prValue,
-          '錄取機率(%)': row.probValue === '-' ? '' : row.probValue,
-          '查詢次數': queryStatsById[row.student.id] || 0
-      }));
-
-      const worksheet = window.XLSX.utils.json_to_sheet(rows);
-      worksheet['!cols'] = [
-          { wch: 6 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 12 }, { wch: 10 }
-      ];
-
-      const workbook = window.XLSX.utils.book_new();
-      window.XLSX.utils.book_append_sheet(workbook, worksheet, '批量成績');
-
-      const safeClass = String(teacherClassFilter).replace(/[^\w\u4e00-\u9fa5-]/g, '');
-      const safeDate = String(batchDate || '').replace('/', '-');
-      window.XLSX.writeFile(workbook, `batch_${safeDate}_${safeClass}.xlsx`);
-      setStatusMsg('已下載批量 Excel');
-      setTimeout(() => setStatusMsg(''), 2000);
-  };
-
   const parentSearchScoreContext = useMemo(() => {
       if (!cachedClassData.length || !sortedAvailableDatesAsc.length) return null;
       return buildProbabilityContext(cachedClassData, sortedAvailableDatesAsc, getTestDateID);
@@ -4618,6 +4571,53 @@ export default function App() {
       batchRelevantGradeMapsByStudentId,
       globalPRByStudentAndWeekend
   ]);
+
+  const handleExportBatchExcel = async () => {
+      if (!window.XLSX) {
+          setStatusMsg('Excel 模組載入中，請稍後');
+          try {
+              await ensureXlsxReady();
+          } catch (error) {
+              console.error('XLSX load error:', error);
+              setStatusMsg('Excel 模組載入失敗');
+              setTimeout(() => setStatusMsg(''), 2000);
+              return;
+          }
+      }
+      if (!batchRowsForDisplay.length) {
+          setStatusMsg('目前沒有可匯出的資料');
+          setTimeout(() => setStatusMsg(''), 2000);
+          return;
+      }
+
+      const rows = batchRowsForDisplay.map((row, index) => ({
+          '序號': index + 1,
+          '學號': row.student.id,
+          '姓名': row.student.name || '',
+          '班級': row.dateGrades.class || '',
+          '國文': row.dateGrades.chi ?? '',
+          '英文': row.dateGrades.eng ?? '',
+          '數學': row.dateGrades.math ?? '',
+          '總分': row.dateGrades.total ?? '',
+          'PR': row.prValue === '-' ? '' : row.prValue,
+          '錄取機率(%)': row.probValue === '-' ? '' : row.probValue,
+          '查詢次數': queryStatsById[row.student.id] || 0
+      }));
+
+      const worksheet = window.XLSX.utils.json_to_sheet(rows);
+      worksheet['!cols'] = [
+          { wch: 6 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 12 }, { wch: 10 }
+      ];
+
+      const workbook = window.XLSX.utils.book_new();
+      window.XLSX.utils.book_append_sheet(workbook, worksheet, '批量成績');
+
+      const safeClass = String(teacherClassFilter).replace(/[^\w\u4e00-\u9fa5-]/g, '');
+      const safeDate = String(batchDate || '').replace('/', '-');
+      window.XLSX.writeFile(workbook, `batch_${safeDate}_${safeClass}.xlsx`);
+      setStatusMsg('已下載批量 Excel');
+      setTimeout(() => setStatusMsg(''), 2000);
+  };
 
   useEffect(() => {
       if (teacherViewMode !== 'batch' || batchInsightTab !== 'grades') return;

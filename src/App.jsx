@@ -1252,7 +1252,6 @@ export default function App() {
       () => Object.fromEntries(cohortOptions.map((cohort) => [cohort.id, cohort])),
       [cohortOptions]
   );
-  const activeTeacherCohort = cohortOptionsById[activeTeacherCohortId] || DEFAULT_COHORT_OPTIONS[1];
   const activePublicCohort = cohortOptionsById[activePublicCohortId] || DEFAULT_COHORT_OPTIONS[0];
   const activeDataCohortId = mode === 'parent' ? activePublicCohortId : activeTeacherCohortId;
   const activeDateContextCohortId = datesCohortId || activeDataCohortId || activeTeacherCohortId || NEXT_COHORT_ID;
@@ -1581,6 +1580,11 @@ export default function App() {
       return gradeMaps;
   }, [deferredStudentsForDerived, getTestDateID]);
 
+  const deferredStudentsById = useMemo(
+      () => Object.fromEntries(deferredStudentsForDerived.map((student) => [student.id, student])),
+      [deferredStudentsForDerived]
+  );
+
   const avgSettingsDateKeysDesc = useMemo(
       () => [...orderedWeekendIds].slice().reverse(),
       [orderedWeekendIds]
@@ -1588,6 +1592,26 @@ export default function App() {
 
   const shouldBuildBatchAnalytics =
       mode === 'teacher' && teacherViewMode === 'batch' && Boolean(batchDate);
+
+  const batchProbCandidateIds = useMemo(() => {
+      if (!shouldBuildBatchAnalytics) return [];
+      const weekendID = getTestDateID(batchDate);
+      if (!weekendID) return [];
+      return deferredStudentsForDerived
+          .filter((student) => {
+              const dateGrades = deferredStudentGradeMapsByStudentId[student.id]?.[weekendID];
+              if (!dateGrades) return false;
+              if ((dateGrades.class || 'A班') !== teacherClassFilter) return false;
+              return hasAnySubjectScore(dateGrades);
+          })
+          .map((student) => student.id);
+  }, [batchDate, deferredStudentGradeMapsByStudentId, deferredStudentsForDerived, getTestDateID, shouldBuildBatchAnalytics, teacherClassFilter]);
+
+  const selectedTeacherDateMeta = useMemo(() => {
+      const targetId = selectedBatchWeekendID || latestAvailableDate;
+      if (!targetId) return null;
+      return teacherDateCards.find((item) => item.weekendID === targetId) || teacherDateCards[0] || null;
+  }, [latestAvailableDate, selectedBatchWeekendID, teacherDateCards]);
 
   useEffect(() => {
       const storedAuth = localStorage.getItem('teacher_auth');
@@ -1617,15 +1641,19 @@ export default function App() {
   // --- OPTIMIZATION: Debounced + chunked probability calculation to keep UI responsive ---
   useEffect(() => {
       const shouldCompute = mode === 'teacher' && teacherViewMode === 'batch';
-      if (!shouldCompute || deferredStudentsForDerived.length === 0) return;
+      if (!shouldCompute) return;
+      if (!orderedWeekendIds.length || batchProbCandidateIds.length === 0) {
+          setAdmissionProbabilities({});
+          return;
+      }
 
       let rafId = null;
       let cancelled = false;
-      const debounceMs = deferredStudentsForDerived.length > 260 ? 680 : deferredStudentsForDerived.length > 150 ? 480 : 300;
+      const debounceMs = batchProbCandidateIds.length > 80 ? 220 : batchProbCandidateIds.length > 40 ? 160 : 90;
       const timer = setTimeout(() => {
           if (cancelled) return;
 
-          const context = buildProbabilityContext(deferredStudentsForDerived, deferredDatesForDerived, getTestDateID);
+          const context = buildProbabilityContext(deferredStudentsForDerived, orderedWeekendIds, (dateId) => dateId);
           const {
               scoresByDate,
               mathScoresByDate,
@@ -1636,10 +1664,12 @@ export default function App() {
           } = context;
 
           const studentGradeMaps = deferredStudentGradeMapsByStudentId;
-          const students = deferredStudentsForDerived;
+          const students = batchProbCandidateIds
+              .map((studentId) => deferredStudentsById[studentId])
+              .filter(Boolean);
           const probs = {};
           let index = 0;
-          const chunkSize = students.length > 320 ? 28 : students.length > 200 ? 44 : 72;
+          const chunkSize = students.length > 120 ? 18 : students.length > 60 ? 28 : 42;
 
           const processChunk = () => {
               if (cancelled) return;
@@ -1680,7 +1710,7 @@ export default function App() {
           clearTimeout(timer);
           if (rafId) cancelAnimationFrame(rafId);
       };
-  }, [deferredStudentsForDerived, deferredDatesForDerived, getTestDateID, mode, teacherViewMode, deferredStudentGradeMapsByStudentId]);
+  }, [batchProbCandidateIds, deferredStudentGradeMapsByStudentId, deferredStudentsById, deferredStudentsForDerived, mode, orderedWeekendIds, teacherViewMode]);
 
   useEffect(() => {
       if (mode !== 'parent' || !viewData?.chartData?.length) return;
@@ -4674,7 +4704,7 @@ export default function App() {
 
       const computedRows = rows.map((row) => {
           const prValue = globalPRByStudentAndWeekend[row.student.id]?.[weekendID] ?? '-';
-          const probValue = admissionProbabilities[row.student.id] || '-';
+          const probValue = admissionProbabilities[row.student.id] ?? '-';
           const prSortValue = prValue === '-' ? -1 : prValue;
           const probNumeric = probValue === '-' ? -1 : Number(probValue);
           const probSortValue = isNaN(probNumeric) ? -1 : probNumeric;
@@ -5950,72 +5980,74 @@ export default function App() {
                         2491212 權限：唯讀成績
                     </div>
                 )}
-                <div className={`mb-4 rounded-2xl border p-3.5 sm:p-4 backdrop-blur-md ${darkMode ? 'bg-[#020617]/35 border-white/10' : 'bg-white/82 border-white/85 ring-1 ring-white/55 shadow-[0_12px_30px_rgba(15,23,42,0.08)]'}`}>
-                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                        <div>
-                            <div className={`flex items-center gap-2 font-black tracking-wide ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>
-                                <GraduationCap className="w-4 h-4 text-emerald-500" />
-                                屆別切換
+                <div className={`mb-5 rounded-[1.7rem] border px-3.5 py-3.5 sm:px-4 sm:py-4 backdrop-blur-xl ${darkMode ? 'bg-[#020617]/35 border-white/10' : 'bg-white/82 border-white/85 ring-1 ring-white/55 shadow-[0_12px_30px_rgba(15,23,42,0.08)]'}`}>
+                    <div className="flex flex-col gap-3 xl:grid xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.45fr)] xl:items-center">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-black tracking-[0.18em] uppercase ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>
+                                <GraduationCap className="w-3.5 h-3.5 text-emerald-500" />
+                                Cohort
+                            </span>
+                            <div className={`inline-flex rounded-2xl p-1 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-slate-100/90 border-slate-200/80 shadow-inner'}`}>
+                                {cohortOptions.map((cohort) => {
+                                    const isTeacherSelected = cohort.id === activeTeacherCohortId;
+                                    return (
+                                        <button
+                                            key={cohort.id}
+                                            type="button"
+                                            onClick={() => handleSwitchTeacherCohort(cohort.id)}
+                                            className={`btn-sheen rounded-[0.95rem] px-3 py-1.5 text-[11px] font-black transition-all ${isTeacherSelected ? (darkMode ? 'bg-slate-800 text-emerald-100 shadow-md' : 'bg-white text-emerald-700 shadow-sm') : (darkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700')}`}
+                                        >
+                                            {cohort.label}
+                                        </button>
+                                    );
+                                })}
                             </div>
-                            <p className={`mt-1 text-[11px] font-semibold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                                老師端可切換新舊兩屆；家長端可跨屆查詢，若同名會優先最新一屆。
-                            </p>
-                        </div>
-                        <div className={`text-[11px] font-bold ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>
-                            家長端預設快取：<span className={darkMode ? 'text-emerald-200' : 'text-emerald-700'}>{activePublicCohort?.label || getCohortLabel(activePublicCohortId)}</span>
-                        </div>
-                    </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                        {cohortOptions.map((cohort) => {
-                            const isTeacherSelected = cohort.id === activeTeacherCohortId;
-                            const isPublicSelected = cohort.id === activePublicCohortId;
-                            return (
+                            <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold ${darkMode ? 'bg-sky-500/12 text-sky-200' : 'bg-sky-50 text-sky-700'}`}>
+                                家長預設 {activePublicCohort?.label || getCohortLabel(activePublicCohortId)}
+                            </span>
+                            {activeTeacherCohortId !== activePublicCohortId && (
                                 <button
-                                  key={cohort.id}
                                   type="button"
-                                  onClick={() => handleSwitchTeacherCohort(cohort.id)}
-                                  className={`btn-sheen rounded-2xl border px-3 py-2 text-left transition-all ${isTeacherSelected ? (darkMode ? 'bg-emerald-500/12 border-emerald-300/35 ring-1 ring-emerald-300/25' : 'bg-emerald-50 border-emerald-300/70 shadow-sm shadow-emerald-200/40') : (darkMode ? 'bg-slate-900/45 border-white/10 hover:border-emerald-200/20' : 'bg-white border-slate-200 hover:border-emerald-200')}`}
+                                  onClick={() => handleSetPublicCohort(activeTeacherCohortId)}
+                                  disabled={publicCohortSaving || cohortRegistryLoading}
+                                  className={`btn-sheen rounded-full px-2.5 py-1 text-[10px] font-bold transition-colors ${darkMode ? 'bg-slate-800 text-slate-100 border border-white/10 hover:bg-slate-700' : 'bg-slate-800 text-white hover:bg-slate-700 shadow-sm'} disabled:opacity-50 disabled:cursor-not-allowed`}
                                 >
-                                    <div className={`text-xs font-black ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>{cohort.label}</div>
-                                    <div className="mt-1 flex items-center gap-1.5">
-                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isTeacherSelected ? (darkMode ? 'bg-emerald-500/15 text-emerald-100' : 'bg-emerald-100 text-emerald-700') : (darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-500')}`}>
-                                            {isTeacherSelected ? '目前編輯' : '切換到此屆'}
-                                        </span>
-                                        {isPublicSelected && (
-                                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${darkMode ? 'bg-sky-500/15 text-sky-100' : 'bg-sky-100 text-sky-700'}`}>
-                                                家長端預設
-                                            </span>
-                                        )}
-                                    </div>
+                                  {publicCohortSaving ? '切換中...' : '同步為家長預設'}
                                 </button>
-                            );
-                        })}
-                    </div>
-                    {activeTeacherCohortId !== activePublicCohortId && (
-                        <div className="mt-3 flex justify-end">
-                            <button
-                              type="button"
-                              onClick={() => handleSetPublicCohort(activeTeacherCohortId)}
-                              disabled={publicCohortSaving || cohortRegistryLoading}
-                              className={`btn-sheen rounded-xl px-3 py-2 text-[11px] font-bold transition-colors ${darkMode ? 'bg-slate-800 text-slate-100 border border-white/10 hover:bg-slate-700' : 'bg-slate-800 text-white hover:bg-slate-700 shadow-sm'} disabled:opacity-50 disabled:cursor-not-allowed`}
+                            )}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+                            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-black tracking-[0.18em] uppercase ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>
+                                <Calendar className="w-3.5 h-3.5 text-blue-500" />
+                                Exam
+                            </span>
+                            <select
+                                className={`min-w-[132px] rounded-xl px-3 py-2 text-[11px] font-bold outline-none transition-colors border shadow-sm ${darkMode ? 'bg-[#020617]/55 border-white/10 text-slate-200' : 'bg-white border-slate-200 text-slate-700'}`}
+                                value={selectedBatchWeekendID || latestAvailableDate || ''}
+                                disabled={!teacherDateCards.length}
+                                onChange={(e) => {
+                                    const nextValue = e.target.value;
+                                    if (!nextValue) return;
+                                    startTransition(() => {
+                                        setBatchDate(nextValue);
+                                    });
+                                }}
                             >
-                              {publicCohortSaving ? '切換中...' : `設為家長端預設：${activeTeacherCohort?.label || getCohortLabel(activeTeacherCohortId)}`}
-                            </button>
-                        </div>
-                    )}
-                </div>
-                <div className={`mb-6 rounded-2xl border p-3.5 sm:p-4 backdrop-blur-md ${darkMode ? 'bg-[#020617]/35 border-white/10' : 'bg-white/80 border-white/85 ring-1 ring-white/55 shadow-[0_12px_30px_rgba(15,23,42,0.08)]'}`}>
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                            <div className={`flex items-center gap-2 font-black tracking-wide ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>
-                                <Calendar className="w-4 h-4 text-blue-500" />
-                                管理日期
-                            </div>
-                            <p className={`mt-1 text-[11px] font-semibold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                                目前共 {orderedWeekendIds.length} 個考次
-                            </p>
-                        </div>
-                        <div className="flex gap-2 items-center flex-wrap justify-end">
+                                {!teacherDateCards.length && <option value="">尚無考次</option>}
+                                {teacherDateCards.map((item) => (
+                                    <option key={item.weekendID} value={item.weekendID}>
+                                        {item.label}
+                                    </option>
+                                ))}
+                            </select>
+                            {selectedTeacherDateMeta && (
+                                <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold ${selectedTeacherDateMeta.phaseId === 'p1' ? (darkMode ? 'bg-cyan-500/12 text-cyan-200' : 'bg-cyan-50 text-cyan-700') : selectedTeacherDateMeta.phaseId === 'mock' ? (darkMode ? 'bg-violet-500/12 text-violet-200' : 'bg-violet-50 text-violet-700') : (darkMode ? 'bg-emerald-500/12 text-emerald-200' : 'bg-emerald-50 text-emerald-700')}`}>
+                                    {selectedTeacherDateMeta.phaseLabel}
+                                </span>
+                            )}
+                            <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
+                                {orderedWeekendIds.length} 考次
+                            </span>
                             {teacherViewMode === 'batch' && latestAvailableDate && selectedBatchWeekendID !== latestAvailableDate && (
                                 <button
                                     type="button"
@@ -6024,66 +6056,26 @@ export default function App() {
                                             setBatchDate(latestAvailableDate);
                                         });
                                     }}
-                                    className={`btn-sheen px-3 py-2 rounded-xl text-[11px] font-bold transition-colors border shadow-sm ${darkMode ? 'bg-slate-800 text-slate-200 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+                                    className={`btn-sheen rounded-full px-2.5 py-1 text-[10px] font-bold transition-colors border ${darkMode ? 'bg-slate-800 text-slate-200 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 shadow-sm'}`}
                                 >
-                                    切到最新
+                                    最新
                                 </button>
                             )}
-                            <input type="text" placeholder="MM/DD" className={`w-24 p-2.5 rounded-xl text-xs text-center font-bold outline-none transition-colors tracking-widest border shadow-sm ${darkMode ? 'bg-[#020617]/50 border-white/10 text-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20' : 'bg-white border-slate-200 text-slate-700 focus:border-blue-400'}`} value={newDateInput} onChange={e=>setNewDateInput(e.target.value)} />
-                            <button onClick={addDate} className={`px-3.5 py-2.5 rounded-xl transition-colors shadow-sm border ${darkMode ? 'bg-slate-800 text-white hover:bg-slate-700 border-white/10' : 'bg-slate-800 text-white hover:bg-slate-700 border-slate-800'}`}>
-                                <Plus className="w-4 h-4"/>
-                            </button>
-                        </div>
-                    </div>
-
-                    <div className={`mt-3.5 rounded-2xl border p-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-white/85 border-slate-200/80'}`}>
-                        <div className="overflow-x-auto pb-1 snap-x snap-mandatory scroll-smooth [scrollbar-width:none] [-ms-overflow-style:none]">
-                            <div className={`inline-flex gap-2.5 min-w-full ${prefersReducedMotion ? '' : 'list-fade-in'}`}>
-                                {teacherDateCards.map((item) => {
-                                    const { weekendID, label, phaseId, phaseLabel, isLatest, isSelected } = item;
-                                    const phaseTagClass = phaseId === 'p1'
-                                        ? (darkMode ? 'bg-cyan-500/15 text-cyan-200 border-cyan-300/25' : 'bg-cyan-50 text-cyan-700 border-cyan-200')
-                                        : phaseId === 'mock'
-                                            ? (darkMode ? 'bg-violet-500/15 text-violet-200 border-violet-300/25' : 'bg-violet-50 text-violet-700 border-violet-200')
-                                            : (darkMode ? 'bg-emerald-500/15 text-emerald-200 border-emerald-300/25' : 'bg-emerald-50 text-emerald-700 border-emerald-200');
-
-                                    return (
-                                        <button
-                                            key={weekendID}
-                                            type="button"
-                                            onClick={() => {
-                                                if (teacherViewMode === 'batch' && weekendID !== selectedBatchWeekendID) {
-                                                    startTransition(() => {
-                                                        setBatchDate(weekendID);
-                                                    });
-                                                }
-                                            }}
-                                            className={`btn-sheen snap-start shrink-0 text-left min-w-[126px] rounded-2xl border px-3 py-2.5 transition-all will-change-transform ${darkMode ? 'bg-slate-800/88 border-white/10 hover:border-emerald-300/30' : 'bg-white border-slate-200/80 shadow-[0_8px_18px_rgba(15,23,42,0.06)] hover:border-emerald-200'} ${isSelected ? (darkMode ? 'ring-1 ring-emerald-300/40 border-emerald-300/40 scale-[1.01]' : 'ring-2 ring-emerald-100 border-emerald-300/60 scale-[1.01]') : ''}`}
-                                        >
-                                            <div className="flex items-start justify-between gap-2">
-                                                <span className={`text-[9px] font-black px-2 py-0.5 rounded-full border tracking-wide ${phaseTagClass}`}>{phaseLabel}</span>
-                                                {isLatest && (
-                                                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${darkMode ? 'bg-blue-500/20 text-blue-200' : 'bg-blue-100 text-blue-700'}`}>最新</span>
-                                                )}
-                                            </div>
-                                            <div className={`mt-2 text-xs font-black tracking-wide ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>
-                                                {label}
-                                            </div>
-                                            <div className="mt-2 flex justify-end">
-                                                {canDeleteDates ? (
-                                                    <button onClick={(e) => { e.stopPropagation(); handleDeleteDate(weekendID); }} className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg transition-colors ${darkMode ? 'text-rose-300 hover:text-rose-200 bg-rose-500/10' : 'text-rose-600 hover:text-rose-700 bg-rose-50'}`} title="危險操作：刪除日期">
-                                                        <X className="w-3 h-3"/> 刪除
-                                                    </button>
-                                                ) : (
-                                                    <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg ${darkMode ? 'text-slate-400 bg-slate-700/70' : 'text-slate-500 bg-slate-100'}`} title="2491212 權限不可刪除日期">
-                                                        <Lock className="w-3 h-3"/> 鎖定
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </button>
-                                    );
-                                })}
+                            <div className={`inline-flex items-center gap-1.5 rounded-2xl px-2 py-1.5 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-white/92 border-slate-200/80 shadow-sm'}`}>
+                                <input type="text" placeholder="MM/DD" className={`w-16 bg-transparent text-center text-[11px] font-black outline-none tracking-widest ${darkMode ? 'text-slate-200 placeholder:text-slate-500' : 'text-slate-700 placeholder:text-slate-400'}`} value={newDateInput} onChange={e=>setNewDateInput(e.target.value)} />
+                                <button onClick={addDate} className={`inline-flex items-center justify-center w-7 h-7 rounded-xl transition-colors ${darkMode ? 'bg-slate-800 text-white hover:bg-slate-700' : 'bg-slate-800 text-white hover:bg-slate-700'}`}>
+                                    <Plus className="w-3.5 h-3.5"/>
+                                </button>
                             </div>
+                            {selectedTeacherDateMeta && (canDeleteDates ? (
+                                <button onClick={() => handleDeleteDate(selectedTeacherDateMeta.weekendID)} className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold transition-colors ${darkMode ? 'text-rose-300 hover:text-rose-200 bg-rose-500/10' : 'text-rose-600 hover:text-rose-700 bg-rose-50'}`} title="危險操作：刪除目前所選考次">
+                                    <X className="w-3 h-3"/> 刪除所選
+                                </button>
+                            ) : (
+                                <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold ${darkMode ? 'text-slate-400 bg-slate-700/70' : 'text-slate-500 bg-slate-100'}`} title="2491212 權限不可刪除日期">
+                                    <Lock className="w-3 h-3"/> 刪除鎖定
+                                </span>
+                            ))}
                         </div>
                     </div>
                 </div>
@@ -6152,25 +6144,21 @@ export default function App() {
                     <div className="pt-2 space-y-4">
                         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
                             <div className="flex items-center gap-2 flex-wrap">
-                                <span className="text-xs font-bold text-slate-500">日期</span>
-                                <select
-                                    className={`border rounded-lg px-2 py-1.5 text-xs font-bold outline-none shadow-sm ${darkMode ? 'bg-[#020617]/50 border-white/10 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}
-                                    value={selectedBatchWeekendID || ''}
-                                    onChange={(e) => {
-                                        const nextValue = e.target.value;
-                                        startTransition(() => {
-                                            setBatchDate(nextValue);
-                                        });
-                                    }}
-                                >
-                                    {teacherDateCards.map((item) => (
-                                        <option key={item.weekendID} value={item.weekendID}>
-                                            {item.label}
-                                        </option>
-                                    ))}
-                                </select>
+                                {selectedTeacherDateMeta && (
+                                    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold ${darkMode ? 'bg-slate-800 text-slate-200' : 'bg-white text-slate-700 border border-slate-200 shadow-sm'}`}>
+                                        {selectedTeacherDateMeta.label}
+                                    </span>
+                                )}
+                                {selectedTeacherDateMeta && (
+                                    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold ${selectedTeacherDateMeta.phaseId === 'p1' ? (darkMode ? 'bg-cyan-500/12 text-cyan-200' : 'bg-cyan-50 text-cyan-700') : selectedTeacherDateMeta.phaseId === 'mock' ? (darkMode ? 'bg-violet-500/12 text-violet-200' : 'bg-violet-50 text-violet-700') : (darkMode ? 'bg-emerald-500/12 text-emerald-200' : 'bg-emerald-50 text-emerald-700')}`}>
+                                        {selectedTeacherDateMeta.phaseLabel}
+                                    </span>
+                                )}
                                 <span className={`text-[11px] font-bold px-2 py-1 rounded-full ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
                                     共 {batchRowsForDisplay.length} 筆
+                                </span>
+                                <span className={`text-[11px] font-bold px-2 py-1 rounded-full ${Object.keys(admissionProbabilities).length ? (darkMode ? 'bg-emerald-500/12 text-emerald-200' : 'bg-emerald-50 text-emerald-700') : (darkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-500')}`}>
+                                    {Object.keys(admissionProbabilities).length ? `機率就緒 ${Object.keys(admissionProbabilities).length}` : '機率計算中'}
                                 </span>
                             </div>
                             <div className="flex gap-2 flex-wrap items-center">

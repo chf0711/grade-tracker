@@ -2149,6 +2149,207 @@ export default function App() {
       }
   }, [activeTeacherCohortId, appendOperationLog, getCohortCacheKey, getCohortSettingsDocRef]);
 
+  const normalizeGrades = useCallback((grades, options = {}) => {
+      const scopedDatePool = sanitizeDateList(options.datePool || availableDates);
+      const resolveDateId = typeof options.getDateID === 'function'
+          ? options.getDateID
+          : (dateStr) => getWeekendID(dateStr, scopedDatePool);
+      const withMeta = Boolean(options.withMeta);
+      if (!grades || typeof grades !== 'object') {
+          return withMeta ? { normalized: {}, removedInvalidDates: 0, changed: false } : {};
+      }
+
+      const normalized = {};
+      let removedInvalidDates = 0;
+      let changed = false;
+
+      Object.keys(grades).forEach(date => {
+          const normalizedDate = normalizeDateToken(date);
+          if (!normalizedDate) {
+              removedInvalidDates += 1;
+              changed = true;
+              return;
+          }
+
+          const g = grades[date];
+          let normalizedG;
+          if (Array.isArray(g)) {
+              normalizedG = { math: g[0]||0, eng: g[1]||0, chi: g[2]||0, total: (g[0]||0)+(g[1]||0)+(g[2]||0), class: 'A班' };
+              changed = true;
+          } else if (g && typeof g === 'object') {
+              normalizedG = { ...g };
+          } else {
+              normalizedG = { chi: '', eng: '', math: '', total: '', class: 'A班' };
+              changed = true;
+          }
+
+          if (!normalizedG.class) {
+              normalizedG.class = 'A班';
+              changed = true;
+          }
+          if (date !== normalizedDate) changed = true;
+          if (normalized[normalizedDate]) changed = true;
+          normalized[normalizedDate] = normalizedG;
+      });
+
+      const weekendEntries = buildWeekendGradeEntryMap(normalized, resolveDateId);
+      const deduped = {};
+      Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
+          deduped[weekendID] = { ...entry.grade };
+          if (entry.sourceDate !== weekendID) changed = true;
+      });
+      if (Object.keys(deduped).length !== Object.keys(normalized).length) changed = true;
+
+      if (withMeta) {
+          return { normalized: deduped, removedInvalidDates, changed };
+      }
+      return deduped;
+  }, [availableDates]);
+
+  const loadAllStudents = useCallback(async (options = {}) => {
+      const { forceRemote = false } = options;
+      const cohortId = String(options?.cohortId || activeTeacherCohortId || LEGACY_COHORT_ID);
+      const datePool = sanitizeDateList(options?.datePool || (cohortId === datesCohortId ? availableDates : DEFAULT_EXAM_STARTS));
+      const getDateIDForCohort = (dateStr) => getWeekendID(dateStr, datePool);
+      if (
+          !forceRemote
+          && studentsLoadPromiseRef.current?.cohortId === cohortId
+          && studentsLoadPromiseRef.current?.promise
+      ) {
+          return studentsLoadPromiseRef.current.promise;
+      }
+
+      const runner = async () => {
+      setLoading(true);
+      let loadingReleased = false;
+      const releaseLoading = () => {
+          if (loadingReleased) return;
+          loadingReleased = true;
+          setLoading(false);
+      };
+      try {
+          const cacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.students, cohortId);
+          const sessionKey = getStudentSessionKey(cohortId);
+          const cachedStudents = readLocalCache(cacheKey, STUDENT_CACHE_TTL_MS);
+          const hasSessionSynced =
+              typeof window !== 'undefined'
+              && sessionStorage.getItem(sessionKey) === '1';
+          if (!forceRemote && Array.isArray(cachedStudents)) {
+              startTransition(() => {
+                  setAllStudentsData(cachedStudents);
+                  setTeacherStudentsCohortId(cohortId);
+                  if (cohortId === activePublicCohortId) {
+                      setCachedClassData(cachedStudents);
+                      setPublicStudentsCohortId(cohortId);
+                  }
+              });
+              batchDirtyStudentIdsRef.current = new Set();
+              setIsBatchDirty(false);
+              releaseLoading();
+              if (hasSessionSynced || !db) {
+                  return cachedStudents;
+              }
+          }
+
+          let studentsMap = {};
+          RAW_STUDENT_RECORDS.forEach(s => {
+              studentsMap[s.id] = {
+                  ...s,
+                  grades: normalizeGrades(s.grades, { datePool, getDateID: getDateIDForCohort })
+              };
+          });
+          let cleanedInvalidDateCount = 0;
+          const cleanupPayloads = [];
+          if (db) {
+              const studentsCollectionRef = getCohortStudentsCollectionRef(cohortId);
+              const querySnapshot = await getDocs(studentsCollectionRef);
+              querySnapshot.forEach((studentDoc) => {
+                  const data = studentDoc.data();
+                  const normalizedResult = normalizeGrades(data.grades, { withMeta: true, datePool, getDateID: getDateIDForCohort });
+                  const sanitizedData = { ...data, grades: normalizedResult.normalized };
+
+                  if (normalizedResult.changed && data.id) {
+                      cleanedInvalidDateCount += normalizedResult.removedInvalidDates;
+                      cleanupPayloads.push({
+                          id: data.id,
+                          payload: { ...sanitizedData, lastUpdated: new Date().toISOString() }
+                      });
+                  }
+
+                  if (studentsMap[data.id]) {
+                      studentsMap[data.id] = {
+                          ...studentsMap[data.id],
+                          ...sanitizedData,
+                          grades: { ...studentsMap[data.id].grades, ...sanitizedData.grades }
+                      };
+                  } else {
+                      studentsMap[data.id] = sanitizedData;
+                  }
+              });
+          }
+          const sortedStudents = Object.values(studentsMap).sort((a,b) => a.id.localeCompare(b.id));
+          startTransition(() => {
+              setAllStudentsData(sortedStudents);
+              setTeacherStudentsCohortId(cohortId);
+              if (cohortId === activePublicCohortId) {
+                  setCachedClassData(sortedStudents);
+                  setPublicStudentsCohortId(cohortId);
+              }
+          });
+          writeLocalCache(cacheKey, sortedStudents);
+          if (typeof window !== 'undefined') {
+              sessionStorage.setItem(sessionKey, '1');
+          }
+          batchDirtyStudentIdsRef.current = new Set();
+          setIsBatchDirty(false);
+          releaseLoading();
+
+          if (db && cleanupPayloads.length > 0) {
+              void Promise.all(
+                  cleanupPayloads.map((item) =>
+                      setDoc(getCohortStudentDocRef(cohortId, item.id), item.payload)
+                  )
+              ).then(() => {
+                  setStatusMsg(
+                      cleanedInvalidDateCount > 0
+                          ? `已自動刪除 ${cleanedInvalidDateCount} 筆不合理日期資料`
+                          : `已自動整理 ${cleanupPayloads.length} 筆重複考次資料`
+                  );
+                  setTimeout(() => setStatusMsg(''), 2400);
+              }).catch((err) => {
+                  console.error('Cleanup invalid student dates error:', err);
+              });
+          }
+          return sortedStudents;
+      } catch (e) { console.error("Load error:", e); }
+      finally {
+          releaseLoading();
+      }
+      return [];
+      };
+
+      const promise = runner().finally(() => {
+          if (
+              studentsLoadPromiseRef.current?.cohortId === cohortId
+              && studentsLoadPromiseRef.current?.promise === promise
+          ) {
+              studentsLoadPromiseRef.current = null;
+          }
+      });
+      studentsLoadPromiseRef.current = { cohortId, promise };
+      return promise;
+  }, [
+      activePublicCohortId,
+      activeTeacherCohortId,
+      availableDates,
+      datesCohortId,
+      getCohortCacheKey,
+      getCohortStudentDocRef,
+      getCohortStudentsCollectionRef,
+      getStudentSessionKey,
+      normalizeGrades
+  ]);
+
   useEffect(() => {
       if (!user || mode !== 'teacher' || !isAuthenticated) return;
       let cancelled = false;
@@ -2747,150 +2948,6 @@ export default function App() {
       }
   }, [activePublicCohortId, getCohortLabel, getCohortRegistryDocRef]);
 
-  const loadAllStudents = useCallback(async (options = {}) => {
-      const { forceRemote = false } = options;
-      const cohortId = String(options?.cohortId || activeTeacherCohortId || LEGACY_COHORT_ID);
-      const datePool = sanitizeDateList(options?.datePool || (cohortId === datesCohortId ? availableDates : DEFAULT_EXAM_STARTS));
-      const getDateIDForCohort = (dateStr) => getWeekendID(dateStr, datePool);
-      if (
-          !forceRemote
-          && studentsLoadPromiseRef.current?.cohortId === cohortId
-          && studentsLoadPromiseRef.current?.promise
-      ) {
-          return studentsLoadPromiseRef.current.promise;
-      }
-
-      const runner = async () => {
-      setLoading(true);
-      let loadingReleased = false;
-      const releaseLoading = () => {
-          if (loadingReleased) return;
-          loadingReleased = true;
-          setLoading(false);
-      };
-      try {
-          const cacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.students, cohortId);
-          const sessionKey = getStudentSessionKey(cohortId);
-          const cachedStudents = readLocalCache(cacheKey, STUDENT_CACHE_TTL_MS);
-          const hasSessionSynced =
-              typeof window !== 'undefined'
-              && sessionStorage.getItem(sessionKey) === '1';
-          if (!forceRemote && Array.isArray(cachedStudents)) {
-              startTransition(() => {
-                  setAllStudentsData(cachedStudents);
-                  setTeacherStudentsCohortId(cohortId);
-                  if (cohortId === activePublicCohortId) {
-                      setCachedClassData(cachedStudents);
-                      setPublicStudentsCohortId(cohortId);
-                  }
-              });
-              batchDirtyStudentIdsRef.current = new Set();
-              setIsBatchDirty(false);
-              releaseLoading();
-              if (hasSessionSynced || !db) {
-                  return cachedStudents;
-              }
-          }
-
-          let studentsMap = {};
-          RAW_STUDENT_RECORDS.forEach(s => {
-              studentsMap[s.id] = {
-                  ...s,
-                  grades: normalizeGrades(s.grades, { datePool, getDateID: getDateIDForCohort })
-              };
-          });
-          let cleanedInvalidDateCount = 0;
-          const cleanupPayloads = [];
-          if (db) {
-              const studentsCollectionRef = getCohortStudentsCollectionRef(cohortId);
-              const querySnapshot = await getDocs(studentsCollectionRef);
-              querySnapshot.forEach((studentDoc) => {
-                  const data = studentDoc.data();
-                  const normalizedResult = normalizeGrades(data.grades, { withMeta: true, datePool, getDateID: getDateIDForCohort });
-                  const sanitizedData = { ...data, grades: normalizedResult.normalized };
-
-                  if (normalizedResult.changed && data.id) {
-                      cleanedInvalidDateCount += normalizedResult.removedInvalidDates;
-                      cleanupPayloads.push({
-                          id: data.id,
-                          payload: { ...sanitizedData, lastUpdated: new Date().toISOString() }
-                      });
-                  }
-
-                  if (studentsMap[data.id]) {
-                      studentsMap[data.id] = {
-                          ...studentsMap[data.id],
-                          ...sanitizedData,
-                          grades: { ...studentsMap[data.id].grades, ...sanitizedData.grades }
-                      };
-                  } else {
-                      studentsMap[data.id] = sanitizedData;
-                  }
-              });
-          }
-          const sortedStudents = Object.values(studentsMap).sort((a,b) => a.id.localeCompare(b.id));
-          startTransition(() => {
-              setAllStudentsData(sortedStudents);
-              setTeacherStudentsCohortId(cohortId);
-              if (cohortId === activePublicCohortId) {
-                  setCachedClassData(sortedStudents);
-                  setPublicStudentsCohortId(cohortId);
-              }
-          });
-          writeLocalCache(cacheKey, sortedStudents);
-          if (typeof window !== 'undefined') {
-              sessionStorage.setItem(sessionKey, '1');
-          }
-          batchDirtyStudentIdsRef.current = new Set();
-          setIsBatchDirty(false);
-          releaseLoading();
-
-          if (db && cleanupPayloads.length > 0) {
-              void Promise.all(
-                  cleanupPayloads.map((item) =>
-                      setDoc(getCohortStudentDocRef(cohortId, item.id), item.payload)
-                  )
-              ).then(() => {
-                  setStatusMsg(
-                      cleanedInvalidDateCount > 0
-                          ? `已自動刪除 ${cleanedInvalidDateCount} 筆不合理日期資料`
-                          : `已自動整理 ${cleanupPayloads.length} 筆重複考次資料`
-                  );
-                  setTimeout(() => setStatusMsg(''), 2400);
-              }).catch((err) => {
-                  console.error('Cleanup invalid student dates error:', err);
-              });
-          }
-          return sortedStudents;
-      } catch (e) { console.error("Load error:", e); }
-      finally {
-          releaseLoading();
-      }
-      return [];
-      };
-
-      const promise = runner().finally(() => {
-          if (
-              studentsLoadPromiseRef.current?.cohortId === cohortId
-              && studentsLoadPromiseRef.current?.promise === promise
-          ) {
-              studentsLoadPromiseRef.current = null;
-          }
-      });
-      studentsLoadPromiseRef.current = { cohortId, promise };
-      return promise;
-  }, [
-      activePublicCohortId,
-      activeTeacherCohortId,
-      availableDates,
-      datesCohortId,
-      getCohortCacheKey,
-      getCohortStudentDocRef,
-      getCohortStudentsCollectionRef,
-      getStudentSessionKey,
-      normalizeGrades
-  ]);
-
   useEffect(() => {
       if (mode !== 'parent' || !user || !db || (publicStudentsCohortId === activePublicCohortId && cachedClassData.length > 0)) return;
       let cancelled = false;
@@ -2945,63 +3002,6 @@ export default function App() {
   // normalizeGrades 依賴 getTestDateID，這裡保持最小觸發條件避免重複預載。
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePublicCohortId, availableDates, cachedClassData.length, datesCohortId, loadDates, mode, normalizeGrades, publicStudentsCohortId, user]);
-
-  const normalizeGrades = useCallback((grades, options = {}) => {
-      const scopedDatePool = sanitizeDateList(options.datePool || availableDates);
-      const resolveDateId = typeof options.getDateID === 'function'
-          ? options.getDateID
-          : (dateStr) => getWeekendID(dateStr, scopedDatePool);
-      const withMeta = Boolean(options.withMeta);
-      if (!grades || typeof grades !== 'object') {
-          return withMeta ? { normalized: {}, removedInvalidDates: 0, changed: false } : {};
-      }
-
-      const normalized = {};
-      let removedInvalidDates = 0;
-      let changed = false;
-
-      Object.keys(grades).forEach(date => {
-          const normalizedDate = normalizeDateToken(date);
-          if (!normalizedDate) {
-              removedInvalidDates += 1;
-              changed = true;
-              return;
-          }
-
-          const g = grades[date];
-          let normalizedG;
-          if (Array.isArray(g)) {
-              normalizedG = { math: g[0]||0, eng: g[1]||0, chi: g[2]||0, total: (g[0]||0)+(g[1]||0)+(g[2]||0), class: 'A班' };
-              changed = true;
-          } else if (g && typeof g === 'object') {
-              normalizedG = { ...g };
-          } else {
-              normalizedG = { chi: '', eng: '', math: '', total: '', class: 'A班' };
-              changed = true;
-          }
-
-          if (!normalizedG.class) {
-              normalizedG.class = 'A班';
-              changed = true;
-          }
-          if (date !== normalizedDate) changed = true;
-          if (normalized[normalizedDate]) changed = true;
-          normalized[normalizedDate] = normalizedG;
-      });
-
-      const weekendEntries = buildWeekendGradeEntryMap(normalized, resolveDateId);
-      const deduped = {};
-      Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
-          deduped[weekendID] = { ...entry.grade };
-          if (entry.sourceDate !== weekendID) changed = true;
-      });
-      if (Object.keys(deduped).length !== Object.keys(normalized).length) changed = true;
-
-      if (withMeta) {
-          return { normalized: deduped, removedInvalidDates, changed };
-      }
-      return deduped;
-  }, [availableDates]);
 
   const persistLocalSnapshots = useCallback((nextSnapshots) => {
       const sanitized = sanitizeSnapshotList(nextSnapshots);

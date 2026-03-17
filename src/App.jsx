@@ -1300,6 +1300,7 @@ export default function App() {
   const pendingImportPayloadRef = useRef(null);
   const importFileInputRef = useRef(null);
   const legacyImportUnlockUntilRef = useRef(0);
+  const teacherCohortPreseedRef = useRef('');
   const currentBatchGradeInfoRef = useRef({});
   const batchRowsForDisplayRef = useRef([]);
   const parentQueryPerfRef = useRef({
@@ -2527,7 +2528,7 @@ export default function App() {
   }, [activeDataCohortId, activeTeacherCohortId, availableDates, datesCohortId, resolveScopedDateId]);
 
   const loadAllStudents = useCallback(async (options = {}) => {
-      const { forceRemote = false } = options;
+      const { forceRemote = false, silent = false } = options;
       const cohortId = String(options?.cohortId || activeTeacherCohortId || LEGACY_COHORT_ID);
       const fallbackDates = getDefaultDatesForCohort(cohortId, cohortOptions);
       const datePool = sanitizeDateList(options?.datePool || (cohortId === datesCohortId ? availableDates : fallbackDates));
@@ -2541,12 +2542,12 @@ export default function App() {
       }
 
       const runner = async () => {
-      setLoading(true);
+      if (!silent) setLoading(true);
       let loadingReleased = false;
       const releaseLoading = () => {
           if (loadingReleased) return;
           loadingReleased = true;
-          setLoading(false);
+          if (!silent) setLoading(false);
       };
       const syncDatesFromStudents = (students) => {
           const derivedDates = deriveDatePoolFromStudents(students);
@@ -2688,6 +2689,80 @@ export default function App() {
       resolveScopedDateId
   ]);
 
+  const applyTeacherCohortCachedState = useCallback((cohortId) => {
+      const normalizedId = String(cohortId || LEGACY_COHORT_ID);
+      const nextDates = sanitizeDateList(
+          readLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, normalizedId)) || []
+      );
+      const cachedStudents = readLocalCache(
+          getCohortCacheKey(LOCAL_CACHE_KEYS.students, normalizedId),
+          STUDENT_CACHE_TTL_MS
+      );
+      const cachedClassAverages = readLocalCache(
+          getCohortCacheKey(LOCAL_CACHE_KEYS.classAverages, normalizedId)
+      );
+      const cachedMessage = readLocalCache(
+          getCohortCacheKey(LOCAL_CACHE_KEYS.teacherMessage, normalizedId),
+          TEACHER_MESSAGE_CACHE_TTL_MS
+      );
+      const cachedStats = readLocalCache(
+          getCohortCacheKey(LOCAL_CACHE_KEYS.queryStats, normalizedId),
+          QUERY_STATS_CACHE_TTL_MS
+      );
+      const cachedLastResetAt = String(cachedStats?.lastResetAt || '');
+      const cachedStatsAreFresh = cachedLastResetAt && !shouldResetQueryStats(cachedLastResetAt);
+
+      if (Array.isArray(cachedStudents) && cachedStudents.length > 0) {
+          setAllStudentsData(cachedStudents);
+          setTeacherStudentsCohortId(normalizedId);
+      }
+
+      if (cachedStatsAreFresh) {
+          setQueryStatsById((cachedStats.counts && typeof cachedStats.counts === 'object') ? cachedStats.counts : {});
+          setQueryEvents(sanitizeQueryEvents(cachedStats.events, cachedLastResetAt));
+          setQueryStatsLastResetAt(cachedLastResetAt);
+          setQueryStatsCohortId(normalizedId);
+      } else {
+          setQueryStatsById({});
+          setQueryEvents([]);
+          setQueryStatsLastResetAt('');
+          setQueryStatsCohortId('');
+      }
+
+      if (cachedMessage && typeof cachedMessage === 'object') {
+          const nextGlobalMessage = String(cachedMessage?.globalMessage ?? cachedMessage?.message ?? '').trim();
+          const nextByStudentMessages = normalizeTeacherStudentMessages(cachedMessage?.byStudent);
+          setTeacherGlobalMessage(nextGlobalMessage);
+          setTeacherGlobalMessageDraft(nextGlobalMessage);
+          setTeacherStudentMessages(nextByStudentMessages);
+          setTeacherStudentMessageDrafts(nextByStudentMessages);
+          setTeacherMessageCohortId(normalizedId);
+      } else {
+          setTeacherGlobalMessage('');
+          setTeacherGlobalMessageDraft('');
+          setTeacherStudentMessages({});
+          setTeacherStudentMessageDrafts({});
+          setTeacherMessageCohortId('');
+      }
+
+      setCurrentStudentId(null);
+      setStudentName('');
+      setGrades({});
+      setBatchDate((prev) => nextDates[nextDates.length - 1] || prev || '');
+      setAvailableDates(nextDates.length ? nextDates : getDefaultDatesForCohort(normalizedId, cohortOptions));
+      setDatesCohortId(nextDates.length ? normalizedId : '');
+
+      if (cachedClassAverages && typeof cachedClassAverages === 'object') {
+          setClassAverages(cachedClassAverages);
+          setClassAveragesCohortId(normalizedId);
+      } else {
+          setClassAverages({});
+          setClassAveragesCohortId('');
+      }
+
+      resetBatchDraftState();
+  }, [cohortOptions, getCohortCacheKey, resetBatchDraftState, shouldResetQueryStats]);
+
   useEffect(() => {
       if (typeof document === 'undefined') return;
       const handleVisibilityChange = () => {
@@ -2725,72 +2800,12 @@ export default function App() {
           clearTimeout(queryFlushTimerRef.current);
           queryFlushTimerRef.current = null;
       }
-      const nextDates = sanitizeDateList(
-          readLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, activeTeacherCohortId)) || []
-      );
-      const cachedStudents = readLocalCache(
-          getCohortCacheKey(LOCAL_CACHE_KEYS.students, activeTeacherCohortId),
-          STUDENT_CACHE_TTL_MS
-      );
-      const cachedClassAverages = readLocalCache(
-          getCohortCacheKey(LOCAL_CACHE_KEYS.classAverages, activeTeacherCohortId)
-      );
-      const cachedMessage = readLocalCache(
-          getCohortCacheKey(LOCAL_CACHE_KEYS.teacherMessage, activeTeacherCohortId),
-          TEACHER_MESSAGE_CACHE_TTL_MS
-      );
-      const cachedStats = readLocalCache(
-          getCohortCacheKey(LOCAL_CACHE_KEYS.queryStats, activeTeacherCohortId),
-          QUERY_STATS_CACHE_TTL_MS
-      );
-      const cachedLastResetAt = String(cachedStats?.lastResetAt || '');
-      const cachedStatsAreFresh = cachedLastResetAt && !shouldResetQueryStats(cachedLastResetAt);
-
-      if (Array.isArray(cachedStudents) && cachedStudents.length > 0) {
-          setAllStudentsData(cachedStudents);
-          setTeacherStudentsCohortId(activeTeacherCohortId);
+      if (teacherCohortPreseedRef.current === activeTeacherCohortId) {
+          teacherCohortPreseedRef.current = '';
+          return;
       }
-      if (cachedStatsAreFresh) {
-          setQueryStatsById((cachedStats.counts && typeof cachedStats.counts === 'object') ? cachedStats.counts : {});
-          setQueryEvents(sanitizeQueryEvents(cachedStats.events, cachedLastResetAt));
-          setQueryStatsLastResetAt(cachedLastResetAt);
-          setQueryStatsCohortId(activeTeacherCohortId);
-      } else {
-          setQueryStatsById({});
-          setQueryEvents([]);
-          setQueryStatsLastResetAt('');
-          setQueryStatsCohortId('');
-      }
-      if (cachedMessage && typeof cachedMessage === 'object') {
-          const nextGlobalMessage = String(cachedMessage?.globalMessage ?? cachedMessage?.message ?? '').trim();
-          const nextByStudentMessages = normalizeTeacherStudentMessages(cachedMessage?.byStudent);
-          setTeacherGlobalMessage(nextGlobalMessage);
-          setTeacherGlobalMessageDraft(nextGlobalMessage);
-          setTeacherStudentMessages(nextByStudentMessages);
-          setTeacherStudentMessageDrafts(nextByStudentMessages);
-          setTeacherMessageCohortId(activeTeacherCohortId);
-      } else {
-          setTeacherGlobalMessage('');
-          setTeacherGlobalMessageDraft('');
-          setTeacherStudentMessages({});
-          setTeacherStudentMessageDrafts({});
-          setTeacherMessageCohortId('');
-      }
-      setCurrentStudentId(null);
-      setStudentName('');
-      setGrades({});
-      setBatchDate((prev) => nextDates[nextDates.length - 1] || prev || '');
-      setAvailableDates(nextDates.length ? nextDates : getDefaultDatesForCohort(activeTeacherCohortId, cohortOptions));
-      setDatesCohortId(nextDates.length ? activeTeacherCohortId : '');
-      if (cachedClassAverages && typeof cachedClassAverages === 'object') {
-          setClassAverages(cachedClassAverages);
-          setClassAveragesCohortId(activeTeacherCohortId);
-      } else {
-          setClassAverages({});
-          setClassAveragesCohortId('');
-      }
-      resetBatchDraftState();
-  }, [activeTeacherCohortId, cohortOptions, getCohortCacheKey, resetBatchDraftState, shouldResetQueryStats]);
+      applyTeacherCohortCachedState(activeTeacherCohortId);
+  }, [activeTeacherCohortId, applyTeacherCohortCachedState]);
 
   useEffect(() => {
       const cachedStudents = readLocalCache(
@@ -2807,26 +2822,26 @@ export default function App() {
           getCohortCacheKey(LOCAL_CACHE_KEYS.teacherMessage, activePublicCohortId),
           TEACHER_MESSAGE_CACHE_TTL_MS
       );
-      if (Array.isArray(cachedStudents) && cachedStudents.length > 0) {
+      const hasCachedStudents = Array.isArray(cachedStudents) && cachedStudents.length > 0;
+      const hasCachedDates = cachedDates.length > 0;
+      const hasCachedClassAverages = cachedClassAverages && typeof cachedClassAverages === 'object';
+      const hasCachedMessage = cachedMessage && typeof cachedMessage === 'object';
+
+      if (hasCachedStudents) {
           setCachedClassData(cachedStudents);
           setPublicStudentsCohortId(activePublicCohortId);
-      } else {
-          setCachedClassData([]);
-          setPublicStudentsCohortId('');
       }
-      setViewData(null);
       setSearchError('');
       if (mode === 'parent') {
-          setAvailableDates(cachedDates.length ? cachedDates : getDefaultDatesForCohort(activePublicCohortId, cohortOptions));
-          setDatesCohortId(cachedDates.length ? activePublicCohortId : '');
-          if (cachedClassAverages && typeof cachedClassAverages === 'object') {
+          if (hasCachedDates) {
+              setAvailableDates(cachedDates);
+              setDatesCohortId(activePublicCohortId);
+          }
+          if (hasCachedClassAverages) {
               setClassAverages(cachedClassAverages);
               setClassAveragesCohortId(activePublicCohortId);
-          } else {
-              setClassAverages({});
-              setClassAveragesCohortId('');
           }
-          if (cachedMessage && typeof cachedMessage === 'object') {
+          if (hasCachedMessage) {
               const nextGlobalMessage = String(cachedMessage?.globalMessage ?? cachedMessage?.message ?? '').trim();
               const nextByStudentMessages = normalizeTeacherStudentMessages(cachedMessage?.byStudent);
               setTeacherGlobalMessage(nextGlobalMessage);
@@ -2834,12 +2849,6 @@ export default function App() {
               setTeacherStudentMessages(nextByStudentMessages);
               setTeacherStudentMessageDrafts(nextByStudentMessages);
               setTeacherMessageCohortId(activePublicCohortId);
-          } else {
-              setTeacherGlobalMessage('');
-              setTeacherGlobalMessageDraft('');
-              setTeacherStudentMessages({});
-              setTeacherStudentMessageDrafts({});
-              setTeacherMessageCohortId('');
           }
       }
   }, [activePublicCohortId, cohortOptions, getCohortCacheKey, mode]);
@@ -3164,7 +3173,7 @@ export default function App() {
           if (cancelled) return;
           await Promise.all([
               hydrateClassAverages({ cohortId: activeTeacherCohortId, datePool: cohortDates }),
-              hydrateStudents({ cohortId: activeTeacherCohortId, datePool: cohortDates })
+              hydrateStudents({ cohortId: activeTeacherCohortId, datePool: cohortDates, silent: true })
           ]);
           if (cancelled) return;
           idleHandle = scheduleSecondaryHydration(() => {
@@ -3419,11 +3428,15 @@ export default function App() {
       const normalizedId = String(nextCohortId || '').trim();
       if (!normalizedId || normalizedId === activeTeacherCohortId) return;
       runWithBatchDiscardGuard(() => {
-          setTeacherViewMode('batch');
-          setBatchInsightTab('grades');
-          setActiveTeacherCohortId(normalizedId);
+          teacherCohortPreseedRef.current = normalizedId;
+          startTransition(() => {
+              setTeacherViewMode('batch');
+              setBatchInsightTab('grades');
+              applyTeacherCohortCachedState(normalizedId);
+              setActiveTeacherCohortId(normalizedId);
+          });
       });
-  }, [activeTeacherCohortId, runWithBatchDiscardGuard]);
+  }, [activeTeacherCohortId, applyTeacherCohortCachedState, runWithBatchDiscardGuard]);
 
   const handleSetPublicCohort = useCallback(async (nextCohortId) => {
       const normalizedId = String(nextCohortId || '').trim();
@@ -3470,7 +3483,11 @@ export default function App() {
               const cleanupPayloads = [];
               qSnap.forEach((d) => {
                   const rawData = d.data();
-                  const normalizedResult = normalizeGrades(rawData.grades, { withMeta: true, datePool: effectiveDates });
+                  const normalizedResult = normalizeGrades(rawData.grades, {
+                      withMeta: true,
+                      cohortId: activePublicCohortId,
+                      datePool: effectiveDates
+                  });
                   preloaded.push({ ...rawData, grades: normalizedResult.normalized });
                   if (normalizedResult.changed && rawData.id) {
                       cleanupPayloads.push({

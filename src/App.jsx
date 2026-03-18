@@ -1246,7 +1246,6 @@ export default function App() {
   const [sortByPR, setSortByPR] = useState(false);
   const [sortByProb, setSortByProb] = useState(false);
   const [isOperationLogExpanded, setIsOperationLogExpanded] = useState(false);
-  const [activeQualityIssueType, setActiveQualityIssueType] = useState('');
   const [queryStatsById, setQueryStatsById] = useState({});
   const [queryEvents, setQueryEvents] = useState([]);
   const [queryStatsLastResetAt, setQueryStatsLastResetAt] = useState('');
@@ -1254,11 +1253,11 @@ export default function App() {
   const [queryPanelStage, setQueryPanelStage] = useState('idle');
   const [queryMonitorKeyword, setQueryMonitorKeyword] = useState('');
   const [queryMonitorDateFilter, setQueryMonitorDateFilter] = useState('all');
-  const [queryMonitorScope, setQueryMonitorScope] = useState('all');
   const [queryMonitorSort, setQueryMonitorSort] = useState('count_desc');
   const [operationLogs, setOperationLogs] = useState([]);
   const [localSnapshots, setLocalSnapshots] = useState([]);
   const [importPreview, setImportPreview] = useState(null);
+  const [showImportFormatGuide, setShowImportFormatGuide] = useState(false);
   const [isApplyingImport, setIsApplyingImport] = useState(false);
   const [parentQueryPerf, setParentQueryPerf] = useState({
       cacheHit: 0,
@@ -1300,7 +1299,6 @@ export default function App() {
   const deferredBatchInsightTab = useDeferredValue(batchInsightTab);
   const deferredQueryMonitorKeyword = useDeferredValue(queryMonitorKeyword);
   const deferredQueryMonitorDateFilter = useDeferredValue(queryMonitorDateFilter);
-  const deferredQueryMonitorScope = useDeferredValue(queryMonitorScope);
   const deferredQueryMonitorSort = useDeferredValue(queryMonitorSort);
   const deferredQueryStatsById = useDeferredValue(queryStatsById);
   const deferredQueryEvents = useDeferredValue(queryEvents);
@@ -1364,6 +1362,31 @@ export default function App() {
       [activeTeacherClassDefs]
   );
   const defaultTeacherClassId = activeTeacherClassDefs[0]?.id || 'A班';
+  const importFormatGuide = useMemo(() => {
+      const classExamples = activeTeacherClassDefs.map((item) => item.id).join(' / ');
+      const classAliasHint = activeTeacherCohortId === NEXT_COHORT_ID
+          ? '可填 A、B、C、東興；也接受 東、DONG、EAST'
+          : '可填 A班、B班、C班、日A班、日B班；也接受 日、SUN';
+      return {
+          sampleHeaders: ['學號', '姓名', '日期', '班級', '國文', '英文', '數學'],
+          sampleRows: [
+              ['261001', '王小明', '09/14', activeTeacherClassDefs[0]?.id || 'A班', '82', '76', '91'],
+              ['261002', '林小華', '2026/09/14', activeTeacherClassDefs[1]?.id || activeTeacherClassDefs[0]?.id || 'B班', '74', '68', '87']
+          ],
+          headerHints: [
+              '系統會在前 10 列找標題列，能辨識：學號 / ID / StudentID、姓名 / Name、日期 / 測驗日、班級 / 類別、國 / 英 / 數',
+              '如果完全找不到標題，會改用固定欄序 A-F：學號、姓名、日期、國文、英文、數學'
+          ],
+          rules: [
+              `目前這屆班級可用：${classExamples}`,
+              classAliasHint,
+              '日期可寫 2/28、02/28、2026/2/28、0228',
+              '不合理日期例如 2/51 會直接略過',
+              '同一個檔案最多只能有 5 個不同測驗日期，超過會取消匯入',
+              '若沒有班級欄，系統會優先沿用該學生同考次既有班級，否則用目前班級'
+          ]
+      };
+  }, [activeTeacherClassDefs, activeTeacherCohortId]);
   const isSingleDayCohort = useCallback(
       (cohortId) => getCohortDateMode(cohortId) === COHORT_DATE_MODE.SINGLE,
       [getCohortDateMode]
@@ -5614,35 +5637,15 @@ export default function App() {
       setQueryPanelStage('shell');
       let cancelled = false;
       let rafId = null;
-      let idleId = null;
-      let timerId = null;
-
-      const promoteToFull = () => {
-          if (cancelled) return;
-          startTransition(() => {
-              setQueryPanelStage('full');
-          });
-      };
 
       rafId = requestAnimationFrame(() => {
           if (cancelled) return;
           setQueryPanelStage('core');
-
-          if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-              idleId = window.requestIdleCallback(() => promoteToFull(), { timeout: 700 });
-              return;
-          }
-
-          timerId = window.setTimeout(promoteToFull, 180);
       });
 
       return () => {
           cancelled = true;
           if (rafId) cancelAnimationFrame(rafId);
-          if (idleId && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
-              window.cancelIdleCallback(idleId);
-          }
-          if (timerId) window.clearTimeout(timerId);
       };
   }, [isQueryTabRequested]);
 
@@ -5650,24 +5653,21 @@ export default function App() {
       mode === 'teacher'
       && teacherViewMode === 'batch'
       && deferredBatchInsightTab === 'query'
-      && queryPanelStage !== 'idle'
-      && queryPanelStage !== 'shell';
-  const shouldBuildQueryDeepInsights =
-      shouldBuildQueryInsights && queryPanelStage === 'full';
+      && queryPanelStage === 'core';
   const isQueryInsightsPending =
       isQueryTabRequested
-      && (deferredBatchInsightTab !== 'query' || queryPanelStage === 'idle' || queryPanelStage === 'shell');
-  const isQueryDeepInsightsPending =
-      shouldBuildQueryInsights && queryPanelStage !== 'full';
+      && (deferredBatchInsightTab !== 'query' || queryPanelStage !== 'core');
 
   const studentNameById = useMemo(() => {
       if (!shouldBuildQueryInsights) return {};
       const map = {};
-      deferredStudentsForDerived.forEach((student) => {
-          map[student.id] = student.name || '';
+      allStudentsData.forEach((student) => {
+          const studentId = String(student?.id || '').toUpperCase().trim();
+          if (!studentId) return;
+          map[studentId] = student.name || '';
       });
       return map;
-  }, [deferredStudentsForDerived, shouldBuildQueryInsights]);
+  }, [allStudentsData, shouldBuildQueryInsights]);
 
   const queryEventTimeline = useMemo(() => {
       if (!shouldBuildQueryInsights) return [];
@@ -5688,7 +5688,7 @@ export default function App() {
               };
           })
           .filter(Boolean)
-          .sort((a, b) => a.ts - b.ts);
+          .sort((a, b) => b.ts - a.ts);
   }, [deferredQueryEvents, studentNameById, shouldBuildQueryInsights]);
 
   const queryEventsByDay = useMemo(() => {
@@ -5701,10 +5701,6 @@ export default function App() {
           grouped[event.dateKey].items.push(event);
       });
       return Object.values(grouped)
-          .map((day) => ({
-              ...day,
-              items: [...day.items].sort((a, b) => b.ts - a.ts)
-          }))
           .sort((a, b) => b.dateKey.localeCompare(a.dateKey));
   }, [queryEventTimeline, shouldBuildQueryInsights]);
 
@@ -5712,7 +5708,9 @@ export default function App() {
       if (!shouldBuildQueryInsights) return [];
       const latestTsById = {};
       queryEventTimeline.forEach((event) => {
-          latestTsById[event.id] = event.ts;
+          if (!latestTsById[event.id] || event.ts > latestTsById[event.id]) {
+              latestTsById[event.id] = event.ts;
+          }
       });
 
       return Object.entries(deferredQueryStatsById)
@@ -5735,55 +5733,6 @@ export default function App() {
           });
   }, [deferredQueryStatsById, studentNameById, queryEventTimeline, shouldBuildQueryInsights]);
 
-  const latestQueryTsById = useMemo(() => {
-      if (!shouldBuildQueryInsights) return {};
-      const map = {};
-      queryEventTimeline.forEach((event) => {
-          map[event.id] = event.ts;
-      });
-      return map;
-  }, [queryEventTimeline, shouldBuildQueryInsights]);
-
-  const queryClassCoverageRows = useMemo(() => {
-      if (!shouldBuildQueryInsights) return [];
-      const rows = deferredBatchRowsForDisplay.map((row) => {
-          const id = String(row.student.id || '').toUpperCase();
-          const count = Number(deferredQueryStatsById[id] || 0);
-          const latestTs = Number(latestQueryTsById[id]) || 0;
-          const latestAtLabel = latestTs
-              ? formatMonitorDateTimeLabel(latestTs, false)
-              : '--';
-
-          return {
-              id,
-              name: row.student.name || '',
-              count,
-              latestTs,
-              latestAtLabel
-          };
-      });
-
-      return rows.sort((a, b) => {
-          if (b.count !== a.count) return b.count - a.count;
-          return b.latestTs - a.latestTs;
-      });
-  }, [deferredBatchRowsForDisplay, deferredQueryStatsById, latestQueryTsById, shouldBuildQueryInsights]);
-
-  const queryClassStudentIdSet = useMemo(() => {
-      if (!shouldBuildQueryInsights) return new Set();
-      const idSet = new Set();
-      queryClassCoverageRows.forEach((row) => {
-          const id = String(row.id || '').toUpperCase();
-          if (id) idSet.add(id);
-      });
-      return idSet;
-  }, [queryClassCoverageRows, shouldBuildQueryInsights]);
-
-  const queryMonitorBaseRows = useMemo(() => {
-      if (!shouldBuildQueryInsights) return [];
-      return deferredQueryMonitorScope === 'class' ? queryClassCoverageRows : queryStatsRows;
-  }, [deferredQueryMonitorScope, queryClassCoverageRows, queryStatsRows, shouldBuildQueryInsights]);
-
   const queryStatsRowsFiltered = useMemo(() => {
       if (!shouldBuildQueryInsights) return [];
       const keyword = deferredQueryMonitorKeyword.trim();
@@ -5791,7 +5740,7 @@ export default function App() {
       const upperKeyword = keyword.toUpperCase();
       const lowerKeyword = keyword.toLowerCase();
 
-      const rows = queryMonitorBaseRows.filter((row) => {
+      const rows = queryStatsRows.filter((row) => {
           if (!hasKeyword) return true;
           const idText = String(row.id || '').toUpperCase();
           const nameText = String(row.name || '').toLowerCase();
@@ -5816,7 +5765,7 @@ export default function App() {
           return b.latestTs - a.latestTs;
       });
       return rows;
-  }, [queryMonitorBaseRows, deferredQueryMonitorKeyword, deferredQueryMonitorSort, shouldBuildQueryInsights]);
+  }, [queryStatsRows, deferredQueryMonitorKeyword, deferredQueryMonitorSort, shouldBuildQueryInsights]);
 
   const queryEventsByDayFiltered = useMemo(() => {
       if (!shouldBuildQueryInsights) return [];
@@ -5824,15 +5773,11 @@ export default function App() {
       const hasKeyword = keyword.length > 0;
       const upperKeyword = keyword.toUpperCase();
       const lowerKeyword = keyword.toLowerCase();
-      const shouldLimitToClass = deferredQueryMonitorScope === 'class';
 
       return queryEventsByDay
           .filter((day) => deferredQueryMonitorDateFilter === 'all' || day.dateKey === deferredQueryMonitorDateFilter)
           .map((day) => {
               let items = day.items;
-              if (shouldLimitToClass) {
-                  items = items.filter((event) => queryClassStudentIdSet.has(String(event.id || '').toUpperCase()));
-              }
               if (hasKeyword) {
                   items = items.filter((event) => {
                       const idText = String(event.id || '').toUpperCase();
@@ -5843,7 +5788,7 @@ export default function App() {
               return { ...day, items };
           })
           .filter((day) => day.items.length > 0);
-  }, [queryEventsByDay, deferredQueryMonitorDateFilter, deferredQueryMonitorKeyword, deferredQueryMonitorScope, queryClassStudentIdSet, shouldBuildQueryInsights]);
+  }, [queryEventsByDay, deferredQueryMonitorDateFilter, deferredQueryMonitorKeyword, shouldBuildQueryInsights]);
 
   const queryFilteredEventList = useMemo(
       () => (shouldBuildQueryInsights ? queryEventsByDayFiltered.flatMap((day) => day.items) : []),
@@ -5854,206 +5799,19 @@ export default function App() {
       if (!shouldBuildQueryInsights) {
           return {
               totalQueries: 0,
-              uniqueStudentCount: 0,
-              peakHourLabel: '--',
-              peakHourCount: 0,
+              rankedStudentCount: 0,
+              filteredEventCount: 0,
               latestDayCount: 0
           };
       }
-      const hourCounts = Array.from({ length: 24 }, (_, hour) => ({ hour, count: 0 }));
-      queryFilteredEventList.forEach((event) => {
-          const hour = new Date(event.ts).getHours();
-          hourCounts[hour].count += 1;
-      });
-
-      const peak = hourCounts.reduce((top, current) => {
-          if (!top || current.count > top.count) return current;
-          return top;
-      }, null);
-
-      const uniqueStudentCount = queryStatsRowsFiltered.filter((row) => Number(row.count) > 0).length;
 
       return {
-          totalQueries: queryFilteredEventList.length,
-          uniqueStudentCount,
-          peakHourLabel: peak && peak.count > 0 ? `${String(peak.hour).padStart(2, '0')}:00-${String((peak.hour + 1) % 24).padStart(2, '0')}:00` : '--',
-          peakHourCount: peak?.count || 0,
+          totalQueries: queryEventTimeline.length,
+          rankedStudentCount: queryStatsRowsFiltered.length,
+          filteredEventCount: queryFilteredEventList.length,
           latestDayCount: queryEventsByDayFiltered[0]?.items.length || 0
       };
-  }, [queryFilteredEventList, queryStatsRowsFiltered, queryEventsByDayFiltered, shouldBuildQueryInsights]);
-
-  const queryRecentWindowSummary = useMemo(() => {
-      if (!shouldBuildQueryInsights) return { last24h: 0, last3d: 0, last7d: 0 };
-      const now = Date.now();
-      const oneDayAgo = now - (24 * 60 * 60 * 1000);
-      const threeDaysAgo = now - (3 * 24 * 60 * 60 * 1000);
-      const sevenDaysAgo = now - (7 * 24 * 60 * 60 * 1000);
-      let last24h = 0;
-      let last3d = 0;
-      let last7d = 0;
-
-      queryFilteredEventList.forEach((event) => {
-          if (event.ts >= sevenDaysAgo) {
-              last7d += 1;
-              if (event.ts >= threeDaysAgo) {
-                  last3d += 1;
-                  if (event.ts >= oneDayAgo) {
-                      last24h += 1;
-                  }
-              }
-          }
-      });
-
-      return { last24h, last3d, last7d };
-  }, [queryFilteredEventList, shouldBuildQueryInsights]);
-
-  const queryBiHourBuckets = useMemo(() => {
-      if (!shouldBuildQueryDeepInsights) return [];
-      const buckets = Array.from({ length: 12 }, (_, index) => ({
-          key: index,
-          startHour: index * 2,
-          endHour: (index * 2) + 2,
-          count: 0
-      }));
-
-      queryFilteredEventList.forEach((event) => {
-          const hour = new Date(event.ts).getHours();
-          const bucketIndex = Math.floor(hour / 2);
-          buckets[bucketIndex].count += 1;
-      });
-
-      const maxCount = buckets.reduce((max, item) => Math.max(max, item.count), 0);
-      const safeMax = maxCount > 0 ? maxCount : 1;
-      return buckets.map((bucket) => ({
-          ...bucket,
-          label: `${String(bucket.startHour).padStart(2, '0')}-${String(bucket.endHour % 24).padStart(2, '0')}`,
-          ratio: bucket.count / safeMax
-      }));
-  }, [queryFilteredEventList, shouldBuildQueryDeepInsights]);
-
-  const queryDailyTrend = useMemo(() => {
-      if (!shouldBuildQueryDeepInsights) return [];
-      const trendDays = [...queryEventsByDayFiltered].slice(0, 14).reverse();
-      const maxCount = trendDays.reduce((max, day) => Math.max(max, day.items.length), 0);
-      const safeMax = maxCount > 0 ? maxCount : 1;
-      return trendDays.map((day) => ({
-          dateKey: day.dateKey,
-          label: day.dateLabel,
-          count: day.items.length,
-          ratio: day.items.length / safeMax
-      }));
-  }, [queryEventsByDayFiltered, shouldBuildQueryDeepInsights]);
-
-  const queryDayCountByIdMap = useMemo(() => {
-      if (!shouldBuildQueryDeepInsights) return {};
-      const map = {};
-      queryEventsByDayFiltered.forEach((day) => {
-          const dayCount = {};
-          day.items.forEach((event) => {
-              const id = String(event.id || '').toUpperCase();
-              if (!id) return;
-              dayCount[id] = (dayCount[id] || 0) + 1;
-          });
-          Object.entries(dayCount).forEach(([id, count]) => {
-              if (!map[id]) map[id] = [];
-              map[id].push(count);
-          });
-      });
-      return map;
-  }, [queryEventsByDayFiltered, shouldBuildQueryDeepInsights]);
-
-  const queryRecent48hCountById = useMemo(() => {
-      if (!shouldBuildQueryDeepInsights) return {};
-      const cutoff = Date.now() - (48 * 60 * 60 * 1000);
-      const map = {};
-      queryFilteredEventList.forEach((event) => {
-          if (event.ts < cutoff) return;
-          const id = String(event.id || '').toUpperCase();
-          if (!id) return;
-          map[id] = (map[id] || 0) + 1;
-      });
-      return map;
-  }, [queryFilteredEventList, shouldBuildQueryDeepInsights]);
-
-  const queryMonitorAlertRows = useMemo(() => {
-      if (!shouldBuildQueryDeepInsights) return [];
-      const now = Date.now();
-      return queryStatsRowsFiltered
-          .map((row) => {
-              const latestTs = Number(row.latestTs) || 0;
-              const daysSinceLast = latestTs ? Math.floor((now - latestTs) / (24 * 60 * 60 * 1000)) : null;
-              const dayCounts = queryDayCountByIdMap[row.id] || [];
-              const maxDayCount = dayCounts.length ? Math.max(...dayCounts) : 0;
-              const recent48hCount = Number(queryRecent48hCountById[row.id] || 0);
-              const tags = [];
-              let alertScore = 0;
-
-              if (Number(row.count) === 0) {
-                  alertScore += 100;
-                  tags.push('尚未查詢');
-              }
-
-              if (daysSinceLast !== null) {
-                  if (daysSinceLast >= 14) {
-                      alertScore += 34;
-                      tags.push(`${daysSinceLast} 天未查`);
-                  } else if (daysSinceLast >= 7) {
-                      alertScore += 20;
-                      tags.push(`${daysSinceLast} 天未查`);
-                  }
-              }
-
-              if (maxDayCount >= 6) {
-                  alertScore += 24;
-                  tags.push(`單日 ${maxDayCount} 次`);
-              } else if (maxDayCount >= 4) {
-                  alertScore += 12;
-                  tags.push(`單日 ${maxDayCount} 次`);
-              }
-
-              if (recent48hCount >= 5) {
-                  alertScore += 16;
-                  tags.push(`48h ${recent48hCount} 次`);
-              } else if (recent48hCount >= 3) {
-                  alertScore += 8;
-                  tags.push(`48h ${recent48hCount} 次`);
-              }
-
-              if (alertScore <= 0) return null;
-
-              return {
-                  ...row,
-                  alertScore,
-                  daysSinceLast,
-                  maxDayCount,
-                  recent48hCount,
-                  tags: tags.slice(0, 3)
-              };
-          })
-          .filter(Boolean)
-          .sort((a, b) => {
-              if (b.alertScore !== a.alertScore) return b.alertScore - a.alertScore;
-              if (b.count !== a.count) return b.count - a.count;
-              return b.latestTs - a.latestTs;
-          })
-          .slice(0, 12);
-  }, [queryStatsRowsFiltered, queryDayCountByIdMap, queryRecent48hCountById, shouldBuildQueryDeepInsights]);
-
-  const queryClassCoverageSummary = useMemo(() => {
-      if (!shouldBuildQueryInsights) {
-          return { total: 0, queried: 0, unqueried: 0, coverageRate: 0 };
-      }
-      const total = queryClassCoverageRows.length;
-      const queried = queryClassCoverageRows.filter((row) => row.count > 0).length;
-      const unqueried = Math.max(total - queried, 0);
-      const coverageRate = total > 0 ? Math.round((queried / total) * 100) : 0;
-      return { total, queried, unqueried, coverageRate };
-  }, [queryClassCoverageRows, shouldBuildQueryInsights]);
-
-  const queryClassUnqueriedPreview = useMemo(
-      () => (shouldBuildQueryInsights ? queryClassCoverageRows.filter((row) => row.count === 0).slice(0, 16) : []),
-      [queryClassCoverageRows, shouldBuildQueryInsights]
-  );
+  }, [queryEventTimeline, queryFilteredEventList.length, queryStatsRowsFiltered.length, queryEventsByDayFiltered, shouldBuildQueryInsights]);
 
   useEffect(() => {
       if (!shouldBuildQueryInsights) return;
@@ -6068,235 +5826,6 @@ export default function App() {
       if (Number.isNaN(date.getTime())) return '尚未初始化';
       return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   }, [queryStatsLastResetAt]);
-
-  const dataQualityReport = useMemo(() => {
-      const emptySummary = {
-          totalStudents: 0,
-          missingNameCount: 0,
-          duplicateNameCount: 0,
-          invalidDateKeyCount: 0,
-          outOfRangeScoreCount: 0,
-          invalidClassCount: 0,
-          orphanDateCount: 0,
-          emptyGradeStudentCount: 0,
-          issueCount: 0
-      };
-      const emptyDetails = {
-          missingName: [],
-          duplicateName: [],
-          invalidDateKey: [],
-          outOfRangeScore: [],
-          invalidClass: [],
-          orphanDate: [],
-          emptyGradeStudent: []
-      };
-
-      if (!shouldBuildQueryDeepInsights) {
-          return { summary: emptySummary, details: emptyDetails };
-      }
-
-      const validClassSet = activeTeacherClassIdSet;
-      const duplicateNameMap = {};
-      const usedWeekendIds = new Set();
-      const details = {
-          missingName: [],
-          duplicateName: [],
-          invalidDateKey: [],
-          outOfRangeScore: [],
-          invalidClass: [],
-          orphanDate: [],
-          emptyGradeStudent: []
-      };
-      const pushDetail = (type, item) => {
-          const list = details[type];
-          if (!Array.isArray(list)) return;
-          if (list.length >= MAX_QUALITY_DETAIL_ITEMS) return;
-          list.push(item);
-      };
-
-      let invalidDateKeyCount = 0;
-      let outOfRangeScoreCount = 0;
-      let missingNameCount = 0;
-      let invalidClassCount = 0;
-      let emptyGradeStudentCount = 0;
-
-      deferredStudentsForDerived.forEach((student) => {
-          const studentId = String(student?.id || '').toUpperCase().trim() || '未填學號';
-          const studentName = String(student?.name || '').trim();
-          const displayName = studentName || '未命名';
-          if (!studentName) {
-              missingNameCount += 1;
-              pushDetail('missingName', {
-                  key: `missing-${studentId}`,
-                  primary: studentId,
-                  secondary: '姓名欄位空白'
-              });
-          } else {
-              const normalizedName = normalizeSearchText(studentName);
-              if (normalizedName) {
-                  if (!duplicateNameMap[normalizedName]) duplicateNameMap[normalizedName] = [];
-                  duplicateNameMap[normalizedName].push({ id: studentId, name: studentName });
-              }
-          }
-
-          const gradesObj = student?.grades && typeof student.grades === 'object' ? student.grades : {};
-          let studentHasScore = false;
-          Object.entries(gradesObj).forEach(([rawDate, grade]) => {
-              const normalizedDate = normalizeDateToken(rawDate);
-              if (!normalizedDate) {
-                  invalidDateKeyCount += 1;
-                  pushDetail('invalidDateKey', {
-                      key: `invalid-date-${studentId}-${rawDate}`,
-                      primary: `${studentId} ${displayName}`,
-                      secondary: `不合理日期鍵：${String(rawDate)}`
-                  });
-                  return;
-              }
-              const weekendID = getTestDateID(normalizedDate);
-              if (!weekendID) return;
-              const weekendLabel = getScopedDateLabel(weekendID, activeDateContextCohortId, availableDates);
-              const className = String(grade?.class || '').trim();
-              if (className && !validClassSet.has(className)) {
-                  invalidClassCount += 1;
-                  pushDetail('invalidClass', {
-                      key: `invalid-class-${studentId}-${weekendID}-${className}`,
-                      primary: `${studentId} ${displayName}`,
-                      secondary: `${weekendLabel} 班級欄位異常：${className}`
-                  });
-              }
-
-              SCORE_KEYS.forEach((subject) => {
-                  const score = toNumberOrNull(grade?.[subject]);
-                  if (score === null) return;
-                  const maxScore = getMaxScore(weekendID, subject, deferredDatesForDerived);
-                  if (score < 0 || score > maxScore) {
-                      outOfRangeScoreCount += 1;
-                      pushDetail('outOfRangeScore', {
-                          key: `oor-${studentId}-${weekendID}-${subject}-${score}`,
-                          primary: `${studentId} ${displayName}`,
-                          secondary: `${weekendLabel} ${COLORS[subject]?.label || subject}=${score}（合理上限 ${maxScore}）`
-                      });
-                      return;
-                  }
-                  studentHasScore = true;
-                  usedWeekendIds.add(weekendID);
-              });
-          });
-
-          if (!studentHasScore) {
-              emptyGradeStudentCount += 1;
-              pushDetail('emptyGradeStudent', {
-                  key: `empty-grade-${studentId}`,
-                  primary: `${studentId} ${displayName}`,
-                  secondary: '目前沒有任何有效科目分數'
-              });
-          }
-      });
-
-      let duplicateNameCount = 0;
-      Object.entries(duplicateNameMap).forEach(([normalized, students]) => {
-          if (!Array.isArray(students) || students.length <= 1) return;
-          duplicateNameCount += students.length;
-          const displayName = students[0]?.name || normalized;
-          pushDetail('duplicateName', {
-              key: `duplicate-${normalized}`,
-              primary: displayName,
-              secondary: `重複學號：${students.map((item) => item.id).join('、')}`
-          });
-      });
-
-      const orphanWeekendIds = new Set();
-      sanitizeDateList(deferredDatesForDerived).forEach((date) => {
-          const weekendID = getTestDateID(date);
-          if (!weekendID) return;
-          if (usedWeekendIds.has(weekendID)) return;
-          orphanWeekendIds.add(weekendID);
-      });
-      const orphanDateCount = orphanWeekendIds.size;
-      Array.from(orphanWeekendIds).sort(customDateSort).forEach((weekendID) => {
-          pushDetail('orphanDate', {
-              key: `orphan-${weekendID}`,
-              primary: getScopedDateLabel(weekendID, activeDateContextCohortId, availableDates),
-              secondary: '此考次目前沒有任何有效分數'
-          });
-      });
-
-      const issueCount =
-          invalidDateKeyCount +
-          outOfRangeScoreCount +
-          missingNameCount +
-          invalidClassCount +
-          duplicateNameCount +
-          orphanDateCount;
-
-      return {
-          summary: {
-              totalStudents: deferredStudentsForDerived.length,
-              missingNameCount,
-              duplicateNameCount,
-              invalidDateKeyCount,
-              outOfRangeScoreCount,
-              invalidClassCount,
-              orphanDateCount,
-              emptyGradeStudentCount,
-              issueCount
-          },
-          details
-      };
-  }, [activeDateContextCohortId, activeTeacherClassIdSet, availableDates, deferredDatesForDerived, deferredStudentsForDerived, getScopedDateLabel, getTestDateID, shouldBuildQueryDeepInsights]);
-
-  const dataQualitySummary = dataQualityReport.summary;
-  const dataQualityDetails = dataQualityReport.details;
-
-  const qualityIssueCountByType = useMemo(() => ({
-      missingName: dataQualitySummary.missingNameCount,
-      duplicateName: dataQualitySummary.duplicateNameCount,
-      invalidDateKey: dataQualitySummary.invalidDateKeyCount,
-      outOfRangeScore: dataQualitySummary.outOfRangeScoreCount,
-      invalidClass: dataQualitySummary.invalidClassCount,
-      orphanDate: dataQualitySummary.orphanDateCount,
-      emptyGradeStudent: dataQualitySummary.emptyGradeStudentCount
-  }), [dataQualitySummary]);
-
-  const qualityMetricCards = useMemo(() => ([
-      { type: 'missingName', label: '缺姓名', count: dataQualitySummary.missingNameCount, tone: 'rose' },
-      { type: 'duplicateName', label: '重複姓名', count: dataQualitySummary.duplicateNameCount, tone: 'amber' },
-      { type: 'emptyGradeStudent', label: '空成績檔', count: dataQualitySummary.emptyGradeStudentCount, tone: 'amber' },
-      { type: 'invalidDateKey', label: '無效日期鍵', count: dataQualitySummary.invalidDateKeyCount, tone: 'rose' },
-      { type: 'outOfRangeScore', label: '異常分數', count: dataQualitySummary.outOfRangeScoreCount, tone: 'rose' },
-      { type: 'invalidClass', label: '無效班級', count: dataQualitySummary.invalidClassCount, tone: 'amber' },
-      { type: 'orphanDate', label: '空白考次', count: dataQualitySummary.orphanDateCount, tone: 'amber' }
-  ]), [dataQualitySummary]);
-
-  const activeQualityIssueTitle = useMemo(() => {
-      const titleMap = {
-          missingName: '缺姓名學生',
-          duplicateName: '重複姓名名單',
-          invalidDateKey: '無效日期鍵',
-          outOfRangeScore: '異常分數明細',
-          invalidClass: '無效班級資料',
-          orphanDate: '空白考次',
-          emptyGradeStudent: '空成績檔學生'
-      };
-      return titleMap[activeQualityIssueType] || '';
-  }, [activeQualityIssueType]);
-
-  const activeQualityIssueItems = useMemo(
-      () => (activeQualityIssueType ? (dataQualityDetails[activeQualityIssueType] || []) : []),
-      [activeQualityIssueType, dataQualityDetails]
-  );
-
-  useEffect(() => {
-      if (shouldBuildQueryDeepInsights) return;
-      if (!activeQualityIssueType) return;
-      setActiveQualityIssueType('');
-  }, [shouldBuildQueryDeepInsights, activeQualityIssueType]);
-
-  useEffect(() => {
-      if (!activeQualityIssueType) return;
-      if ((qualityIssueCountByType[activeQualityIssueType] || 0) > 0) return;
-      setActiveQualityIssueType('');
-  }, [activeQualityIssueType, qualityIssueCountByType]);
 
   const operationLogPreview = useMemo(
       () => operationLogs.slice(0, 36),
@@ -6696,6 +6225,13 @@ export default function App() {
                                 <>
                                     <button type="button" onClick={requestExcelImport} className="btn-sheen cursor-pointer bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all whitespace-nowrap">
                                         <FileSpreadsheet className="w-4 h-4" /> {isLegacyCohort(activeTeacherCohortId) ? '匯入 Excel（需驗證）' : '匯入 Excel'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setShowImportFormatGuide(true)}
+                                      className={`px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors border ${darkMode ? 'text-slate-200 bg-slate-900/55 border-white/10 hover:bg-slate-800' : 'text-slate-600 bg-white border-slate-200 hover:bg-slate-50 shadow-sm'}`}
+                                    >
+                                        <Info className="w-4 h-4" /> 匯入格式
                                     </button>
                                     <input ref={importFileInputRef} type="file" accept=".xlsx, .xls" className="hidden" onChange={handleExcelUpload} />
                                 </>
@@ -7119,7 +6655,7 @@ export default function App() {
                                     </div>
                                 </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-[1fr_8.8rem_auto] gap-1.5">
+                                <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_10.5rem_auto] gap-1.5">
                                     <div className={`flex items-center gap-2 rounded-xl border px-2.5 py-1.5 ${darkMode ? 'border-white/10 bg-slate-900/50' : 'border-slate-200 bg-white'}`}>
                                         <Search className={`w-3.5 h-3.5 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`} />
                                         <input
@@ -7151,21 +6687,7 @@ export default function App() {
                                     </button>
                                 </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-[12.5rem_11.4rem] gap-1.5">
-                                    <div className={`rounded-xl border p-1 flex ${darkMode ? 'border-white/10 bg-slate-900/50' : 'border-slate-200 bg-white'}`}>
-                                        <button
-                                          onClick={() => setQueryMonitorScope('all')}
-                                          className={`flex-1 rounded-lg px-2 py-1.5 text-[11px] font-black transition-colors ${queryMonitorScope === 'all' ? 'bg-emerald-600 text-white' : (darkMode ? 'text-slate-300 hover:bg-slate-800' : 'text-slate-600 hover:bg-slate-50')}`}
-                                        >
-                                          全部學生
-                                        </button>
-                                        <button
-                                          onClick={() => setQueryMonitorScope('class')}
-                                          className={`flex-1 rounded-lg px-2 py-1.5 text-[11px] font-black transition-colors ${queryMonitorScope === 'class' ? 'bg-emerald-600 text-white' : (darkMode ? 'text-slate-300 hover:bg-slate-800' : 'text-slate-600 hover:bg-slate-50')}`}
-                                        >
-                                          目前班級
-                                        </button>
-                                    </div>
+                                <div className="grid grid-cols-1 md:grid-cols-[11.4rem_1fr] gap-1.5">
                                     <select
                                       value={queryMonitorSort}
                                       onChange={(e) => setQueryMonitorSort(e.target.value)}
@@ -7175,91 +6697,34 @@ export default function App() {
                                         <option value="latest_desc">依最近查詢</option>
                                         <option value="id_asc">依學號排序</option>
                                     </select>
+                                    <div className={`flex flex-wrap items-center justify-between gap-1.5 rounded-xl border px-2.5 py-1.5 text-[10px] font-semibold ${darkMode ? 'border-white/10 bg-slate-900/45 text-slate-300' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                                        <span>上次重置：{queryStatsLastResetText}</span>
+                                        <span>排行 {queryStatsRowsFiltered.length} 人 / 事件 {queryFilteredSummary.filteredEventCount} 筆</span>
+                                    </div>
                                 </div>
 
-                                <div className={`flex flex-wrap items-center justify-between gap-1.5 text-[10px] font-semibold ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
-                                    <span>上次重置：{queryStatsLastResetText}（時間依本機）</span>
-                                    <span>
-                                        監控範圍：{queryMonitorScope === 'class' ? `目前班級（${teacherClassFilter}）` : '全部學生'} / 排行 {queryStatsRowsFiltered.length} 人 / 事件 {queryFilteredEventList.length} 筆
-                                    </span>
-                                </div>
-
-                                <div className="grid grid-cols-3 lg:grid-cols-6 gap-1.5">
-                                    <div className={`rounded-xl border px-2.5 py-1.5 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                <div className="grid grid-cols-2 lg:grid-cols-4 gap-1.5">
+                                    <div className={`rounded-xl border px-2.5 py-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
                                         <div className={`text-[9px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>總查詢數</div>
-                                        <div className={`text-base font-black ${darkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>{queryEventTimeline.length}</div>
+                                        <div className={`text-base font-black ${darkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>{queryFilteredSummary.totalQueries}</div>
                                         <div className={`text-[9px] font-semibold ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>累積</div>
                                     </div>
-                                    <div className={`rounded-xl border px-2.5 py-1.5 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
-                                        <div className={`text-[9px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>有查詢學號數</div>
-                                        <div className={`text-base font-black ${darkMode ? 'text-sky-200' : 'text-sky-700'}`}>{queryFilteredSummary.uniqueStudentCount}</div>
+                                    <div className={`rounded-xl border px-2.5 py-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                        <div className={`text-[9px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>排行學生數</div>
+                                        <div className={`text-base font-black ${darkMode ? 'text-sky-200' : 'text-sky-700'}`}>{queryFilteredSummary.rankedStudentCount}</div>
                                     </div>
-                                    <div className={`rounded-xl border px-2.5 py-1.5 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
-                                        <div className={`text-[9px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>近24小時</div>
-                                        <div className={`text-base font-black ${darkMode ? 'text-indigo-200' : 'text-indigo-700'}`}>{queryRecentWindowSummary.last24h}</div>
+                                    <div className={`rounded-xl border px-2.5 py-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                        <div className={`text-[9px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>目前篩選事件</div>
+                                        <div className={`text-base font-black ${darkMode ? 'text-cyan-200' : 'text-cyan-700'}`}>{queryFilteredSummary.filteredEventCount}</div>
                                     </div>
-                                    <div className={`rounded-xl border px-2.5 py-1.5 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
-                                        <div className={`text-[9px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>近3天</div>
-                                        <div className={`text-base font-black ${darkMode ? 'text-cyan-200' : 'text-cyan-700'}`}>{queryRecentWindowSummary.last3d}</div>
-                                    </div>
-                                    <div className={`rounded-xl border px-2.5 py-1.5 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
-                                        <div className={`text-[9px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>近7天</div>
-                                        <div className={`text-base font-black ${darkMode ? 'text-amber-200' : 'text-amber-700'}`}>{queryRecentWindowSummary.last7d}</div>
-                                    </div>
-                                    <div className={`rounded-xl border px-2.5 py-1.5 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
-                                        <div className={`text-[9px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>高峰時段</div>
-                                        <div className={`text-[11px] font-black ${darkMode ? 'text-violet-200' : 'text-violet-700'}`}>{queryFilteredSummary.peakHourLabel}</div>
-                                        <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>共 {queryFilteredSummary.peakHourCount} 次</div>
+                                    <div className={`rounded-xl border px-2.5 py-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                        <div className={`text-[9px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>最新一天查詢</div>
+                                        <div className={`text-base font-black ${darkMode ? 'text-indigo-200' : 'text-indigo-700'}`}>{queryFilteredSummary.latestDayCount}</div>
                                     </div>
                                 </div>
 
-                                <div className={`rounded-xl border p-2.5 ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
-                                    <div className="flex items-center justify-between mb-2">
-                                        <div className={`text-[10px] font-black tracking-widest uppercase ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>監控提醒</div>
-                                        <div className={`text-[10px] font-black ${darkMode ? 'text-amber-200' : 'text-amber-700'}`}>{isQueryDeepInsightsPending ? '整理中' : `${queryMonitorAlertRows.length} 筆`}</div>
-                                    </div>
-                                    {isQueryDeepInsightsPending ? (
-                                        <div className={`rounded-lg border px-3 py-3 text-center text-xs font-bold ${darkMode ? 'border-white/10 bg-slate-900/55 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
-                                            進階監控提醒整理中，基本排行與事件紀錄已可先操作。
-                                        </div>
-                                    ) : (
-                                        <div className="space-y-1 max-h-[12.5rem] overflow-y-auto pr-1">
-                                            {queryMonitorAlertRows.map((row) => (
-                                                <div
-                                                  key={`alert-${row.id}`}
-                                                  onClick={() => setQueryMonitorKeyword(row.id)}
-                                                  className={`rounded-lg border px-2 py-1.5 cursor-pointer transition-colors ${darkMode ? 'border-white/10 bg-slate-900/55 hover:bg-slate-800' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}`}
-                                                  title="點擊可快速篩選此學號"
-                                                >
-                                                    <div className="flex items-center justify-between gap-2">
-                                                        <div className={`text-[11px] font-black ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>
-                                                            <span className="font-mono">{row.id}</span>
-                                                            <span className="ml-1.5">{row.name || '-'}</span>
-                                                        </div>
-                                                        <div className={`text-[10px] font-black ${darkMode ? 'text-rose-200' : 'text-rose-700'}`}>
-                                                            {row.alertScore}
-                                                        </div>
-                                                    </div>
-                                                    <div className="mt-1 flex flex-wrap gap-1">
-                                                        {row.tags.map((tag) => (
-                                                            <span key={`${row.id}-${tag}`} className={`inline-flex text-[10px] font-bold rounded-full px-2 py-0.5 ${darkMode ? 'bg-rose-400/20 text-rose-100 border border-rose-300/25' : 'bg-rose-100 text-rose-700 border border-rose-200'}`}>
-                                                                {tag}
-                                                            </span>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            ))}
-                                            {!queryMonitorAlertRows.length && (
-                                                <div className={`rounded-lg border px-3 py-3 text-center text-xs font-bold ${darkMode ? 'border-white/10 bg-slate-900/55 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
-                                                    目前沒有明顯異常行為
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-
-                                <div className="grid grid-cols-1 lg:grid-cols-[1.34fr_0.86fr] gap-2">
-                                    <div className={`rounded-xl border overflow-hidden ${darkMode ? 'border-white/10' : 'border-slate-200'}`} style={{ contentVisibility: 'auto', containIntrinsicSize: '420px' }}>
+                                <div className="grid grid-cols-1 xl:grid-cols-[1.02fr_0.98fr] gap-2">
+                                    <div className={`rounded-xl border overflow-hidden ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`} style={{ contentVisibility: 'auto', containIntrinsicSize: '420px' }}>
                                         <div className={`grid grid-cols-[5.6rem_1fr_3.6rem_6rem_4.2rem] px-2.5 py-1.5 text-[10px] font-bold tracking-wide ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>
                                             <span className="text-center">學號</span>
                                             <span className="text-center">姓名</span>
@@ -7277,12 +6742,7 @@ export default function App() {
                                                     ? 'bg-emerald-400/20 text-emerald-100 border-emerald-300/30'
                                                     : 'bg-emerald-100 text-emerald-700 border-emerald-200';
 
-                                                if (Number(row.count) === 0) {
-                                                    statusText = '未查詢';
-                                                    statusClass = darkMode
-                                                        ? 'bg-rose-400/20 text-rose-100 border-rose-300/30'
-                                                        : 'bg-rose-100 text-rose-700 border-rose-200';
-                                                } else if (daysSinceLast !== null && daysSinceLast >= 14) {
+                                                if (daysSinceLast !== null && daysSinceLast >= 14) {
                                                     statusText = '久未查';
                                                     statusClass = darkMode
                                                         ? 'bg-amber-400/20 text-amber-100 border-amber-300/30'
@@ -7322,222 +6782,39 @@ export default function App() {
                                         </div>
                                     </div>
 
-                                    <div className="space-y-2">
-                                        <div className={`rounded-xl border p-2.5 ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
-                                            <div className="flex items-center justify-between mb-2">
-                                                <div className={`text-[10px] font-black tracking-widest uppercase ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>本班查詢覆蓋</div>
-                                                <div className={`text-sm font-black ${darkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>{queryClassCoverageSummary.coverageRate}%</div>
-                                            </div>
-                                            <div className={`w-full h-2 rounded-full overflow-hidden ${darkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>
-                                                <div
-                                                  className="h-full rounded-full bg-[linear-gradient(90deg,#22c55e_0%,#16a34a_50%,#15803d_100%)]"
-                                                  style={{ width: `${queryClassCoverageSummary.coverageRate}%` }}
-                                                />
-                                            </div>
-                                            <div className={`mt-2 text-[11px] font-semibold ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>
-                                                已查詢 {queryClassCoverageSummary.queried} / 總人數 {queryClassCoverageSummary.total}，未查詢 {queryClassCoverageSummary.unqueried}
-                                            </div>
-                                            {queryClassUnqueriedPreview.length > 0 && (
-                                                <div className="mt-1.5 space-y-1">
-                                                    {queryClassUnqueriedPreview.map((row) => (
-                                                        <div key={row.id} className={`grid grid-cols-[5.5rem_1fr] gap-1.5 text-[10px] rounded-lg px-2 py-1 border ${darkMode ? 'border-white/10 bg-slate-900/55 text-slate-300' : 'border-slate-200 bg-slate-50 text-slate-600'}`}>
-                                                            <span className="font-mono">{row.id}</span>
-                                                            <span className="truncate">{row.name || '-'}</span>
-                                                        </div>
-                                                    ))}
-                                                    {queryClassCoverageSummary.unqueried > queryClassUnqueriedPreview.length && (
-                                                        <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                                                            尚有 {queryClassCoverageSummary.unqueried - queryClassUnqueriedPreview.length} 位未顯示
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )}
-                                            {queryClassCoverageSummary.total === 0 && (
-                                                <div className={`mt-2 text-[11px] font-semibold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                                                    目前班級名單尚未載入，請先確認日期與班級
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        <div className={`rounded-xl border p-2.5 ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
-                                            <div className={`text-[10px] font-black tracking-widest uppercase mb-2 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>兩小時查詢熱區</div>
-                                            {isQueryDeepInsightsPending ? (
-                                                <div className={`rounded-lg border px-3 py-3 text-center text-xs font-bold ${darkMode ? 'border-white/10 bg-slate-900/55 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
-                                                    正在整理熱區資料...
-                                                </div>
-                                            ) : (
-                                                <div className="grid grid-cols-2 gap-1.5">
-                                                    {queryBiHourBuckets.map((bucket) => (
-                                                        <div key={bucket.key} className={`rounded-lg border px-1.5 py-1.5 ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-slate-50'}`}>
-                                                            <div className={`text-[10px] font-bold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>{bucket.label}</div>
-                                                            <div className={`h-1.5 rounded-full overflow-hidden ${darkMode ? 'bg-slate-800' : 'bg-slate-200'}`}>
-                                                                <div
-                                                                  className="h-full rounded-full bg-[linear-gradient(90deg,#22c55e_0%,#0ea5e9_55%,#6366f1_100%)]"
-                                                                  style={{ width: `${bucket.count > 0 ? Math.max(8, Math.round(bucket.ratio * 100)) : 0}%` }}
-                                                                />
+                                    <div className={`rounded-xl border overflow-hidden ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`} style={{ contentVisibility: 'auto', containIntrinsicSize: '420px' }}>
+                                        <div className={`px-2.5 py-1.5 text-[10px] font-bold tracking-wide uppercase ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>每日查詢名單（由新到舊）</div>
+                                        <div className="max-h-[24rem] overflow-y-auto">
+                                            {queryEventsByDayFiltered.map((day) => (
+                                                <div key={day.dateKey} className={`border-t ${darkMode ? 'border-white/5' : 'border-slate-100'}`}>
+                                                    <div className={`px-2.5 py-1.5 text-[10px] font-black flex items-center justify-between ${darkMode ? 'text-slate-200 bg-slate-900/55' : 'text-slate-700 bg-slate-50/80'}`}>
+                                                        <span>{day.dateLabel}</span>
+                                                        <span className={`${darkMode ? 'text-emerald-300' : 'text-emerald-700'}`}>{day.items.length} 次</span>
+                                                    </div>
+                                                    <div>
+                                                        {day.items.map((event, idx) => (
+                                                            <div key={`${event.id}-${event.ts}-${idx}`} className={`grid grid-cols-[4.9rem_5.7rem_1fr_3.8rem] gap-1.5 px-2.5 py-1 text-[10px] ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                                                                <span className="font-mono">{event.timeLabel}</span>
+                                                                <span className="font-mono">{event.id}</span>
+                                                                <span className="truncate">{event.name || '-'}</span>
+                                                                <span className={`text-right text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>{event.relativeLabel}</span>
                                                             </div>
-                                                            <div className={`text-[10px] font-black mt-1 ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}>{bucket.count}</div>
-                                                        </div>
-                                                    ))}
+                                                        ))}
+                                                    </div>
                                                 </div>
-                                            )}
-                                        </div>
-
-                                        <div className={`rounded-xl border p-2.5 ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
-                                            <div className={`text-[10px] font-black tracking-widest uppercase mb-2 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>14日查詢趨勢</div>
-                                            {isQueryDeepInsightsPending ? (
-                                                <div className={`rounded-lg border px-3 py-3 text-center text-xs font-bold ${darkMode ? 'border-white/10 bg-slate-900/55 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
-                                                    正在整理趨勢資料...
-                                                </div>
-                                            ) : (
-                                                <div className="space-y-1 max-h-[11rem] overflow-y-auto pr-1">
-                                                    {queryDailyTrend.map((day) => (
-                                                        <div key={day.dateKey} className="grid grid-cols-[3.9rem_1fr_2rem] items-center gap-2">
-                                                            <span className={`text-[10px] font-bold ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>{day.label.slice(0, 5)}</span>
-                                                            <div className={`h-1.5 rounded-full overflow-hidden ${darkMode ? 'bg-slate-800' : 'bg-slate-200'}`}>
-                                                                <div
-                                                                  className="h-full rounded-full bg-[linear-gradient(90deg,#10b981_0%,#22c55e_35%,#0ea5e9_100%)]"
-                                                                  style={{ width: `${day.count > 0 ? Math.max(8, Math.round(day.ratio * 100)) : 0}%` }}
-                                                                />
-                                                            </div>
-                                                            <span className={`text-[10px] font-black text-right ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>{day.count}</span>
-                                                        </div>
-                                                    ))}
-                                                    {!queryDailyTrend.length && (
-                                                        <div className={`text-[11px] text-center font-semibold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                                                            目前沒有趨勢資料
-                                                        </div>
-                                                    )}
+                                            ))}
+                                            {!queryEventsByDayFiltered.length && (
+                                                <div className={`px-3 py-3 text-center text-xs ${darkMode ? 'text-slate-400' : 'text-slate-400'}`}>
+                                                    目前沒有符合條件的每日查詢資料
                                                 </div>
                                             )}
                                         </div>
                                     </div>
                                 </div>
 
-                                <div className={`rounded-xl border overflow-hidden ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`} style={{ contentVisibility: 'auto', containIntrinsicSize: '420px' }}>
-                                    <div className={`px-2.5 py-1.5 text-[10px] font-bold tracking-wide uppercase ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>每日查詢名單（由新到舊）</div>
-                                    <div className="max-h-[18rem] overflow-y-auto">
-                                        {queryEventsByDayFiltered.map((day) => (
-                                            <div key={day.dateKey} className={`border-t ${darkMode ? 'border-white/5' : 'border-slate-100'}`}>
-                                                <div className={`px-2.5 py-1.5 text-[10px] font-black flex items-center justify-between ${darkMode ? 'text-slate-200 bg-slate-900/55' : 'text-slate-700 bg-slate-50/80'}`}>
-                                                    <span>{day.dateLabel}</span>
-                                                    <span className={`${darkMode ? 'text-emerald-300' : 'text-emerald-700'}`}>{day.items.length} 次</span>
-                                                </div>
-                                                <div>
-                                                    {day.items.map((event, idx) => (
-                                                        <div key={`${event.id}-${event.ts}-${idx}`} className={`grid grid-cols-[4.9rem_5.7rem_1fr_3.8rem] gap-1.5 px-2.5 py-1 text-[10px] ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>
-                                                            <span className="font-mono">{event.timeLabel}</span>
-                                                            <span className="font-mono">{event.id}</span>
-                                                            <span className="truncate">{event.name || '-'}</span>
-                                                            <span className={`text-right text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>{event.relativeLabel}</span>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        ))}
-                                        {!queryEventsByDayFiltered.length && (
-                                            <div className={`px-3 py-3 text-center text-xs ${darkMode ? 'text-slate-400' : 'text-slate-400'}`}>
-                                                目前沒有符合條件的每日查詢資料
-                                            </div>
-                                        )}
-                                    </div>
+                                <div className={`rounded-lg border px-2.5 py-1.5 ${darkMode ? 'border-white/10 bg-slate-900/55 text-slate-300' : 'border-slate-200 bg-slate-50 text-slate-600'} text-[10px] font-semibold`}>
+                                    家長查詢效能：快取命中 <span className="font-black text-emerald-600">{parentQueryPerf.cacheHit}</span> / 未命中 <span className="font-black text-sky-600">{parentQueryPerf.cacheMiss}</span>，平均 <span className="font-black">{parentQueryPerf.avgMs}ms</span>，P95 <span className="font-black">{parentQueryPerf.p95Ms}ms</span>，最近一次 <span className="font-black">{parentQueryPerf.latestMs}ms</span>。
                                 </div>
-
-                                <div className="grid grid-cols-1 xl:grid-cols-[1.06fr_0.94fr] gap-2">
-                                    <div className={`rounded-xl border p-2.5 space-y-2 ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
-                                        <div className="flex items-center justify-between gap-2">
-                                            <div className={`text-[10px] font-black tracking-widest uppercase ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>資料品質中心</div>
-                                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
-                                                isQueryDeepInsightsPending
-                                                    ? (darkMode ? 'text-slate-200 border-white/15 bg-slate-800/70' : 'text-slate-600 border-slate-200 bg-slate-50')
-                                                    : dataQualitySummary.issueCount > 0
-                                                        ? (darkMode ? 'text-amber-200 border-amber-300/40 bg-amber-500/15' : 'text-amber-700 border-amber-200 bg-amber-50')
-                                                        : (darkMode ? 'text-emerald-200 border-emerald-300/35 bg-emerald-500/15' : 'text-emerald-700 border-emerald-200 bg-emerald-50')
-                                            }`}>
-                                                {isQueryDeepInsightsPending ? '整理中' : (dataQualitySummary.issueCount > 0 ? `${dataQualitySummary.issueCount} 項待檢查` : '狀態良好')}
-                                            </span>
-                                        </div>
-                                        {isQueryDeepInsightsPending ? (
-                                            <div className={`rounded-lg border px-3 py-3 text-center text-xs font-bold ${darkMode ? 'border-white/10 bg-slate-900/55 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
-                                                正在掃描資料品質，先不阻塞查詢監控主畫面。
-                                            </div>
-                                        ) : (
-                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5">
-                                            <div className={`rounded-lg border px-2 py-1.5 ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-slate-50'}`}>
-                                                <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>總學生數</div>
-                                                <div className={`text-[13px] font-black ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>{dataQualitySummary.totalStudents}</div>
-                                                <div className={`mt-0.5 text-[9px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>資料母體</div>
-                                            </div>
-                                            {qualityMetricCards.map((metric) => {
-                                                const hasIssue = metric.count > 0;
-                                                const isActive = activeQualityIssueType === metric.type;
-                                                const countClass = metric.tone === 'rose'
-                                                    ? (hasIssue ? 'text-rose-500' : (darkMode ? 'text-slate-100' : 'text-slate-700'))
-                                                    : (hasIssue ? 'text-amber-500' : (darkMode ? 'text-slate-100' : 'text-slate-700'));
-                                                return (
-                                                    <button
-                                                      key={metric.type}
-                                                      type="button"
-                                                      disabled={!hasIssue}
-                                                      onClick={() => setActiveQualityIssueType((prev) => (prev === metric.type ? '' : metric.type))}
-                                                      className={`rounded-lg border px-2 py-1.5 text-left transition-all ${
-                                                          darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-slate-50'
-                                                      } ${
-                                                          hasIssue ? 'cursor-pointer hover:-translate-y-[1px] hover:shadow-sm' : 'cursor-default opacity-85'
-                                                      } ${
-                                                          isActive ? (darkMode ? 'ring-1 ring-sky-300/50 border-sky-300/50' : 'ring-2 ring-sky-100 border-sky-300/65') : ''
-                                                      }`}
-                                                    >
-                                                        <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>{metric.label}</div>
-                                                        <div className={`text-[13px] font-black ${countClass}`}>{metric.count}</div>
-                                                        <div className={`mt-0.5 text-[9px] font-bold ${hasIssue ? (darkMode ? 'text-sky-300' : 'text-sky-600') : (darkMode ? 'text-slate-500' : 'text-slate-400')}`}>
-                                                            {hasIssue ? '點擊查看明細' : '-'}
-                                                        </div>
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                        )}
-                                        {!isQueryDeepInsightsPending && activeQualityIssueType && (
-                                            <div className={`rounded-lg border p-2 space-y-1.5 ${darkMode ? 'border-sky-300/30 bg-slate-900/55' : 'border-sky-200 bg-sky-50/60'}`}>
-                                                <div className="flex items-center justify-between gap-2">
-                                                    <div className={`text-[10px] font-black tracking-widest uppercase ${darkMode ? 'text-sky-200' : 'text-sky-700'}`}>
-                                                        {activeQualityIssueTitle || '問題明細'}
-                                                    </div>
-                                                    <button
-                                                      type="button"
-                                                      onClick={() => setActiveQualityIssueType('')}
-                                                      className={`text-[10px] font-black px-2 py-0.5 rounded-md transition-colors ${darkMode ? 'bg-slate-800 text-slate-200 hover:bg-slate-700' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'}`}
-                                                    >
-                                                      收起
-                                                    </button>
-                                                </div>
-                                                <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
-                                                    {activeQualityIssueItems.map((item) => (
-                                                        <div key={item.key} className={`rounded-lg border px-2 py-1 ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-white'}`}>
-                                                            <div className={`text-[10px] font-black ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>{item.primary}</div>
-                                                            {item.secondary && (
-                                                                <div className={`text-[10px] mt-0.5 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>{item.secondary}</div>
-                                                            )}
-                                                        </div>
-                                                    ))}
-                                                    {!activeQualityIssueItems.length && (
-                                                        <div className={`text-[10px] font-semibold text-center py-1.5 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                                                            目前沒有可顯示的問題明細
-                                                        </div>
-                                                    )}
-                                                </div>
-                                                {(qualityIssueCountByType[activeQualityIssueType] || 0) > activeQualityIssueItems.length && (
-                                                    <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                                                        僅顯示前 {activeQualityIssueItems.length} 筆，請先逐步清理後再查看其餘資料
-                                                    </div>
-                                                )}
-                                            </div>
-                                        )}
-                                        <div className={`rounded-lg border px-2.5 py-1.5 ${darkMode ? 'border-white/10 bg-slate-900/55 text-slate-300' : 'border-slate-200 bg-slate-50 text-slate-600'} text-[10px] font-semibold`}>
-                                            家長查詢效能：快取命中 <span className="font-black text-emerald-600">{parentQueryPerf.cacheHit}</span> / 未命中 <span className="font-black text-sky-600">{parentQueryPerf.cacheMiss}</span>，平均 <span className="font-black">{parentQueryPerf.avgMs}ms</span>，P95 <span className="font-black">{parentQueryPerf.p95Ms}ms</span>，最近一次 <span className="font-black">{parentQueryPerf.latestMs}ms</span>。
-                                        </div>
-                                    </div>
 
                                     <div className={`rounded-xl border p-2.5 space-y-2 ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
                                         <div className="flex items-center justify-between gap-2">
@@ -7619,7 +6896,6 @@ export default function App() {
                                             )}
                                         </div>
                                     </div>
-                                </div>
                                     </>
                                 )}
                             </div>
@@ -8066,6 +7342,88 @@ export default function App() {
                         className={`w-full text-center text-3xl font-bold tracking-[0.5em] p-4 rounded-xl outline-none border-2 transition-all shadow-inner ${darkMode ? 'bg-slate-900 border-slate-800 text-white focus:border-blue-500/50' : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-blue-200 focus:bg-white'}`}
                         placeholder=""
                     />
+                </div>
+            </div>
+        )}
+
+        {showImportFormatGuide && (
+            <div className="modal-backdrop-animate fixed inset-0 bg-black/58 backdrop-blur-sm flex items-center justify-center z-[64] px-4 py-[calc(env(safe-area-inset-top)+1.2rem)] pb-[calc(env(safe-area-inset-bottom)+1.2rem)]" onClick={() => setShowImportFormatGuide(false)}>
+                <div className={`modal-panel-animate w-full max-w-2xl rounded-[1.8rem] border overflow-hidden ${darkMode ? 'bg-slate-800 border-white/10' : 'bg-white border-slate-200 shadow-[0_26px_64px_rgba(15,23,42,0.2)]'}`} onClick={(event) => event.stopPropagation()}>
+                    <div className={`px-5 py-4 border-b ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-slate-50'}`}>
+                        <div className="flex items-start justify-between gap-3">
+                            <div>
+                                <h3 className={`text-base font-black tracking-tight ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>匯入格式說明</h3>
+                                <p className={`text-[11px] mt-1 font-semibold ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>匯入前先對照這份格式，能減少預檢失敗與錯誤日期被略過。</p>
+                            </div>
+                            <button onClick={() => setShowImportFormatGuide(false)} className={`p-1.5 rounded-full transition ${darkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-white text-slate-500 border border-slate-200'}`}>
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="px-5 py-4 space-y-3">
+                        <div className={`rounded-lg border px-3 py-2.5 ${darkMode ? 'border-white/10 bg-slate-900/45 text-slate-300' : 'border-slate-200 bg-slate-50 text-slate-600'}`}>
+                            <div className={`text-[10px] font-black tracking-widest uppercase mb-2 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>建議欄位順序</div>
+                            <div className="flex flex-wrap gap-1.5">
+                                {importFormatGuide.sampleHeaders.map((header) => (
+                                    <span key={header} className={`inline-flex rounded-full px-2 py-1 text-[10px] font-black ${darkMode ? 'bg-slate-800 text-slate-100 border border-white/10' : 'bg-white text-slate-700 border border-slate-200'}`}>
+                                        {header}
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className={`rounded-lg border overflow-hidden ${darkMode ? 'border-white/10 bg-slate-900/50' : 'border-slate-200 bg-white'}`}>
+                            <div className={`grid grid-cols-[5.2rem_1fr_5rem_4.4rem_3.3rem_3.3rem_3.3rem] px-3 py-2 text-[10px] font-bold tracking-wide ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>
+                                <span className="text-center">學號</span>
+                                <span className="text-center">姓名</span>
+                                <span className="text-center">日期</span>
+                                <span className="text-center">班級</span>
+                                <span className="text-center">國</span>
+                                <span className="text-center">英</span>
+                                <span className="text-center">數</span>
+                            </div>
+                            <div>
+                                {importFormatGuide.sampleRows.map((row, idx) => (
+                                    <div key={`import-guide-row-${idx}`} className={`grid grid-cols-[5.2rem_1fr_5rem_4.4rem_3.3rem_3.3rem_3.3rem] px-3 py-1.5 text-[11px] border-t ${darkMode ? 'border-white/10 text-slate-200' : 'border-slate-100 text-slate-700'}`}>
+                                        {row.map((cell, cellIdx) => (
+                                            <span key={`import-guide-cell-${idx}-${cellIdx}`} className={`${cellIdx === 1 ? 'truncate text-center' : 'text-center'} ${cellIdx === 0 || cellIdx === 2 ? 'font-mono' : ''}`}>
+                                                {cell}
+                                            </span>
+                                        ))}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            <div className={`rounded-lg border p-3 ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-slate-50'}`}>
+                                <div className={`text-[10px] font-black tracking-widest uppercase mb-2 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>欄位辨識規則</div>
+                                <div className="space-y-1.5">
+                                    {importFormatGuide.headerHints.map((hint) => (
+                                        <div key={hint} className={`text-[11px] leading-relaxed font-semibold ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>{hint}</div>
+                                    ))}
+                                </div>
+                            </div>
+                            <div className={`rounded-lg border p-3 ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-slate-50'}`}>
+                                <div className={`text-[10px] font-black tracking-widest uppercase mb-2 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>匯入注意事項</div>
+                                <div className="space-y-1.5">
+                                    {importFormatGuide.rules.map((rule) => (
+                                        <div key={rule} className={`text-[11px] leading-relaxed font-semibold ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>{rule}</div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className={`px-5 py-4 border-t flex justify-end ${darkMode ? 'border-white/10 bg-slate-900/50' : 'border-slate-200 bg-white'}`}>
+                        <button
+                          onClick={() => setShowImportFormatGuide(false)}
+                          className={`px-4 py-2 rounded-lg text-xs font-bold ${darkMode ? 'bg-slate-800 text-slate-200 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                        >
+                          關閉
+                        </button>
+                    </div>
                 </div>
             </div>
         )}

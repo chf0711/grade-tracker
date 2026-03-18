@@ -3548,7 +3548,7 @@ export default function App() {
           return true;
       }
       try {
-          await setDoc(getCohortSettingsDocRef(cohortId, 'class_averages_v18'), { averages: normalizedAverages }, { merge: true });
+          await setDoc(getCohortSettingsDocRef(cohortId, 'class_averages_v18'), { averages: normalizedAverages });
           if (showToast) {
               setStatusMsg(toastMessage);
               setTimeout(() => setStatusMsg(''), 2000);
@@ -3674,18 +3674,102 @@ export default function App() {
       }
       if (!deleteTarget) return;
       const targetWeekendID = getTestDateID(deleteTarget);
+      if (!targetWeekendID) {
+          setStatusMsg('刪除失敗：找不到目標考次');
+          setTimeout(() => setStatusMsg(''), 2200);
+          setDeleteTarget(null);
+          return;
+      }
       const newList = availableDates.filter((d) => getTestDateID(d) !== targetWeekendID);
-      setAvailableDates(newList);
-      setDatesCohortId(activeTeacherCohortId);
-      writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, activeTeacherCohortId), newList);
-      if (db) await setDoc(getCohortSettingsDocRef(activeTeacherCohortId, 'dates'), { list: newList }, { merge: true });
-      appendOperationLog({
-          kind: 'danger',
-          level: 'warn',
-          title: '刪除考次',
-          detail: targetWeekendID || deleteTarget
+      const nextStudents = [];
+      const changedStudents = [];
+
+      allStudentsData.forEach((student) => {
+          let changed = false;
+          const nextGrades = {};
+          Object.entries(student?.grades || {}).forEach(([sourceDate, grade]) => {
+              if (getTestDateID(sourceDate) === targetWeekendID) {
+                  changed = true;
+                  return;
+              }
+              nextGrades[sourceDate] = grade;
+          });
+          const nextStudent = changed ? { ...student, grades: nextGrades } : student;
+          nextStudents.push(nextStudent);
+          if (changed) changedStudents.push(nextStudent);
       });
-      setStatusMsg(`已刪除考次: ${targetWeekendID || deleteTarget}`); setTimeout(() => setStatusMsg(''), 2000); setDeleteTarget(null);
+
+      const nextClassAverages = Object.fromEntries(
+          Object.entries(classAverages || {}).filter(([dateKey]) => String(dateKey) !== String(targetWeekendID))
+      );
+      const currentWeekendID = batchDate ? getTestDateID(batchDate) : '';
+      const nextBatchDate = currentWeekendID === targetWeekendID
+          ? (newList[newList.length - 1] || '')
+          : batchDate;
+
+      setStatusMsg('刪除考次中...');
+      try {
+          const nowIso = new Date().toISOString();
+          if (db) {
+              const writes = [
+                  setDoc(getCohortSettingsDocRef(activeTeacherCohortId, 'dates'), { list: newList }, { merge: true }),
+                  setDoc(getCohortSettingsDocRef(activeTeacherCohortId, 'class_averages_v18'), { averages: nextClassAverages, updatedAt: nowIso })
+              ];
+              changedStudents.forEach((student) => {
+                  writes.push(
+                      setDoc(
+                          getCohortStudentDocRef(activeTeacherCohortId, student.id),
+                          { id: student.id, name: student.name, grades: student.grades, lastUpdated: nowIso },
+                          { merge: true }
+                      )
+                  );
+              });
+              await Promise.all(writes);
+          }
+
+          if (changedStudents.length > 0) {
+              await bumpStudentsVersion(activeTeacherCohortId);
+          }
+
+          setAvailableDates(newList);
+          setDatesCohortId(activeTeacherCohortId);
+          setAllStudentsData(nextStudents);
+          setTeacherStudentsCohortId(activeTeacherCohortId);
+          setClassAverages(nextClassAverages);
+          setClassAveragesCohortId(activeTeacherCohortId);
+          setBatchDate(nextBatchDate);
+          if (activeTeacherCohortId === activePublicCohortId) {
+              setCachedClassData(nextStudents);
+              setPublicStudentsCohortId(activeTeacherCohortId);
+          }
+          setGrades((prev) => {
+              const next = {};
+              Object.entries(prev || {}).forEach(([sourceDate, grade]) => {
+                  if (getTestDateID(sourceDate) === targetWeekendID) return;
+                  next[sourceDate] = grade;
+              });
+              return next;
+          });
+          resetBatchDraftState();
+
+          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, activeTeacherCohortId), newList);
+          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.students, activeTeacherCohortId), nextStudents);
+          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.classAverages, activeTeacherCohortId), nextClassAverages);
+
+          appendOperationLog({
+              kind: 'danger',
+              level: 'warn',
+              title: '刪除考次',
+              detail: `${targetWeekendID} / ${changedStudents.length} 位學生`
+          });
+          setStatusMsg(`已刪除考次: ${targetWeekendID}`);
+          setTimeout(() => setStatusMsg(''), 2200);
+          setDeleteTarget(null);
+      } catch (error) {
+          console.error('Delete date error:', error);
+          setStatusMsg('刪除考次失敗');
+          setTimeout(() => setStatusMsg(''), 2200);
+      }
   };
 
   const handleLoginSubmit = () => {

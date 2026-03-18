@@ -221,6 +221,68 @@
   animation: gt-fade-up var(--motion-medium) var(--ease-spring);
 }
 
+button {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-medium) var(--ease-standard),
+    border-color var(--motion-medium) var(--ease-standard),
+    color var(--motion-medium) var(--ease-standard),
+    opacity var(--motion-fast) var(--ease-standard),
+    filter var(--motion-medium) var(--ease-standard);
+}
+
+button::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.3) 0%,
+      rgba(255, 255, 255, 0.12) 34%,
+      rgba(255, 255, 255, 0) 72%
+    );
+  opacity: 0.48;
+  transition:
+    opacity var(--motion-medium) var(--ease-standard),
+    transform var(--motion-medium) var(--ease-standard);
+}
+
+button:hover:not(:disabled) {
+  transform: translate3d(0, -1px, 0);
+  filter: saturate(1.03) brightness(1.01);
+}
+
+button:hover:not(:disabled)::after {
+  opacity: 0.72;
+  transform: translate3d(0, -1px, 0);
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.985);
+  filter: saturate(1);
+}
+
+button:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.9),
+    0 0 0 4px rgba(14, 165, 233, 0.14);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  filter: saturate(0.84);
+}
+
 .btn-sheen {
   position: relative;
   overflow: hidden;
@@ -228,7 +290,10 @@
   transition:
     transform var(--motion-fast) var(--ease-standard),
     box-shadow var(--motion-medium) var(--ease-standard),
-    filter var(--motion-medium) var(--ease-standard);
+    filter var(--motion-medium) var(--ease-standard),
+    background-color var(--motion-medium) var(--ease-standard),
+    border-color var(--motion-medium) var(--ease-standard),
+    color var(--motion-medium) var(--ease-standard);
   will-change: transform;
 }
 
@@ -245,14 +310,24 @@
   );
   mix-blend-mode: screen;
   opacity: 0;
+  z-index: 0;
+}
+
+.btn-sheen > * {
+  position: relative;
+  z-index: 1;
 }
 
 .btn-sheen:hover::before {
   animation: gt-sheen-sweep 760ms var(--ease-standard);
 }
 
-.btn-sheen:active {
-  transform: scale(0.98);
+.btn-sheen:hover:not(:disabled) {
+  filter: saturate(1.05) brightness(1.015);
+}
+
+.btn-sheen:active:not(:disabled) {
+  transform: scale(0.982);
 }
 
 .btn-sheen:disabled::before {
@@ -458,6 +533,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  button,
+  button::after,
   .hero-reveal,
   .list-fade-in,
   .panel-fade-in,

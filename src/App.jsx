@@ -5384,6 +5384,55 @@ export default function App() {
       setTimeout(() => setStatusMsg(''), 2000);
   };
 
+  const handleDownloadImportTemplate = useCallback(async () => {
+      if (!window.XLSX) {
+          setStatusMsg('Excel 模組載入中，請稍後');
+          try {
+              await ensureXlsxReady();
+          } catch (error) {
+              console.error('XLSX load error:', error);
+              setStatusMsg('Excel 模組載入失敗');
+              setTimeout(() => setStatusMsg(''), 2000);
+              return;
+          }
+      }
+
+      const workbook = window.XLSX.utils.book_new();
+      const templateRows = [
+          importFormatGuide.sampleHeaders,
+          ...importFormatGuide.sampleRows
+      ];
+      const templateSheet = window.XLSX.utils.aoa_to_sheet(templateRows);
+      templateSheet['!cols'] = [
+          { wch: 12 },
+          { wch: 14 },
+          { wch: 12 },
+          { wch: 10 },
+          { wch: 8 },
+          { wch: 8 },
+          { wch: 8 }
+      ];
+      window.XLSX.utils.book_append_sheet(workbook, templateSheet, '成績匯入範本');
+
+      const guideRows = [
+          ['項目', '說明'],
+          ['建議欄位', importFormatGuide.sampleHeaders.join(' / ')],
+          ...importFormatGuide.headerHints.map((text, index) => [`欄位辨識 ${index + 1}`, text]),
+          ...importFormatGuide.rules.map((text, index) => [`注意事項 ${index + 1}`, text])
+      ];
+      const guideSheet = window.XLSX.utils.aoa_to_sheet(guideRows);
+      guideSheet['!cols'] = [
+          { wch: 16 },
+          { wch: 72 }
+      ];
+      window.XLSX.utils.book_append_sheet(workbook, guideSheet, '匯入說明');
+
+      const safeCohort = String(activeTeacherCohortId || 'template').replace(/[^\w-]/g, '_');
+      window.XLSX.writeFile(workbook, `import_template_${safeCohort}.xlsx`);
+      setStatusMsg('已下載匯入範本');
+      setTimeout(() => setStatusMsg(''), 1800);
+  }, [activeTeacherCohortId, ensureXlsxReady, importFormatGuide]);
+
   useEffect(() => {
       if (teacherViewMode !== 'batch' || batchInsightTab !== 'grades') return;
       const totalRows = batchRowsForDisplay.length;
@@ -6228,10 +6277,17 @@ export default function App() {
                                     </button>
                                     <button
                                       type="button"
-                                      onClick={() => setShowImportFormatGuide(true)}
-                                      className={`px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors border ${darkMode ? 'text-slate-200 bg-slate-900/55 border-white/10 hover:bg-slate-800' : 'text-slate-600 bg-white border-slate-200 hover:bg-slate-50 shadow-sm'}`}
+                                      onClick={handleDownloadImportTemplate}
+                                      className={`px-3 py-2.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors border ${darkMode ? 'text-slate-200 bg-slate-900/55 border-white/10 hover:bg-slate-800' : 'text-slate-600 bg-white border-slate-200 hover:bg-slate-50 shadow-sm'}`}
                                     >
-                                        <Info className="w-4 h-4" /> 匯入格式
+                                        <ArrowDownWideNarrow className="w-3.5 h-3.5" /> 下載範本.xlsx
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setShowImportFormatGuide(true)}
+                                      className={`px-3 py-2.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors border ${darkMode ? 'text-slate-200 bg-slate-900/55 border-white/10 hover:bg-slate-800' : 'text-slate-600 bg-white border-slate-200 hover:bg-slate-50 shadow-sm'}`}
+                                    >
+                                        <Info className="w-3.5 h-3.5" /> 匯入格式
                                     </button>
                                     <input ref={importFileInputRef} type="file" accept=".xlsx, .xls" className="hidden" onChange={handleExcelUpload} />
                                 </>

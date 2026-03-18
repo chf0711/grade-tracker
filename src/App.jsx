@@ -7176,7 +7176,7 @@ export default function App() {
                        <button onClick={() => setViewData(null)} className={`${BUTTON_SYSTEM.icon} absolute top-0 right-0 z-20 p-2 rounded-full backdrop-blur-md transition-colors ${darkMode ? 'text-slate-400 hover:text-white bg-white/5' : 'text-slate-500 hover:text-slate-700 bg-white border border-slate-200'}`}><LogOut className="w-4 h-4"/></button>
 
                        {viewData.prob && viewData.prob !== '-' && (
-                           <div className="absolute right-0 top-12 sm:top-[3.35rem] text-right">
+                           <div className="absolute right-0 top-[3.9rem] sm:top-[4.3rem] text-right">
                                <div className={`text-[9px] font-bold uppercase tracking-[0.28em] ${darkMode ? 'text-emerald-300/85' : 'text-emerald-700/85'}`}>錄取機率</div>
                                <div className="mt-1 flex items-end justify-end gap-1 leading-none">
                                    <span className="text-[2.45rem] sm:text-[3rem] font-black tracking-tight tabular-nums" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>{viewData.prob}</span>

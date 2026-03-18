@@ -386,48 +386,11 @@ const writeParentQueryCache = (studentId, dataVersion, result) => {
     writeLocalCache(LOCAL_CACHE_KEYS.parentQueryResults, Object.fromEntries(sortedEntries));
 };
 
-const normalizeSearchText = (value) =>
-    String(value || '')
-        .trim()
-        .replace(/\s+/g, '')
-        .toUpperCase();
-
-const findStudentByIdOrName = (students, keyword) => {
-    if (!Array.isArray(students) || students.length === 0) {
-        return { student: null, duplicateName: false };
-    }
-
-    const rawKeyword = String(keyword || '').trim();
-    if (!rawKeyword) return { student: null, duplicateName: false };
-
-    const normalizedId = rawKeyword.toUpperCase();
-    const byId = students.find((student) => String(student?.id || '').toUpperCase() === normalizedId) || null;
-    if (byId) return { student: byId, duplicateName: false };
-
-    const normalizedName = normalizeSearchText(rawKeyword);
-    if (!normalizedName) return { student: null, duplicateName: false };
-
-    const exactNameMatches = students.filter(
-        (student) => normalizeSearchText(student?.name) === normalizedName
-    );
-    if (exactNameMatches.length === 1) {
-        return { student: exactNameMatches[0], duplicateName: false };
-    }
-    if (exactNameMatches.length > 1) {
-        return { student: null, duplicateName: true };
-    }
-
-    const fuzzyNameMatches = students.filter((student) =>
-        normalizeSearchText(student?.name).includes(normalizedName)
-    );
-    if (fuzzyNameMatches.length === 1) {
-        return { student: fuzzyNameMatches[0], duplicateName: false };
-    }
-    if (fuzzyNameMatches.length > 1) {
-        return { student: null, duplicateName: true };
-    }
-
-    return { student: null, duplicateName: false };
+const findStudentById = (students, keyword) => {
+    if (!Array.isArray(students) || students.length === 0) return null;
+    const normalizedId = String(keyword || '').trim().toUpperCase();
+    if (!normalizedId) return null;
+    return students.find((student) => String(student?.id || '').toUpperCase() === normalizedId) || null;
 };
 
 const PHASES = [
@@ -533,7 +496,19 @@ const buildWeekendGradeEntryMap = (grades, getDateID) => {
 };
 
 const deriveDatePoolFromStudents = (students = []) => sanitizeDateList(
-    students.flatMap((student) => Object.keys(student?.grades || {}))
+    students.flatMap((student) => (
+        Object.entries(student?.grades || {})
+            .filter(([, grade]) => {
+                if (!grade) return false;
+                return (
+                    (grade.chi !== '' && grade.chi !== undefined && grade.chi !== null) ||
+                    (grade.eng !== '' && grade.eng !== undefined && grade.eng !== null) ||
+                    (grade.math !== '' && grade.math !== undefined && grade.math !== null) ||
+                    (grade.total !== '' && grade.total !== undefined && grade.total !== null)
+                );
+            })
+            .map(([date]) => date)
+    ))
 );
 
 const mergeDatePools = (...dateLists) => sanitizeDateList(dateLists.flatMap((list) => Array.isArray(list) ? list : []));
@@ -2525,8 +2500,10 @@ export default function App() {
 
   const loadTeacherMessage = useCallback(async (options = {}) => {
       const force = Boolean(options && options.force);
+      const hydrateState = options?.hydrateState !== false;
       const cohortId = String(options?.cohortId || activeDataCohortId || LEGACY_COHORT_ID);
       const hydrateMessageState = (raw) => {
+          if (!hydrateState) return;
           const nextGlobalMessage = String(raw?.globalMessage ?? raw?.message ?? '').trim();
           const nextByStudentMessages = normalizeTeacherStudentMessages(raw?.byStudent);
           setTeacherGlobalMessage(nextGlobalMessage);
@@ -2548,15 +2525,17 @@ export default function App() {
       }
 
       if (!db) {
-          setTeacherGlobalMessage('');
-          setTeacherGlobalMessageDraft('');
-          setTeacherStudentMessages({});
-          setTeacherStudentMessageDrafts({});
-          setTeacherMessageCohortId(cohortId);
+          if (hydrateState) {
+              setTeacherGlobalMessage('');
+              setTeacherGlobalMessageDraft('');
+              setTeacherStudentMessages({});
+              setTeacherStudentMessageDrafts({});
+              setTeacherMessageCohortId(cohortId);
+          }
           return { globalMessage: '', byStudent: {} };
       }
 
-      setTeacherMessageLoading(true);
+      if (hydrateState) setTeacherMessageLoading(true);
       try {
           const messageDocRef = getCohortSettingsDocRef(cohortId, TEACHER_MESSAGE_DOC_ID);
           const docSnap = await getDoc(messageDocRef);
@@ -2572,7 +2551,7 @@ export default function App() {
           console.error('Load teacher message error:', e);
           return { globalMessage: '', byStudent: {} };
       } finally {
-          setTeacherMessageLoading(false);
+          if (hydrateState) setTeacherMessageLoading(false);
       }
   }, [activeDataCohortId, getCohortCacheKey, getCohortSettingsDocRef]);
 
@@ -2881,6 +2860,88 @@ export default function App() {
       loadStudentsVersion,
       normalizeGrades,
       resetBatchDraftState,
+      resolveScopedDateId
+  ]);
+
+  const loadParentSearchStudents = useCallback(async (cohortId, options = {}) => {
+      const normalizedId = String(cohortId || LEGACY_COHORT_ID);
+      const fallbackDates = getDefaultDatesForCohort(normalizedId, cohortOptions);
+      const datePool = sanitizeDateList(options?.datePool || fallbackDates);
+      const getDateIDForCohort = (dateStr) => resolveScopedDateId(dateStr, normalizedId, datePool);
+      const cacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.students, normalizedId);
+      const versionCacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.studentsVersion, normalizedId);
+      const cachedStudents = readLocalCache(cacheKey, STUDENT_CACHE_TTL_MS);
+      const hasCachedStudents = Array.isArray(cachedStudents) && cachedStudents.length > 0;
+
+      if (hasCachedStudents) {
+          const remoteVersion = await loadStudentsVersion(normalizedId);
+          const cachedVersion = String(readLocalCache(versionCacheKey, SETTINGS_CACHE_TTL_MS) || '').trim();
+          if (remoteVersion && cachedVersion && remoteVersion === cachedVersion) {
+              return cachedStudents;
+          }
+      }
+
+      if (!db) {
+          return hasCachedStudents ? cachedStudents : [];
+      }
+
+      const studentsMap = {};
+      let cleanedInvalidDateCount = 0;
+      const cleanupPayloads = [];
+      const querySnapshot = await getDocs(getCohortStudentsCollectionRef(normalizedId));
+
+      querySnapshot.forEach((studentDoc) => {
+          const data = studentDoc.data();
+          const normalizedResult = normalizeGrades(data.grades, { withMeta: true, datePool, getDateID: getDateIDForCohort });
+          const sanitizedData = { ...data, grades: normalizedResult.normalized };
+
+          if (normalizedResult.changed && data.id) {
+              cleanedInvalidDateCount += normalizedResult.removedInvalidDates;
+              cleanupPayloads.push({
+                  id: data.id,
+                  payload: { ...sanitizedData, lastUpdated: new Date().toISOString() }
+              });
+          }
+
+          studentsMap[data.id] = sanitizedData;
+      });
+
+      const sortedStudents = Object.values(studentsMap).sort((a, b) => a.id.localeCompare(b.id));
+      writeLocalCache(cacheKey, sortedStudents);
+      let remoteVersion = await loadStudentsVersion(normalizedId, { force: true });
+      if (!remoteVersion) {
+          remoteVersion = await bumpStudentsVersion(normalizedId);
+      }
+      if (remoteVersion) {
+          writeLocalCache(versionCacheKey, remoteVersion);
+      }
+
+      if (cleanupPayloads.length > 0) {
+          void Promise.all(
+              cleanupPayloads.map((item) =>
+                  setDoc(getCohortStudentDocRef(normalizedId, item.id), item.payload)
+              )
+          ).then(() => {
+              setStatusMsg(
+                  cleanedInvalidDateCount > 0
+                      ? `已自動刪除 ${cleanedInvalidDateCount} 筆不合理日期資料`
+                      : `已自動整理 ${cleanupPayloads.length} 筆重複考次資料`
+              );
+              setTimeout(() => setStatusMsg(''), 2400);
+          }).catch((err) => {
+              console.error('Parent search cleanup invalid student dates error:', err);
+          });
+      }
+
+      return sortedStudents;
+  }, [
+      bumpStudentsVersion,
+      cohortOptions,
+      getCohortCacheKey,
+      getCohortStudentDocRef,
+      getCohortStudentsCollectionRef,
+      loadStudentsVersion,
+      normalizeGrades,
       resolveScopedDateId
   ]);
 
@@ -4652,6 +4713,23 @@ export default function App() {
       return signatureById;
   }, [cachedClassData, getTestDateID]);
 
+  const getCachedStudentsForParentSearch = useCallback((cohortId) => {
+      const normalizedId = String(cohortId || LEGACY_COHORT_ID);
+      if (publicStudentsCohortId === normalizedId && cachedClassData.length > 0) {
+          return cachedClassData;
+      }
+      if (teacherStudentsCohortId === normalizedId && allStudentsData.length > 0) {
+          return allStudentsData;
+      }
+      const localCachedStudents = readLocalCache(
+          getCohortCacheKey(LOCAL_CACHE_KEYS.students, normalizedId),
+          STUDENT_CACHE_TTL_MS
+      );
+      return Array.isArray(localCachedStudents) && localCachedStudents.length > 0
+          ? localCachedStudents
+          : [];
+  }, [allStudentsData, cachedClassData, getCohortCacheKey, publicStudentsCohortId, teacherStudentsCohortId]);
+
   const handleParentSearch = async () => {
     if (!searchId.trim()) return;
     if (!user) {
@@ -4672,149 +4750,87 @@ export default function App() {
     try {
       const rawSearchKeyword = searchId.trim();
       const normalizedSearchId = rawSearchKeyword.toUpperCase();
-      const matchFromList = (list) => findStudentByIdOrName(list, rawSearchKeyword);
       const likelyStudentId = /^[A-Z0-9_-]{3,24}$/.test(normalizedSearchId);
+      if (!likelyStudentId) {
+          setSearchError('請輸入正確學號');
+          updateParentQueryPerf(performance.now() - searchStartTs, false);
+          return;
+      }
       let resolvedSearch = null;
 
       for (const cohortId of parentSearchCohortOrder) {
-          const effectiveDates = datesCohortId === cohortId && sortedAvailableDatesAsc.length > 0
-              ? sortedAvailableDatesAsc
-              : await loadDates({ cohortId });
-          const effectiveClassAverages = classAveragesCohortId === cohortId
-              ? classAverages
-              : await loadClassAverages({ cohortId, datePool: effectiveDates });
-          const getSearchDateID = (dateStr) => resolveScopedDateId(dateStr, cohortId, effectiveDates);
-          const cohortStudentCacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.students, cohortId);
-          const cohortStudentVersionCacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.studentsVersion, cohortId);
-          const hasPublicCachedStudents = publicStudentsCohortId === cohortId && cachedClassData.length > 0;
-          const hasTeacherStudentsForCohort = teacherStudentsCohortId === cohortId && allStudentsData.length > 0;
-          let data = null;
-          let fullClassData = [];
-          let duplicateName = false;
-
-          if (hasPublicCachedStudents) {
-              fullClassData = cachedClassData;
-              const matched = matchFromList(cachedClassData);
-              data = matched.student;
-              duplicateName = matched.duplicateName;
-          } else if (hasTeacherStudentsForCohort) {
-              fullClassData = allStudentsData;
-              const matched = matchFromList(allStudentsData);
-              data = matched.student;
-              duplicateName = matched.duplicateName;
+          const quickClassData = getCachedStudentsForParentSearch(cohortId);
+          if (quickClassData.length > 0) {
+              const matchedStudent = findStudentById(quickClassData, normalizedSearchId);
+              if (matchedStudent) {
+                  resolvedSearch = {
+                      cohortId,
+                      data: matchedStudent,
+                      fullClassData: quickClassData
+                  };
+                  break;
+              }
           }
 
-          if (!data && duplicateName) {
-              setSearchError('同名學生超過 1 位，請改用學號查詢');
-              updateParentQueryPerf(performance.now() - searchStartTs, false);
-              return;
-          }
-
-          if (db && !data && likelyStudentId) {
+          if (db && likelyStudentId) {
+              const cachedDatePool = sanitizeDateList(
+                  readLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, cohortId)) || getDefaultDatesForCohort(cohortId, cohortOptions)
+              );
+              const getCachedDateID = (dateStr) => resolveScopedDateId(dateStr, cohortId, cachedDatePool);
               const docRef = getCohortStudentDocRef(cohortId, normalizedSearchId);
               const docSnap = await getDoc(docRef);
               if (docSnap.exists()) {
                   const rawData = docSnap.data();
-                  const normalizedResult = normalizeGrades(rawData.grades, { withMeta: true, cohortId, datePool: effectiveDates, getDateID: getSearchDateID });
-                  data = { ...rawData, grades: normalizedResult.normalized };
+                  const normalizedResult = normalizeGrades(rawData.grades, {
+                      withMeta: true,
+                      cohortId,
+                      datePool: cachedDatePool,
+                      getDateID: getCachedDateID
+                  });
+                  const normalizedStudent = { ...rawData, grades: normalizedResult.normalized };
                   if (normalizedResult.changed && rawData.id) {
                       void setDoc(
                           getCohortStudentDocRef(cohortId, rawData.id),
                           { ...rawData, grades: normalizedResult.normalized, lastUpdated: new Date().toISOString() }
                       ).catch((err) => console.error('Parent search cleanup invalid date error:', err));
                   }
+                  resolvedSearch = {
+                      cohortId,
+                      data: normalizedStudent,
+                      fullClassData: quickClassData.some((student) => String(student?.id || '').toUpperCase() === normalizedSearchId)
+                          ? quickClassData
+                          : []
+                  };
+                  break;
               }
+              continue;
           }
-
-          if (db && fullClassData.length === 0) {
-              const cachedStudents = readLocalCache(cohortStudentCacheKey, STUDENT_CACHE_TTL_MS);
-              let canReuseCachedStudents = Array.isArray(cachedStudents) && cachedStudents.length > 0;
-              if (canReuseCachedStudents) {
-                  const remoteVersion = await loadStudentsVersion(cohortId);
-                  const cachedVersion = String(readLocalCache(cohortStudentVersionCacheKey, SETTINGS_CACHE_TTL_MS) || '').trim();
-                  canReuseCachedStudents = Boolean(remoteVersion && cachedVersion && remoteVersion === cachedVersion);
-              }
-              if (canReuseCachedStudents) {
-                  fullClassData = cachedStudents;
-              } else {
-                  const qSnap = await getDocs(getCohortStudentsCollectionRef(cohortId));
-                  fullClassData = [];
-                  const cleanupPayloads = [];
-                  qSnap.forEach((docItem) => {
-                      const rawData = docItem.data();
-                      const normalizedResult = normalizeGrades(rawData.grades, { withMeta: true, cohortId, datePool: effectiveDates, getDateID: getSearchDateID });
-                      fullClassData.push({ ...rawData, grades: normalizedResult.normalized });
-                      if (normalizedResult.changed && rawData.id) {
-                          cleanupPayloads.push({
-                              id: rawData.id,
-                              payload: { ...rawData, grades: normalizedResult.normalized, lastUpdated: new Date().toISOString() }
-                          });
-                      }
-                  });
-                  if (cleanupPayloads.length > 0) {
-                      void Promise.all(
-                          cleanupPayloads.map((item) =>
-                              setDoc(getCohortStudentDocRef(cohortId, item.id), item.payload)
-                          )
-                      ).catch((err) => console.error('Parent search cleanup invalid date error:', err));
-                  }
-                  writeLocalCache(cohortStudentCacheKey, fullClassData);
-                  let remoteVersion = await loadStudentsVersion(cohortId, { force: true });
-                  if (!remoteVersion) {
-                      remoteVersion = await bumpStudentsVersion(cohortId);
-                  }
-                  if (remoteVersion) {
-                      writeLocalCache(cohortStudentVersionCacheKey, remoteVersion);
-                  }
-              }
-          }
-
-          if (!data && fullClassData.length > 0) {
-              const matched = matchFromList(fullClassData);
-              if (matched.duplicateName) {
-                  setSearchError('同名學生超過 1 位，請改用學號查詢');
-                  updateParentQueryPerf(performance.now() - searchStartTs, false);
-                  return;
-              }
-              data = matched.student;
-          }
-
-          if (!data) continue;
-
-          resolvedSearch = {
-              cohortId,
-              data,
-              fullClassData,
-              effectiveDates,
-              effectiveClassAverages,
-              getSearchDateID,
-              hasPublicCachedStudents,
-              hasTeacherStudentsForCohort
-          };
-          break;
       }
 
       if (!resolvedSearch) {
-          setSearchError('查無此學號或姓名');
+          setSearchError('查無此學號');
           updateParentQueryPerf(performance.now() - searchStartTs, false);
           return;
       }
 
       const {
           cohortId: foundCohortId,
-          data,
-          fullClassData,
-          effectiveDates,
-          effectiveClassAverages,
-          getSearchDateID,
-          hasPublicCachedStudents,
-          hasTeacherStudentsForCohort
+          data: matchedStudent,
+          fullClassData
       } = resolvedSearch;
 
-      const sortedDates = effectiveDates;
-      const contextData = fullClassData.length > 0
-          ? fullClassData
-          : (hasPublicCachedStudents ? cachedClassData : (hasTeacherStudentsForCohort ? allStudentsData : []));
+      const sortedDates = datesCohortId === foundCohortId && sortedAvailableDatesAsc.length > 0
+          ? sortedAvailableDatesAsc
+          : await loadDates({ cohortId: foundCohortId });
+      const getSearchDateID = (dateStr) => resolveScopedDateId(dateStr, foundCohortId, sortedDates);
+      const [contextData, effectiveClassAverages, teacherMessagePayload] = await Promise.all([
+          fullClassData.length > 0
+              ? Promise.resolve(fullClassData)
+              : loadParentSearchStudents(foundCohortId, { datePool: sortedDates }),
+          loadClassAverages({ cohortId: foundCohortId, datePool: sortedDates }),
+          loadTeacherMessage({ cohortId: foundCohortId, hydrateState: false })
+      ]);
+      const data = contextData.find((student) => String(student?.id || '').toUpperCase() === String(matchedStudent?.id || '').toUpperCase()) || matchedStudent;
       const weekendOrder = new Map();
       sortedDates.forEach((date, index) => {
           const weekendID = getSearchDateID(date);
@@ -4822,7 +4838,6 @@ export default function App() {
               weekendOrder.set(weekendID, index);
           }
       });
-      const teacherMessagePayload = await loadTeacherMessage({ cohortId: foundCohortId });
       if (foundCohortId === activePublicCohortId) {
           setAvailableDates(sortedDates);
           setDatesCohortId(foundCohortId);
@@ -4847,6 +4862,7 @@ export default function App() {
 
       const cacheStudentId = String(data.id || '').toUpperCase();
       const cacheStudentKey = `${foundCohortId}::${cacheStudentId}`;
+      const hasPublicCachedStudents = publicStudentsCohortId === foundCohortId && cachedClassData.length > 0;
       const shouldReuseCachedVersionBase =
           foundCohortId === activePublicCohortId
           && hasPublicCachedStudents
@@ -4937,7 +4953,7 @@ export default function App() {
           const shouldReuseParentContext =
               foundCohortId === activePublicCohortId
               && sortedAvailableDatesAsc.length > 0
-              && effectiveDates === sortedAvailableDatesAsc
+              && sortedDates === sortedAvailableDatesAsc
               && publicStudentsCohortId === activePublicCohortId
               && datesCohortId === activePublicCohortId;
           const scoreContext = shouldReuseParentContext && parentSearchScoreContext
@@ -6183,7 +6199,7 @@ export default function App() {
                       className={`btn-sheen group w-full p-5 rounded-[1.45rem] border flex items-center gap-4 transition-all duration-200 backdrop-blur-xl ${darkMode ? 'bg-[#081c18]/82 border-emerald-200/22 shadow-[0_14px_32px_rgba(2,6,23,0.45)] hover:bg-[#0c2620]/90 hover:border-cyan-300/45 hover:-translate-y-0.5' : 'bg-white/94 border-white/95 shadow-[0_14px_32px_rgba(15,23,42,0.09)] hover:bg-white hover:border-emerald-200/90 hover:-translate-y-0.5'}`}
                     >
                       <div className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-colors ${darkMode ? 'bg-gradient-to-br from-cyan-500/24 to-emerald-400/20 text-cyan-100' : 'bg-gradient-to-br from-sky-100 to-emerald-100 text-sky-700'}`}><BarChart3 className="w-5 h-5" /></div>
-                      <div className="text-left flex-1"><h3 className={`text-base font-black ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>家長查詢</h3><p className={`text-[11px] mt-0.5 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>輸入學號或姓名查看分析</p></div>
+                      <div className="text-left flex-1"><h3 className={`text-base font-black ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>家長查詢</h3><p className={`text-[11px] mt-0.5 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>輸入學號查看分析</p></div>
                       <ChevronRight className={`w-4.5 h-4.5 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all ${darkMode ? 'text-slate-300' : 'text-slate-400'}`}/>
                    </button>
                 </div>
@@ -7144,7 +7160,7 @@ export default function App() {
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-sky-500 via-emerald-500 to-indigo-500"></div>
               <h2 className={`text-2xl font-black mb-8 tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>查詢成績</h2>
               <div className={`w-full p-2 rounded-2xl border transition-all mb-6 shadow-inner ${darkMode ? 'bg-[#08120d]/70 border-emerald-200/15 focus-within:ring-2 focus-within:ring-emerald-500/20' : 'bg-white/75 border-white/85 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100'}`}>
-                <input type="text" placeholder="請輸入學號或姓名" className={`w-full bg-transparent border-none px-4 py-3 outline-none text-xl font-bold text-center tracking-widest placeholder:text-base placeholder:tracking-normal placeholder:font-medium ${darkMode ? 'text-white placeholder:text-slate-600' : 'text-slate-800 placeholder:text-slate-400'}`} value={searchId} onChange={(e) => setSearchId(e.target.value)} />
+                <input type="text" placeholder="請輸入學號" className={`w-full bg-transparent border-none px-4 py-3 outline-none text-xl font-bold text-center tracking-widest placeholder:text-base placeholder:tracking-normal placeholder:font-medium ${darkMode ? 'text-white placeholder:text-slate-600' : 'text-slate-800 placeholder:text-slate-400'}`} value={searchId} onChange={(e) => setSearchId(e.target.value)} />
               </div>
               <button onClick={handleParentSearch} disabled={loading || !user} className={`${BUTTON_SYSTEM.primary} w-full bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-2xl font-bold text-lg shadow-sm transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 tracking-wide`}>{loading ? '查詢中...' : (!user ? '連線中...' : '開始查詢')}</button>
               {searchError && <p className="mt-6 text-red-500 text-xs font-bold bg-red-500/10 inline-block px-4 py-2 rounded-full animate-pulse">{searchError}</p>}
@@ -7160,30 +7176,23 @@ export default function App() {
                        <button onClick={() => setViewData(null)} className={`${BUTTON_SYSTEM.icon} absolute top-0 right-0 p-2 rounded-full backdrop-blur-md transition-colors ${darkMode ? 'text-slate-400 hover:text-white bg-white/5' : 'text-slate-500 hover:text-slate-700 bg-white border border-slate-200'}`}><LogOut className="w-4 h-4"/></button>
 
                        {viewData.prob && viewData.prob !== '-' && (
-                           <div className="absolute right-0 top-10 text-right">
-                               <div className={`text-[10px] font-bold uppercase tracking-widest ${darkMode ? 'text-emerald-300/85' : 'text-emerald-700/85'}`}>錄取機率</div>
-                               <div className="mt-0.5 flex items-end justify-end gap-1 leading-none">
-                                   <span className="text-[2.15rem] sm:text-[2.7rem] font-black tracking-tight tabular-nums" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>{viewData.prob}</span>
-                                   <span className="text-base sm:text-lg font-black mb-[0.22rem]" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>%</span>
+                           <div className="absolute right-0 top-11 sm:top-12 text-right">
+                               <div className={`text-[9px] font-bold uppercase tracking-[0.28em] ${darkMode ? 'text-emerald-300/85' : 'text-emerald-700/85'}`}>錄取機率</div>
+                               <div className="mt-1 flex items-end justify-end gap-1 leading-none">
+                                   <span className="text-[2.45rem] sm:text-[3rem] font-black tracking-tight tabular-nums" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>{viewData.prob}</span>
+                                   <span className="text-lg sm:text-xl font-black mb-[0.28rem]" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>%</span>
                                </div>
+                               <p className={`mt-1 text-[9px] font-medium ${darkMode ? 'text-slate-300/80' : 'text-slate-500'}`}>僅供參考</p>
                            </div>
                        )}
 
-                       <div className="pr-[7.1rem] sm:pr-[9rem]">
+                       <div className={viewData.prob && viewData.prob !== '-' ? 'pr-[7.8rem] sm:pr-[10rem]' : ''}>
                            <div className={`text-[9px] font-bold uppercase tracking-widest border inline-block px-2 py-1 rounded ${darkMode ? 'text-emerald-300 border-emerald-300/25' : 'text-emerald-700 border-emerald-200'}`}>Student Profile</div>
                            <div className="mt-2">
                                <h3 className={`text-2xl sm:text-3xl font-bold tracking-tighter break-words ${darkMode ? 'text-white' : 'text-slate-800'}`}>{viewData.name}</h3>
                                <p className="font-mono text-xs mt-1 font-bold text-slate-500">{viewData.id}</p>
                            </div>
                        </div>
-
-                       {viewData.prob && viewData.prob !== '-' && (
-                           <div className="mt-2 flex items-center justify-end gap-1.5 opacity-55">
-                                <p className={`text-[9px] font-medium ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
-                                    系統綜合歷史成績運算，<span className={`${darkMode ? 'text-white/90 border-white/20' : 'text-slate-700 border-slate-300'} border-b pb-0.5`}>僅供參考</span>
-                                </p>
-                           </div>
-                       )}
                    </div>
                 </div>
 

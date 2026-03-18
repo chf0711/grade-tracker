@@ -52,8 +52,9 @@ const SECURITY_CODE = String.fromCharCode(49, 49, 48, 55);
 const QUERY_COUNT_RESET_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000;
 const MAX_QUERY_EVENTS = 3000;
 const TEACHER_MESSAGE_DOC_ID = 'teacher_parent_message_v1';
+const STUDENT_DATA_VERSION_DOC_ID = 'students_data_version_v1';
 const SETTINGS_CACHE_TTL_MS = 10 * 60 * 1000;
-const STUDENT_CACHE_TTL_MS = 20 * 60 * 1000;
+const STUDENT_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const TEACHER_MESSAGE_CACHE_TTL_MS = 10 * 60 * 1000;
 const PARENT_QUERY_CACHE_TTL_MS = 20 * 60 * 1000;
 const MAX_PARENT_QUERY_CACHE_ENTRIES = 40;
@@ -72,6 +73,7 @@ const LOCAL_CACHE_KEYS = Object.freeze({
     dates: 'grade_tracker_cache_dates_v1',
     classAverages: 'grade_tracker_cache_class_averages_v18',
     students: 'grade_tracker_cache_students_v1',
+    studentsVersion: 'grade_tracker_cache_students_version_v1',
     teacherMessage: 'grade_tracker_cache_teacher_message_v1',
     queryStats: 'grade_tracker_cache_query_stats_v1',
     parentQueryResults: 'grade_tracker_cache_parent_query_results_v3',
@@ -461,20 +463,6 @@ const buildWeekendGradeEntryMap = (grades, getDateID) => {
     Object.entries(grades || {}).forEach(([sourceDate, grade]) => {
         const weekendID = getDateID(sourceDate);
         if (!weekendID) return;
-        const nextEntry = { sourceDate, grade };
-        if (shouldReplaceGradeEntry(weekendEntryMap[weekendID], nextEntry)) {
-            weekendEntryMap[weekendID] = nextEntry;
-        }
-    });
-    return weekendEntryMap;
-};
-
-const buildTargetWeekendGradeEntryMap = (grades, targetWeekendIds, getDateID) => {
-    if (!targetWeekendIds?.size) return {};
-    const weekendEntryMap = {};
-    Object.entries(grades || {}).forEach(([sourceDate, grade]) => {
-        const weekendID = getDateID(sourceDate);
-        if (!weekendID || !targetWeekendIds.has(weekendID)) return;
         const nextEntry = { sourceDate, grade };
         if (shouldReplaceGradeEntry(weekendEntryMap[weekendID], nextEntry)) {
             weekendEntryMap[weekendID] = nextEntry;
@@ -1301,6 +1289,7 @@ export default function App() {
   const importFileInputRef = useRef(null);
   const legacyImportUnlockUntilRef = useRef(0);
   const teacherCohortPreseedRef = useRef('');
+  const autoPruneNoticeKeyRef = useRef('');
   const currentBatchGradeInfoRef = useRef({});
   const batchRowsForDisplayRef = useRef([]);
   const parentQueryPerfRef = useRef({
@@ -1319,6 +1308,13 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [searchId, setSearchId] = useState('');
   const [viewData, setViewData] = useState(null);
+  const [parentViewContext, setParentViewContext] = useState({
+      cohortId: '',
+      dates: [],
+      classData: [],
+      classAverages: {},
+      teacherMessage: { globalMessage: '', byStudent: {} }
+  });
   const [searchError, setSearchError] = useState('');
   const [activeTab, setActiveTab] = useState('total');
   
@@ -1346,6 +1342,7 @@ export default function App() {
   const activePublicCohort = cohortOptionsById[activePublicCohortId] || DEFAULT_COHORT_OPTIONS[0];
   const activeDataCohortId = mode === 'parent' ? activePublicCohortId : activeTeacherCohortId;
   const activeDateContextCohortId = datesCohortId || activeDataCohortId || activeTeacherCohortId || NEXT_COHORT_ID;
+  const activeParentViewCohortId = viewData?.cohortId || parentViewContext.cohortId || activePublicCohortId;
   const getCohortLabel = useCallback(
       (cohortId) => cohortOptionsById[cohortId]?.label || String(cohortId || ''),
       [cohortOptionsById]
@@ -1418,6 +1415,45 @@ export default function App() {
       }
       return doc(db, 'artifacts', appId, 'public', 'data', 'cohorts', cohortId, 'students', `student_${studentId}`);
   }, [isLegacyCohort]);
+  const loadStudentsVersion = useCallback(async (cohortId, options = {}) => {
+      const force = Boolean(options?.force);
+      const normalizedId = String(cohortId || LEGACY_COHORT_ID);
+      const cacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.studentsVersion, normalizedId);
+      if (!force) {
+          const cachedVersion = readLocalCache(cacheKey, SETTINGS_CACHE_TTL_MS);
+          if (typeof cachedVersion === 'string' && cachedVersion.trim()) {
+              return cachedVersion;
+          }
+      }
+      if (!db) return '';
+      try {
+          const docSnap = await getDoc(getCohortSettingsDocRef(normalizedId, STUDENT_DATA_VERSION_DOC_ID));
+          const version = String(docSnap.data()?.version || '').trim();
+          if (version) {
+              writeLocalCache(cacheKey, version);
+          }
+          return version;
+      } catch (error) {
+          console.error('Load students version error:', error);
+          return '';
+      }
+  }, [getCohortCacheKey, getCohortSettingsDocRef]);
+  const bumpStudentsVersion = useCallback(async (cohortId) => {
+      const normalizedId = String(cohortId || LEGACY_COHORT_ID);
+      const nextVersion = new Date().toISOString();
+      writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.studentsVersion, normalizedId), nextVersion);
+      if (!db) return nextVersion;
+      try {
+          await setDoc(
+              getCohortSettingsDocRef(normalizedId, STUDENT_DATA_VERSION_DOC_ID),
+              { version: nextVersion, updatedAt: nextVersion },
+              { merge: true }
+          );
+      } catch (error) {
+          console.error('Bump students version error:', error);
+      }
+      return nextVersion;
+  }, [getCohortCacheKey, getCohortSettingsDocRef]);
 
   const appendOperationLog = useCallback((entry) => {
       const title = String(entry?.title || '').trim();
@@ -1561,6 +1597,24 @@ export default function App() {
       () => [...availableDates].sort(customDateSort),
       [availableDates]
   );
+  const parentAvailableDates = useMemo(
+      () => (viewData ? sanitizeDateList(parentViewContext.dates) : []),
+      [parentViewContext.dates, viewData]
+  );
+  const parentSortedAvailableDatesAsc = useMemo(
+      () => [...parentAvailableDates].sort(customDateSort),
+      [parentAvailableDates]
+  );
+  const parentClassData = useMemo(
+      () => (viewData ? (Array.isArray(parentViewContext.classData) ? parentViewContext.classData : []) : []),
+      [parentViewContext.classData, viewData]
+  );
+  const parentTeacherMessageContext = useMemo(
+      () => (viewData && parentViewContext.teacherMessage && typeof parentViewContext.teacherMessage === 'object'
+          ? parentViewContext.teacherMessage
+          : { globalMessage: '', byStudent: {} }),
+      [parentViewContext.teacherMessage, viewData]
+  );
   const sortedAvailableDatesDesc = useMemo(
       () => [...sortedAvailableDatesAsc].slice().reverse(),
       [sortedAvailableDatesAsc]
@@ -1582,6 +1636,10 @@ export default function App() {
       }
       return resolveScopedDateId(dateStr, activeDateContextCohortId, availableDates);
   }, [activeDateContextCohortId, availableDates, resolveScopedDateId, testDateIdLookup]);
+  const parentGetTestDateID = useCallback((dateStr) => {
+      if (!viewData) return '';
+      return resolveScopedDateId(dateStr, activeParentViewCohortId, parentAvailableDates);
+  }, [activeParentViewCohortId, parentAvailableDates, resolveScopedDateId, viewData]);
 
   const weekendLabelByDate = useMemo(() => {
       const labels = {};
@@ -1680,6 +1738,26 @@ export default function App() {
       return gradeMaps;
   }, [deferredStudentsForDerived, getTestDateID]);
 
+  const allStudentWeekendEntriesByStudentId = useMemo(() => {
+      const entryMaps = {};
+      allStudentsData.forEach((student) => {
+          entryMaps[student.id] = buildWeekendGradeEntryMap(student.grades, getTestDateID);
+      });
+      return entryMaps;
+  }, [allStudentsData, getTestDateID]);
+
+  const allStudentWeekendGradesByStudentId = useMemo(() => {
+      const gradeMaps = {};
+      Object.entries(allStudentWeekendEntriesByStudentId).forEach(([studentId, entryMap]) => {
+          const weekendGrades = {};
+          Object.entries(entryMap || {}).forEach(([weekendID, entry]) => {
+              weekendGrades[weekendID] = entry.grade;
+          });
+          gradeMaps[studentId] = weekendGrades;
+      });
+      return gradeMaps;
+  }, [allStudentWeekendEntriesByStudentId]);
+
   const allStudentsById = useMemo(
       () => Object.fromEntries(allStudentsData.map((student) => [student.id, student])),
       [allStudentsData]
@@ -1707,9 +1785,10 @@ export default function App() {
       const nextInfo = {};
       allStudentsData.forEach((student) => {
           const currentGrades = student.grades || {};
-          const existingKey = Object.keys(currentGrades).find((key) => getTestDateID(key) === batchDateID);
-          const sourceDate = existingKey || batchDateID || batchDate;
-          const persistedGrade = currentGrades[sourceDate] || {
+          const weekendEntries = allStudentWeekendEntriesByStudentId[student.id] || {};
+          const currentEntry = weekendEntries[batchDateID];
+          const sourceDate = currentEntry?.sourceDate || batchDateID || batchDate;
+          const persistedGrade = currentEntry?.grade || currentGrades[sourceDate] || {
               chi: '',
               eng: '',
               math: '',
@@ -1729,7 +1808,7 @@ export default function App() {
       });
 
       return nextInfo;
-  }, [allStudentsData, batchDate, batchDraftGradesByStudentId, defaultTeacherClassId, getTestDateID, shouldBuildBatchAnalytics, teacherClassFilter]);
+  }, [allStudentWeekendEntriesByStudentId, allStudentsData, batchDate, batchDraftGradesByStudentId, defaultTeacherClassId, getTestDateID, shouldBuildBatchAnalytics, teacherClassFilter]);
   currentBatchGradeInfoRef.current = currentBatchGradeInfoByStudentId;
 
   const batchProbCandidateIds = useMemo(() => {
@@ -1753,11 +1832,7 @@ export default function App() {
 
       allStudentsData.forEach((student) => {
           if (!targetIds.has(student.id)) return;
-          const weekendGrades = {};
-          const weekendEntries = buildWeekendGradeEntryMap(student.grades, getTestDateID);
-          Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
-              weekendGrades[weekendID] = entry.grade;
-          });
+          const weekendGrades = { ...(allStudentWeekendGradesByStudentId[student.id] || {}) };
           const currentBatchInfo = currentBatchGradeInfoByStudentId[student.id];
           if (currentBatchInfo && selectedBatchWeekendID) {
               weekendGrades[selectedBatchWeekendID] = currentBatchInfo.grade;
@@ -1766,7 +1841,7 @@ export default function App() {
       });
 
       return gradeMaps;
-  }, [allStudentsData, batchProbCandidateIds, currentBatchGradeInfoByStudentId, getTestDateID, selectedBatchWeekendID, shouldBuildBatchAnalytics]);
+  }, [allStudentWeekendGradesByStudentId, allStudentsData, batchProbCandidateIds, currentBatchGradeInfoByStudentId, selectedBatchWeekendID, shouldBuildBatchAnalytics]);
 
   const teacherProbabilityContext = useMemo(() => {
       if (mode !== 'teacher' || orderedWeekendIds.length === 0 || probabilityContextStudents.length === 0) {
@@ -1777,15 +1852,14 @@ export default function App() {
 
   const weekendScoreCountById = useMemo(() => {
       const counts = {};
-      allStudentsData.forEach((student) => {
-          const weekendEntries = buildWeekendGradeEntryMap(student.grades, getTestDateID);
-          Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
+      Object.values(allStudentWeekendEntriesByStudentId).forEach((weekendEntries) => {
+          Object.entries(weekendEntries || {}).forEach(([weekendID, entry]) => {
               if (!hasAnySubjectScore(entry.grade)) return;
               counts[weekendID] = (counts[weekendID] || 0) + 1;
           });
       });
       return counts;
-  }, [allStudentsData, getTestDateID]);
+  }, [allStudentWeekendEntriesByStudentId]);
 
   const latestPopulatedWeekendID = useMemo(() => {
       for (let idx = orderedWeekendIds.length - 1; idx >= 0; idx -= 1) {
@@ -1912,13 +1986,20 @@ export default function App() {
   useEffect(() => {
       if (mode !== 'parent' || !viewData?.chartData?.length) return;
       const latest = viewData.chartData[viewData.chartData.length - 1];
-      const nextPhase = resolvePhaseByDate(latest.weekendID || latest.date, sortedAvailableDatesAsc);
+      const nextPhase = resolvePhaseByDate(latest.weekendID || latest.date, parentSortedAvailableDatesAsc);
       setActivePhase(nextPhase);
-  }, [viewData, mode, sortedAvailableDatesAsc]);
+  }, [viewData, mode, parentSortedAvailableDatesAsc]);
 
   useEffect(() => {
       if (mode === 'parent') {
           setViewData(null);
+          setParentViewContext({
+              cohortId: '',
+              dates: [],
+              classData: [],
+              classAverages: {},
+              teacherMessage: { globalMessage: '', byStudent: {} }
+          });
           setSearchError('');
       }
   }, [mode]);
@@ -2033,6 +2114,7 @@ export default function App() {
 
   useEffect(() => {
       if (mode !== 'teacher' || loading || isBatchDirty) return;
+      if (datesCohortId !== activeTeacherCohortId || teacherStudentsCohortId !== activeTeacherCohortId) return;
       if (!availableDates.length || !allStudentsData.length) return;
 
       const hasScoreValue = (value) => {
@@ -2063,10 +2145,13 @@ export default function App() {
               .catch((err) => console.error('Auto prune empty dates error:', err));
       }
       const removedCount = availableDates.length - nextDates.length;
+      const pruneNoticeKey = `${activeTeacherCohortId}::${availableDates.join('|')}=>${nextDates.join('|')}`;
+      if (autoPruneNoticeKeyRef.current === pruneNoticeKey) return;
+      autoPruneNoticeKeyRef.current = pruneNoticeKey;
       setStatusMsg(`已自動刪除 ${removedCount} 個無學生資料日期`);
       const timer = setTimeout(() => setStatusMsg(''), 2200);
       return () => clearTimeout(timer);
-  }, [activeTeacherCohortId, allStudentsData.length, availableDates, deferredStudentGradeMapsByStudentId, getCohortCacheKey, getCohortSettingsDocRef, getTestDateID, isBatchDirty, loading, mode, user]);
+  }, [activeTeacherCohortId, allStudentsData.length, availableDates, datesCohortId, deferredStudentGradeMapsByStudentId, getCohortCacheKey, getCohortSettingsDocRef, getTestDateID, isBatchDirty, loading, mode, teacherStudentsCohortId, user]);
 
   const hasPendingBatchChanges = mode === 'teacher' && teacherViewMode === 'batch' && isBatchDirty;
 
@@ -2371,7 +2456,10 @@ export default function App() {
           const cachedMessage = readLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.teacherMessage, cohortId), TEACHER_MESSAGE_CACHE_TTL_MS);
           if (cachedMessage && typeof cachedMessage === 'object') {
               hydrateMessageState(cachedMessage);
-              return;
+              return {
+                  globalMessage: String(cachedMessage?.globalMessage ?? cachedMessage?.message ?? '').trim(),
+                  byStudent: normalizeTeacherStudentMessages(cachedMessage?.byStudent)
+              };
           }
       }
 
@@ -2381,7 +2469,7 @@ export default function App() {
           setTeacherStudentMessages({});
           setTeacherStudentMessageDrafts({});
           setTeacherMessageCohortId(cohortId);
-          return;
+          return { globalMessage: '', byStudent: {} };
       }
 
       setTeacherMessageLoading(true);
@@ -2395,8 +2483,10 @@ export default function App() {
           };
           hydrateMessageState(payload);
           writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.teacherMessage, cohortId), payload);
+          return payload;
       } catch (e) {
           console.error('Load teacher message error:', e);
+          return { globalMessage: '', byStudent: {} };
       } finally {
           setTeacherMessageLoading(false);
       }
@@ -2563,9 +2653,11 @@ export default function App() {
       };
       try {
           const cacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.students, cohortId);
+          const versionCacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.studentsVersion, cohortId);
           const sessionKey = getStudentSessionKey(cohortId);
           const cachedStudents = readLocalCache(cacheKey, STUDENT_CACHE_TTL_MS);
           const hasCachedStudents = Array.isArray(cachedStudents) && cachedStudents.length > 0;
+          let remoteVersion = '';
           const hasSessionSynced =
               typeof window !== 'undefined'
               && sessionStorage.getItem(sessionKey) === '1';
@@ -2581,7 +2673,18 @@ export default function App() {
               });
               resetBatchDraftState();
               releaseLoading();
-              if (hasSessionSynced || !db) {
+              if (!db) {
+                  return cachedStudents;
+              }
+              if (hasSessionSynced) {
+                  return cachedStudents;
+              }
+              remoteVersion = await loadStudentsVersion(cohortId);
+              const cachedVersion = String(readLocalCache(versionCacheKey, SETTINGS_CACHE_TTL_MS) || '').trim();
+              if (remoteVersion && cachedVersion && remoteVersion === cachedVersion) {
+                  if (typeof window !== 'undefined') {
+                      sessionStorage.setItem(sessionKey, '1');
+                  }
                   return cachedStudents;
               }
           }
@@ -2633,6 +2736,12 @@ export default function App() {
               }
           });
           writeLocalCache(cacheKey, sortedStudents);
+          if (!remoteVersion) {
+              remoteVersion = await bumpStudentsVersion(cohortId);
+          }
+          if (remoteVersion) {
+              writeLocalCache(versionCacheKey, remoteVersion);
+          }
           if (typeof window !== 'undefined') {
               sessionStorage.setItem(sessionKey, '1');
           }
@@ -2684,14 +2793,16 @@ export default function App() {
       getCohortStudentDocRef,
       getCohortStudentsCollectionRef,
       getStudentSessionKey,
+      bumpStudentsVersion,
+      loadStudentsVersion,
       normalizeGrades,
       resetBatchDraftState,
       resolveScopedDateId
   ]);
 
-  const applyTeacherCohortCachedState = useCallback((cohortId) => {
+  const getTeacherCohortCachedBundle = useCallback((cohortId) => {
       const normalizedId = String(cohortId || LEGACY_COHORT_ID);
-      const nextDates = sanitizeDateList(
+      const cachedDates = sanitizeDateList(
           readLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, normalizedId)) || []
       );
       const cachedStudents = readLocalCache(
@@ -2711,6 +2822,42 @@ export default function App() {
       );
       const cachedLastResetAt = String(cachedStats?.lastResetAt || '');
       const cachedStatsAreFresh = cachedLastResetAt && !shouldResetQueryStats(cachedLastResetAt);
+      const derivedDates = Array.isArray(cachedStudents) && cachedStudents.length > 0
+          ? deriveDatePoolFromStudents(cachedStudents)
+          : [];
+      const nextDates = mergeDatePools(cachedDates, derivedDates);
+      const hasDisplayData = Boolean(
+          nextDates.length
+          || (Array.isArray(cachedStudents) && cachedStudents.length > 0)
+          || (cachedClassAverages && typeof cachedClassAverages === 'object' && Object.keys(cachedClassAverages).length)
+      );
+
+      return {
+          normalizedId,
+          nextDates,
+          cachedStudents,
+          cachedClassAverages,
+          cachedMessage,
+          cachedStats,
+          cachedLastResetAt,
+          cachedStatsAreFresh,
+          hasDisplayData
+      };
+  }, [getCohortCacheKey, shouldResetQueryStats]);
+
+  const applyTeacherCohortCachedState = useCallback((cohortInput) => {
+      const bundle = typeof cohortInput === 'string' ? getTeacherCohortCachedBundle(cohortInput) : cohortInput;
+      if (!bundle?.hasDisplayData) return false;
+      const {
+          normalizedId,
+          nextDates,
+          cachedStudents,
+          cachedClassAverages,
+          cachedMessage,
+          cachedStats,
+          cachedLastResetAt,
+          cachedStatsAreFresh
+      } = bundle;
 
       if (Array.isArray(cachedStudents) && cachedStudents.length > 0) {
           setAllStudentsData(cachedStudents);
@@ -2761,7 +2908,8 @@ export default function App() {
       }
 
       resetBatchDraftState();
-  }, [cohortOptions, getCohortCacheKey, resetBatchDraftState, shouldResetQueryStats]);
+      return true;
+  }, [cohortOptions, getTeacherCohortCachedBundle, resetBatchDraftState]);
 
   useEffect(() => {
       if (typeof document === 'undefined') return;
@@ -3428,15 +3576,18 @@ export default function App() {
       const normalizedId = String(nextCohortId || '').trim();
       if (!normalizedId || normalizedId === activeTeacherCohortId) return;
       runWithBatchDiscardGuard(() => {
-          teacherCohortPreseedRef.current = normalizedId;
+          const cachedBundle = getTeacherCohortCachedBundle(normalizedId);
+          teacherCohortPreseedRef.current = cachedBundle.hasDisplayData ? normalizedId : '';
           startTransition(() => {
               setTeacherViewMode('batch');
               setBatchInsightTab('grades');
-              applyTeacherCohortCachedState(normalizedId);
+              if (cachedBundle.hasDisplayData) {
+                  applyTeacherCohortCachedState(cachedBundle);
+              }
               setActiveTeacherCohortId(normalizedId);
           });
       });
-  }, [activeTeacherCohortId, applyTeacherCohortCachedState, runWithBatchDiscardGuard]);
+  }, [activeTeacherCohortId, applyTeacherCohortCachedState, getTeacherCohortCachedBundle, runWithBatchDiscardGuard]);
 
   const handleSetPublicCohort = useCallback(async (nextCohortId) => {
       const normalizedId = String(nextCohortId || '').trim();
@@ -3462,63 +3613,14 @@ export default function App() {
   }, [activePublicCohortId, getCohortLabel, getCohortRegistryDocRef]);
 
   useEffect(() => {
-      if (mode !== 'parent' || !user || !db || (publicStudentsCohortId === activePublicCohortId && cachedClassData.length > 0)) return;
-      let cancelled = false;
-
-      const preloadClassData = async () => {
-          const effectiveDates = datesCohortId === activePublicCohortId
-              ? availableDates
-              : await loadDates({ cohortId: activePublicCohortId });
-          const cacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.students, activePublicCohortId);
-          const cachedStudents = readLocalCache(cacheKey, STUDENT_CACHE_TTL_MS);
-          if (Array.isArray(cachedStudents) && cachedStudents.length > 0) {
-              setCachedClassData(cachedStudents);
-              setPublicStudentsCohortId(activePublicCohortId);
-              return;
-          }
-          try {
-              const qSnap = await getDocs(getCohortStudentsCollectionRef(activePublicCohortId));
-              if (cancelled) return;
-              const preloaded = [];
-              const cleanupPayloads = [];
-              qSnap.forEach((d) => {
-                  const rawData = d.data();
-                  const normalizedResult = normalizeGrades(rawData.grades, {
-                      withMeta: true,
-                      cohortId: activePublicCohortId,
-                      datePool: effectiveDates
-                  });
-                  preloaded.push({ ...rawData, grades: normalizedResult.normalized });
-                  if (normalizedResult.changed && rawData.id) {
-                      cleanupPayloads.push({
-                          id: rawData.id,
-                          payload: { ...rawData, grades: normalizedResult.normalized, lastUpdated: new Date().toISOString() }
-                      });
-                  }
-              });
-              if (cleanupPayloads.length > 0) {
-                  void Promise.all(
-                      cleanupPayloads.map((item) =>
-                          setDoc(getCohortStudentDocRef(activePublicCohortId, item.id), item.payload)
-                      )
-                  ).catch((err) => console.error('Preload cleanup invalid date error:', err));
-              }
-              if (cancelled) return;
-              setCachedClassData(preloaded);
-              setPublicStudentsCohortId(activePublicCohortId);
-              writeLocalCache(cacheKey, preloaded);
-          } catch (e) {
-              console.error('Preload class data error:', e);
-          }
-      };
-
-      preloadClassData();
-      return () => {
-          cancelled = true;
-      };
-  // normalizeGrades 依賴 getTestDateID，這裡保持最小觸發條件避免重複預載。
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePublicCohortId, availableDates, cachedClassData.length, datesCohortId, loadDates, mode, normalizeGrades, publicStudentsCohortId, user]);
+      if (mode !== 'parent' || !user) return;
+      if (publicStudentsCohortId === activePublicCohortId && cachedClassData.length > 0) return;
+      const cacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.students, activePublicCohortId);
+      const cachedStudents = readLocalCache(cacheKey, STUDENT_CACHE_TTL_MS);
+      if (!Array.isArray(cachedStudents) || cachedStudents.length === 0) return;
+      setCachedClassData(cachedStudents);
+      setPublicStudentsCohortId(activePublicCohortId);
+  }, [activePublicCohortId, cachedClassData.length, getCohortCacheKey, mode, publicStudentsCohortId, user]);
 
   const persistLocalSnapshots = useCallback((nextSnapshots) => {
       const sanitized = sanitizeSnapshotList(nextSnapshots);
@@ -4302,6 +4404,7 @@ export default function App() {
     if (!studentToDelete) return;
     try {
         if (db) await deleteDoc(getCohortStudentDocRef(activeTeacherCohortId, studentToDelete.id));
+        await bumpStudentsVersion(activeTeacherCohortId);
         const nextStudents = allStudentsData.filter((s) => s.id !== studentToDelete.id);
         setAllStudentsData(nextStudents);
         setTeacherStudentsCohortId(activeTeacherCohortId);
@@ -4334,6 +4437,7 @@ export default function App() {
     setStatusMsg('儲存中...');
     try {
       if (db) await setDoc(getCohortStudentDocRef(activeTeacherCohortId, currentStudentId), { id: currentStudentId, name: studentName, grades: grades, lastUpdated: new Date().toISOString() }, { merge: true });
+      await bumpStudentsVersion(activeTeacherCohortId);
       const savedStudent = { id: currentStudentId, name: studentName, grades };
       const exists = allStudentsData.find((s) => s.id === currentStudentId);
       const nextStudents = exists
@@ -4401,6 +4505,7 @@ export default function App() {
               );
               await Promise.all(batchPromises);
           }
+          await bumpStudentsVersion(activeTeacherCohortId);
           setAllStudentsData(nextStudents);
           setTeacherStudentsCohortId(activeTeacherCohortId);
           if (activeTeacherCohortId === activePublicCohortId) {
@@ -4429,9 +4534,9 @@ export default function App() {
   };
 
   const parentSearchScoreContext = useMemo(() => {
-      if (!cachedClassData.length || !sortedAvailableDatesAsc.length) return null;
-      return buildProbabilityContext(cachedClassData, sortedAvailableDatesAsc, getTestDateID);
-  }, [cachedClassData, sortedAvailableDatesAsc, getTestDateID]);
+      if (!parentClassData.length || !parentSortedAvailableDatesAsc.length) return null;
+      return buildProbabilityContext(parentClassData, parentSortedAvailableDatesAsc, parentGetTestDateID);
+  }, [parentClassData, parentGetTestDateID, parentSortedAvailableDatesAsc]);
 
   const cachedParentDateSignature = useMemo(
       () => sortedAvailableDatesAsc.join('|'),
@@ -4470,7 +4575,16 @@ export default function App() {
       return;
     }
     const searchStartTs = performance.now();
-    setSearchError(''); setViewData(null); setLoading(true);
+    setSearchError('');
+    setViewData(null);
+    setParentViewContext({
+        cohortId: '',
+        dates: [],
+        classData: [],
+        classAverages: {},
+        teacherMessage: { globalMessage: '', byStudent: {} }
+    });
+    setLoading(true);
     try {
       const rawSearchKeyword = searchId.trim();
       const normalizedSearchId = rawSearchKeyword.toUpperCase();
@@ -4487,6 +4601,7 @@ export default function App() {
               : await loadClassAverages({ cohortId, datePool: effectiveDates });
           const getSearchDateID = (dateStr) => resolveScopedDateId(dateStr, cohortId, effectiveDates);
           const cohortStudentCacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.students, cohortId);
+          const cohortStudentVersionCacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.studentsVersion, cohortId);
           const hasPublicCachedStudents = publicStudentsCohortId === cohortId && cachedClassData.length > 0;
           const hasTeacherStudentsForCohort = teacherStudentsCohortId === cohortId && allStudentsData.length > 0;
           let data = null;
@@ -4529,7 +4644,13 @@ export default function App() {
 
           if (db && fullClassData.length === 0) {
               const cachedStudents = readLocalCache(cohortStudentCacheKey, STUDENT_CACHE_TTL_MS);
-              if (Array.isArray(cachedStudents) && cachedStudents.length > 0) {
+              let canReuseCachedStudents = Array.isArray(cachedStudents) && cachedStudents.length > 0;
+              if (canReuseCachedStudents) {
+                  const remoteVersion = await loadStudentsVersion(cohortId);
+                  const cachedVersion = String(readLocalCache(cohortStudentVersionCacheKey, SETTINGS_CACHE_TTL_MS) || '').trim();
+                  canReuseCachedStudents = Boolean(remoteVersion && cachedVersion && remoteVersion === cachedVersion);
+              }
+              if (canReuseCachedStudents) {
                   fullClassData = cachedStudents;
               } else {
                   const qSnap = await getDocs(getCohortStudentsCollectionRef(cohortId));
@@ -4554,6 +4675,13 @@ export default function App() {
                       ).catch((err) => console.error('Parent search cleanup invalid date error:', err));
                   }
                   writeLocalCache(cohortStudentCacheKey, fullClassData);
+                  let remoteVersion = await loadStudentsVersion(cohortId, { force: true });
+                  if (!remoteVersion) {
+                      remoteVersion = await bumpStudentsVersion(cohortId);
+                  }
+                  if (remoteVersion) {
+                      writeLocalCache(cohortStudentVersionCacheKey, remoteVersion);
+                  }
               }
           }
 
@@ -4610,14 +4738,28 @@ export default function App() {
               weekendOrder.set(weekendID, index);
           }
       });
-
-      setAvailableDates(sortedDates);
-      setDatesCohortId(foundCohortId);
-      setClassAverages(effectiveClassAverages);
-      setClassAveragesCohortId(foundCohortId);
-      await loadTeacherMessage({ cohortId: foundCohortId });
-      setCachedClassData(contextData);
-      setPublicStudentsCohortId(foundCohortId);
+      const teacherMessagePayload = await loadTeacherMessage({ cohortId: foundCohortId });
+      if (foundCohortId === activePublicCohortId) {
+          setAvailableDates(sortedDates);
+          setDatesCohortId(foundCohortId);
+          setClassAverages(effectiveClassAverages);
+          setClassAveragesCohortId(foundCohortId);
+          setCachedClassData(contextData);
+          setPublicStudentsCohortId(foundCohortId);
+      }
+      const nextParentViewContext = {
+          cohortId: foundCohortId,
+          dates: sortedDates,
+          classData: contextData,
+          classAverages: effectiveClassAverages,
+          teacherMessage: teacherMessagePayload && typeof teacherMessagePayload === 'object'
+              ? {
+                  globalMessage: String(teacherMessagePayload.globalMessage || '').trim(),
+                  byStudent: normalizeTeacherStudentMessages(teacherMessagePayload.byStudent)
+              }
+              : { globalMessage: '', byStudent: {} }
+      };
+      setParentViewContext(nextParentViewContext);
 
       const cacheStudentId = String(data.id || '').toUpperCase();
       const cacheStudentKey = `${foundCohortId}::${cacheStudentId}`;
@@ -4639,6 +4781,7 @@ export default function App() {
           });
       const cachedView = readParentQueryCache(cacheStudentKey, parentQueryDataVersion);
       if (cachedView) {
+          setParentViewContext(nextParentViewContext);
           setViewData(cachedView);
           incrementQueryCount(data.id, foundCohortId);
           updateParentQueryPerf(performance.now() - searchStartTs, true);
@@ -4754,18 +4897,18 @@ export default function App() {
   const parentPhaseData = useMemo(() => {
       if (!shouldBuildParentAnalytics) return [];
       return viewData.chartData.filter((d) => {
-          const dateKey = d.weekendID || getTestDateID(d.date);
-          return resolvePhaseByDate(dateKey, sortedAvailableDatesAsc) === activePhase;
+          const dateKey = d.weekendID || parentGetTestDateID(d.date);
+          return resolvePhaseByDate(dateKey, parentSortedAvailableDatesAsc) === activePhase;
       });
-  }, [shouldBuildParentAnalytics, viewData, activePhase, sortedAvailableDatesAsc, getTestDateID]);
+  }, [shouldBuildParentAnalytics, viewData, activePhase, parentGetTestDateID, parentSortedAvailableDatesAsc]);
   const deferredParentPhaseData = useDeferredValue(parentPhaseData);
 
   const allSubjectScoresByWeekend = useMemo(() => {
       const buckets = {};
-      if (!shouldBuildParentAnalytics || !cachedClassData.length) return buckets;
+      if (!shouldBuildParentAnalytics || !parentClassData.length) return buckets;
 
-      cachedClassData.forEach((student) => {
-          const weekendEntries = buildWeekendGradeEntryMap(student.grades, getTestDateID);
+      parentClassData.forEach((student) => {
+          const weekendEntries = buildWeekendGradeEntryMap(student.grades, parentGetTestDateID);
           Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
               const grade = entry.grade;
               if (!weekendID) return;
@@ -4787,7 +4930,7 @@ export default function App() {
       });
 
       return buckets;
-  }, [shouldBuildParentAnalytics, cachedClassData, getTestDateID]);
+  }, [shouldBuildParentAnalytics, parentClassData, parentGetTestDateID]);
 
   const parentRadarData = useMemo(() => {
       if (!deferredParentPhaseData.length) return [];
@@ -4803,7 +4946,7 @@ export default function App() {
               .filter((v) => !isNaN(v));
           const benchmarkValues = deferredParentPhaseData
               .map((item) => {
-                  const weekendID = item.weekendID || getTestDateID(item.date);
+                  const weekendID = item.weekendID || parentGetTestDateID(item.date);
                   const scoreList = allSubjectScoresByWeekend[weekendID]?.[scoreKey] || [];
                   const medianScore = resolveMedianScore(scoreList);
                   if (medianScore !== null) return medianScore;
@@ -4827,7 +4970,7 @@ export default function App() {
           summarize('英文', 'eng'),
           summarize('數學', 'math')
       ];
-  }, [deferredParentPhaseData, allSubjectScoresByWeekend, getTestDateID]);
+  }, [deferredParentPhaseData, allSubjectScoresByWeekend, parentGetTestDateID]);
   const deferredParentRadarData = useDeferredValue(parentRadarData);
 
   const parentRadarMax = useMemo(() => {
@@ -4855,10 +4998,10 @@ export default function App() {
   const scoreIndexByWeekendAndClass = useMemo(() => {
       const index = {};
 
-      if (!shouldBuildParentAnalytics || !cachedClassData.length) return index;
+      if (!shouldBuildParentAnalytics || !parentClassData.length) return index;
 
-      cachedClassData.forEach(student => {
-          const weekendEntries = buildWeekendGradeEntryMap(student.grades, getTestDateID);
+      parentClassData.forEach(student => {
+          const weekendEntries = buildWeekendGradeEntryMap(student.grades, parentGetTestDateID);
           Object.entries(weekendEntries).forEach(([weekendId, entry]) => {
               const g = entry.grade;
               if (!weekendId) return;
@@ -4895,7 +5038,7 @@ export default function App() {
       });
 
       return index;
-  }, [shouldBuildParentAnalytics, cachedClassData, getTestDateID]);
+  }, [shouldBuildParentAnalytics, parentClassData, parentGetTestDateID]);
 
   const distributionProfileByWeekendClass = useMemo(() => {
       const profile = {};
@@ -4908,7 +5051,7 @@ export default function App() {
               profile[weekendID][classKey] = {};
 
               ['total', 'chi', 'eng', 'math'].forEach((subject) => {
-                  const maxScore = getMaxScore(weekendID, subject, availableDates);
+                  const maxScore = getMaxScore(weekendID, subject, parentAvailableDates);
                   const template = buildDistributionTemplate(maxScore);
                   const counts = new Array(template.buckets.length).fill(0);
                   const scoreList = bySubject[subject] || [];
@@ -4924,7 +5067,7 @@ export default function App() {
       });
 
       return profile;
-  }, [shouldBuildParentAnalytics, scoreIndexByWeekendAndClass, availableDates]);
+  }, [parentAvailableDates, shouldBuildParentAnalytics, scoreIndexByWeekendAndClass]);
 
   const rankLookupByWeekendClassSubject = useMemo(() => {
       const lookup = {};
@@ -4971,12 +5114,12 @@ export default function App() {
 
   // 計算單科或總分在「本班」中的名次（#1, #2...）
   const calculateRank = (date, subject, myScore, myClass) => {
-      if (!cachedClassData.length || !myScore) return '-';
+      if (!parentClassData.length || !myScore) return '-';
       const myVal = parseFloat(myScore);
       if (isNaN(myVal)) return '-';
       
       const targetClass = myClass || 'A班';
-      const currentWeekendID = getTestDateID(date);
+      const currentWeekendID = parentGetTestDateID(date);
 
       const rankLookup = rankLookupByWeekendClassSubject[currentWeekendID]?.[targetClass]?.[subject];
       if (!rankLookup) return '-';
@@ -4987,11 +5130,11 @@ export default function App() {
 
   // 計算「本部全部學生」的 PR（需樣本數達門檻）
   const calculateGlobalPR = (date, subject, myScore) => {
-      if (!cachedClassData.length || !myScore) return '-';
+      if (!parentClassData.length || !myScore) return '-';
       const myVal = parseFloat(myScore);
       if (isNaN(myVal)) return '-';
 
-      const currentWeekendID = getTestDateID(date);
+      const currentWeekendID = parentGetTestDateID(date);
       const lookup = globalPRLookupByWeekendSubject[currentWeekendID]?.[subject];
       if (!lookup) return null;
 
@@ -5001,9 +5144,9 @@ export default function App() {
 
   // 計算某次測驗的成績分布，用於家長端的「落點分析」長條圖
   const calculateDistribution = (date, subject, myScore, allDates, myClass) => {
-      if (!cachedClassData.length) return [];
+      if (!parentClassData.length) return [];
       const myVal = parseFloat(myScore);
-      const currentWeekendID = getTestDateID(date);
+      const currentWeekendID = parentGetTestDateID(date);
       const targetClass = myClass || 'A班';
       const precomputed = distributionProfileByWeekendClass[currentWeekendID]?.[targetClass]?.[subject];
 
@@ -5037,10 +5180,10 @@ export default function App() {
       const gradeMaps = {};
 
       allStudentsData.forEach((student) => {
-          const weekendEntries = buildTargetWeekendGradeEntryMap(student.grades, targetWeekendIds, getTestDateID);
           const weekendGrades = {};
-          Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
-              weekendGrades[weekendID] = entry.grade;
+          Object.entries(allStudentWeekendGradesByStudentId[student.id] || {}).forEach(([weekendID, grade]) => {
+              if (!targetWeekendIds.has(weekendID)) return;
+              weekendGrades[weekendID] = grade;
           });
           const currentBatchInfo = currentBatchGradeInfoByStudentId[student.id];
           if (currentBatchInfo && selectedBatchWeekendID && targetWeekendIds.has(selectedBatchWeekendID)) {
@@ -5052,7 +5195,7 @@ export default function App() {
       });
 
       return gradeMaps;
-  }, [allStudentsData, currentBatchGradeInfoByStudentId, getTestDateID, relevantWeekendIdsForPR, selectedBatchWeekendID, shouldBuildBatchAnalytics]);
+  }, [allStudentWeekendGradesByStudentId, allStudentsData, currentBatchGradeInfoByStudentId, relevantWeekendIdsForPR, selectedBatchWeekendID, shouldBuildBatchAnalytics]);
 
   const globalPRByStudentAndWeekend = useMemo(() => {
       if (!shouldBuildBatchAnalytics || relevantWeekendIdsForPR.length === 0) return {};
@@ -6164,10 +6307,10 @@ export default function App() {
       setStatsModalData({
           date,
           className: className || 'A班',
-          total: calculateDistribution(date, 'total', grades.total, availableDates, className),
-          chi: calculateDistribution(date, 'chi', grades.chi, availableDates, className),
-          eng: calculateDistribution(date, 'eng', grades.eng, availableDates, className),
-          math: calculateDistribution(date, 'math', grades.math, availableDates, className),
+          total: calculateDistribution(date, 'total', grades.total, parentAvailableDates, className),
+          chi: calculateDistribution(date, 'chi', grades.chi, parentAvailableDates, className),
+          eng: calculateDistribution(date, 'eng', grades.eng, parentAvailableDates, className),
+          math: calculateDistribution(date, 'math', grades.math, parentAvailableDates, className),
           myGrades: grades
       });
   };
@@ -6181,11 +6324,11 @@ export default function App() {
       () => {
           const studentId = String(viewData?.id || '').toUpperCase().trim();
           if (!studentId) return '';
-          const personalMessage = String(teacherStudentMessages[studentId] || '').trim();
+          const personalMessage = String(parentTeacherMessageContext.byStudent?.[studentId] || '').trim();
           if (personalMessage) return personalMessage;
-          return String(teacherGlobalMessage || '').trim();
+          return String(parentTeacherMessageContext.globalMessage || '').trim();
       },
-      [viewData, teacherStudentMessages, teacherGlobalMessage]
+      [parentTeacherMessageContext, viewData]
   );
 
   const statsSummary = useMemo(() => {
@@ -6202,7 +6345,7 @@ export default function App() {
       }, null);
 
       const myScore = toNumberOrNull(statsModalData.myGrades?.[statsActiveTab]);
-      const weekendID = getTestDateID(statsModalData.date);
+      const weekendID = parentGetTestDateID(statsModalData.date);
       const className = statsModalData.className || 'A班';
       const classScores = scoreIndexByWeekendAndClass[weekendID]?.[className]?.[statsActiveTab] || [];
 
@@ -6255,7 +6398,7 @@ export default function App() {
           equalCount,
           lowerCount
       };
-  }, [statsModalData, statsActiveTab, getTestDateID, scoreIndexByWeekendAndClass]);
+  }, [statsModalData, statsActiveTab, parentGetTestDateID, scoreIndexByWeekendAndClass]);
 
   const isLandingMode = mode === 'landing';
   const isConnectionReady = Boolean(user);

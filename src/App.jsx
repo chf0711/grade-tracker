@@ -419,6 +419,8 @@ const TAB_DOT_BG_CLASS = {
     eng: 'bg-amber-500',
     math: 'bg-cyan-500'
 };
+const EMPTY_OBJECT = Object.freeze({});
+const EMPTY_ARRAY = Object.freeze([]);
 const EMPTY_GRADE = { chi: '', eng: '', math: '', total: '', class: 'A班' };
 
 const hasAnySubjectScore = (gradeObj) => {
@@ -1738,6 +1740,11 @@ export default function App() {
       () => (batchDate ? getTestDateID(batchDate) : ''),
       [batchDate, getTestDateID]
   );
+  const shouldBuildBatchAnalytics =
+      mode === 'teacher' && teacherViewMode === 'batch' && Boolean(batchDate);
+  const shouldBuildTeacherDerivedMaps = mode === 'teacher';
+  const shouldBuildTeacherLocalAverages =
+      mode === 'teacher' && teacherStudentsCohortId === activeTeacherCohortId;
 
   const teacherDateCards = useMemo(() => {
       const cards = [];
@@ -1782,9 +1789,11 @@ export default function App() {
   // Defer heavy derived calculations to keep typing/edit interactions smooth.
   const deferredStudentsForDerived = useDeferredValue(allStudentsData);
   const deferredDatesForDerived = useDeferredValue(availableDates);
+  const deferredParentClassData = useDeferredValue(parentClassData);
 
   // 將每位學生的日期成績先依週末 ID 正規化，避免在多個流程中重複掃描 grades 物件
   const deferredStudentGradeMapsByStudentId = useMemo(() => {
+      if (!shouldBuildTeacherDerivedMaps) return EMPTY_OBJECT;
       const gradeMaps = {};
       deferredStudentsForDerived.forEach((student) => {
           const weekendGrades = {};
@@ -1795,17 +1804,19 @@ export default function App() {
           gradeMaps[student.id] = weekendGrades;
       });
       return gradeMaps;
-  }, [deferredStudentsForDerived, getTestDateID]);
+  }, [deferredStudentsForDerived, getTestDateID, shouldBuildTeacherDerivedMaps]);
 
   const allStudentWeekendEntriesByStudentId = useMemo(() => {
+      if (!shouldBuildTeacherDerivedMaps) return EMPTY_OBJECT;
       const entryMaps = {};
       allStudentsData.forEach((student) => {
           entryMaps[student.id] = buildWeekendGradeEntryMap(student.grades, getTestDateID);
       });
       return entryMaps;
-  }, [allStudentsData, getTestDateID]);
+  }, [allStudentsData, getTestDateID, shouldBuildTeacherDerivedMaps]);
 
   const allStudentWeekendGradesByStudentId = useMemo(() => {
+      if (!shouldBuildTeacherDerivedMaps) return EMPTY_OBJECT;
       const gradeMaps = {};
       Object.entries(allStudentWeekendEntriesByStudentId).forEach(([studentId, entryMap]) => {
           const weekendGrades = {};
@@ -1815,12 +1826,12 @@ export default function App() {
           gradeMaps[studentId] = weekendGrades;
       });
       return gradeMaps;
-  }, [allStudentWeekendEntriesByStudentId]);
+  }, [allStudentWeekendEntriesByStudentId, shouldBuildTeacherDerivedMaps]);
 
-  const allStudentsById = useMemo(
-      () => Object.fromEntries(allStudentsData.map((student) => [student.id, student])),
-      [allStudentsData]
-  );
+  const batchStudentsById = useMemo(() => {
+      if (!shouldBuildBatchAnalytics) return EMPTY_OBJECT;
+      return Object.fromEntries(allStudentsData.map((student) => [student.id, student]));
+  }, [allStudentsData, shouldBuildBatchAnalytics]);
 
   const probabilityContextStudents = useMemo(() => (
       deferredStudentsForDerived.length === allStudentsData.length
@@ -1832,9 +1843,6 @@ export default function App() {
       () => [...orderedWeekendIds].slice().reverse(),
       [orderedWeekendIds]
   );
-
-  const shouldBuildBatchAnalytics =
-      mode === 'teacher' && teacherViewMode === 'batch' && Boolean(batchDate);
 
   const currentBatchGradeInfoByStudentId = useMemo(() => {
       if (!shouldBuildBatchAnalytics) return {};
@@ -1903,13 +1911,14 @@ export default function App() {
   }, [allStudentWeekendGradesByStudentId, allStudentsData, batchProbCandidateIds, currentBatchGradeInfoByStudentId, selectedBatchWeekendID, shouldBuildBatchAnalytics]);
 
   const teacherProbabilityContext = useMemo(() => {
-      if (mode !== 'teacher' || orderedWeekendIds.length === 0 || probabilityContextStudents.length === 0) {
+      if (!shouldBuildBatchAnalytics || orderedWeekendIds.length === 0 || probabilityContextStudents.length === 0) {
           return null;
       }
       return buildProbabilityContext(probabilityContextStudents, orderedWeekendIds, (dateId) => dateId);
-  }, [mode, orderedWeekendIds, probabilityContextStudents]);
+  }, [orderedWeekendIds, probabilityContextStudents, shouldBuildBatchAnalytics]);
 
   const weekendScoreCountById = useMemo(() => {
+      if (!shouldBuildTeacherDerivedMaps) return EMPTY_OBJECT;
       const counts = {};
       Object.values(allStudentWeekendEntriesByStudentId).forEach((weekendEntries) => {
           Object.entries(weekendEntries || {}).forEach(([weekendID, entry]) => {
@@ -1918,7 +1927,7 @@ export default function App() {
           });
       });
       return counts;
-  }, [allStudentWeekendEntriesByStudentId]);
+  }, [allStudentWeekendEntriesByStudentId, shouldBuildTeacherDerivedMaps]);
 
   const latestPopulatedWeekendID = useMemo(() => {
       for (let idx = orderedWeekendIds.length - 1; idx >= 0; idx -= 1) {
@@ -1995,7 +2004,7 @@ export default function App() {
 
           const studentGradeMaps = batchProbStudentGradeMapsByStudentId;
           const students = batchProbCandidateIds
-              .map((studentId) => allStudentsById[studentId])
+              .map((studentId) => batchStudentsById[studentId])
               .filter(Boolean);
           const probs = {};
           let index = 0;
@@ -2040,7 +2049,7 @@ export default function App() {
           clearTimeout(timer);
           if (rafId) cancelAnimationFrame(rafId);
       };
-  }, [allStudentsById, batchProbCandidateIds, batchProbStudentGradeMapsByStudentId, mode, orderedWeekendIds, teacherProbabilityContext, teacherViewMode]);
+  }, [batchProbCandidateIds, batchProbStudentGradeMapsByStudentId, batchStudentsById, mode, orderedWeekendIds, teacherProbabilityContext, teacherViewMode]);
 
   useEffect(() => {
       if (mode !== 'parent' || !viewData?.chartData?.length) return;
@@ -3260,6 +3269,7 @@ export default function App() {
   };
 
   const localComputedAverages = useMemo(() => {
+      if (!shouldBuildTeacherLocalAverages) return EMPTY_OBJECT;
       const avgs = {};
       const validClassSet = activeTeacherClassIdSet;
 
@@ -3281,10 +3291,9 @@ export default function App() {
           }
       });
 
-      deferredStudentsForDerived.forEach(student => {
-          const weekendEntries = buildWeekendGradeEntryMap(student.grades, getTestDateID);
-          Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
-              const grade = entry.grade;
+      deferredStudentsForDerived.forEach((student) => {
+          const weekendGrades = deferredStudentGradeMapsByStudentId[student.id] || EMPTY_OBJECT;
+          Object.entries(weekendGrades).forEach(([weekendID, grade]) => {
               const groups = groupsByWeekendID[weekendID];
               if (!groups) return;
 
@@ -3331,7 +3340,7 @@ export default function App() {
           });
       });
       return avgs;
-  }, [activeTeacherClassDefs, activeTeacherClassIdSet, deferredDatesForDerived, deferredStudentsForDerived, getTestDateID]);
+  }, [activeTeacherClassDefs, activeTeacherClassIdSet, deferredDatesForDerived, deferredStudentGradeMapsByStudentId, deferredStudentsForDerived, getTestDateID, shouldBuildTeacherLocalAverages]);
 
   const loadClassAverages = useCallback(async (options = {}) => {
       const force = Boolean(options && options.force);
@@ -3664,6 +3673,12 @@ export default function App() {
           notifyPermissionDenied('2491212 權限無法刪除日期');
           return;
       }
+      if (hasPendingBatchChanges && !window.confirm('批量成績尚未儲存，刪除考次會直接移除目前未儲存內容，確定繼續嗎？')) {
+          return;
+      }
+      if (hasPendingBatchChanges) {
+          resetBatchDraftState();
+      }
       setDeleteTarget(dateToDelete);
   };
   const confirmDeleteDate = async () => {
@@ -3719,8 +3734,7 @@ export default function App() {
                   writes.push(
                       setDoc(
                           getCohortStudentDocRef(activeTeacherCohortId, student.id),
-                          { id: student.id, name: student.name, grades: student.grades, lastUpdated: nowIso },
-                          { merge: true }
+                          { id: student.id, name: student.name, grades: student.grades, lastUpdated: nowIso }
                       )
                   );
               });
@@ -3915,6 +3929,13 @@ export default function App() {
   }, [localSnapshots, persistLocalSnapshots, appendOperationLog]);
 
   const handleRestoreLocalSnapshot = useCallback(async (snapshotId) => {
+      if (!canEditStudentGrades) {
+          notifyPermissionDenied('2491212 權限無法還原快照');
+          return;
+      }
+      if (hasPendingBatchChanges && !window.confirm('目前有未儲存的批量修改，還原快照會覆蓋這些內容，確定繼續嗎？')) {
+          return;
+      }
       const target = localSnapshots.find((item) => item.id === snapshotId);
       if (!target) {
           setStatusMsg('找不到指定快照');
@@ -3936,29 +3957,32 @@ export default function App() {
       const restoredAverages = normalizeClassAveragesByWeekend(payload.classAverages || {}, getTestDateID);
       const restoredGlobalMessage = String(payload.teacherGlobalMessage || '').trim();
       const restoredStudentMessages = normalizeTeacherStudentMessages(payload.teacherStudentMessages);
+      const nextBatchDate = restoredDates.length
+          ? (restoredDates[restoredDates.length - 1] || '')
+          : '';
+      const restoredStudentIdSet = new Set(restoredStudents.map((student) => String(student.id)));
+      const deletedStudentIds = allStudentsData
+          .map((student) => String(student?.id || '').trim())
+          .filter((id) => id && !restoredStudentIdSet.has(id));
 
-      if (restoredDates.length) {
-          setAvailableDates(restoredDates);
-          setDatesCohortId(activeTeacherCohortId);
-          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, activeTeacherCohortId), restoredDates);
+      setAvailableDates(restoredDates);
+      setDatesCohortId(activeTeacherCohortId);
+      writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, activeTeacherCohortId), restoredDates);
+
+      setAllStudentsData(restoredStudents);
+      setTeacherStudentsCohortId(activeTeacherCohortId);
+      if (activeTeacherCohortId === activePublicCohortId) {
+          setCachedClassData(restoredStudents);
+          setPublicStudentsCohortId(activeTeacherCohortId);
       }
-      if (restoredStudents.length) {
-          setAllStudentsData(restoredStudents);
-          setTeacherStudentsCohortId(activeTeacherCohortId);
-          if (activeTeacherCohortId === activePublicCohortId) {
-              setCachedClassData(restoredStudents);
-              setPublicStudentsCohortId(activeTeacherCohortId);
-          }
-          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.students, activeTeacherCohortId), restoredStudents);
-          setBatchDraftGradesByStudentId({});
-          batchDirtyStudentIdsRef.current = new Set(restoredStudents.map((student) => String(student.id)));
-          setIsBatchDirty(true);
-      }
-      if (Object.keys(restoredAverages).length) {
-          setClassAverages(restoredAverages);
-          setClassAveragesCohortId(activeTeacherCohortId);
-          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.classAverages, activeTeacherCohortId), restoredAverages);
-      }
+      writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.students, activeTeacherCohortId), restoredStudents);
+      resetBatchDraftState();
+
+      setClassAverages(restoredAverages);
+      setClassAveragesCohortId(activeTeacherCohortId);
+      writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.classAverages, activeTeacherCohortId), restoredAverages);
+
+      setBatchDate(nextBatchDate);
       setTeacherGlobalMessage(restoredGlobalMessage);
       setTeacherGlobalMessageDraft(restoredGlobalMessage);
       setTeacherStudentMessages(restoredStudentMessages);
@@ -3967,25 +3991,41 @@ export default function App() {
 
       if (db && user) {
           try {
-              if (restoredDates.length) {
-                  await setDoc(getCohortSettingsDocRef(activeTeacherCohortId, 'dates'), { list: restoredDates }, { merge: true });
-              }
-              if (Object.keys(restoredAverages).length) {
-                  await setDoc(getCohortSettingsDocRef(activeTeacherCohortId, 'class_averages_v18'), { averages: restoredAverages }, { merge: true });
-              }
+              const nowIso = new Date().toISOString();
+              await Promise.all([
+                  ...restoredStudents.map((student) =>
+                      setDoc(
+                          getCohortStudentDocRef(activeTeacherCohortId, student.id),
+                          {
+                              id: student.id,
+                              name: student.name || '',
+                              grades: student.grades || {},
+                              lastUpdated: nowIso
+                          }
+                      )
+                  ),
+                  ...deletedStudentIds.map((studentId) =>
+                      deleteDoc(getCohortStudentDocRef(activeTeacherCohortId, studentId))
+                  )
+              ]);
+              await setDoc(getCohortSettingsDocRef(activeTeacherCohortId, 'dates'), { list: restoredDates }, { merge: true });
+              await setDoc(getCohortSettingsDocRef(activeTeacherCohortId, 'class_averages_v18'), { averages: restoredAverages });
               await setDoc(
                   getCohortSettingsDocRef(activeTeacherCohortId, TEACHER_MESSAGE_DOC_ID),
                   {
                       globalMessage: restoredGlobalMessage,
                       message: restoredGlobalMessage,
                       byStudent: restoredStudentMessages,
-                      updatedAt: new Date().toISOString(),
+                      updatedAt: nowIso,
                       updatedBy: user?.uid || ''
-                  },
-                  { merge: true }
+                  }
               );
+              await bumpStudentsVersion(activeTeacherCohortId);
           } catch (error) {
               console.error('Restore snapshot remote sync error:', error);
+              setStatusMsg('已還原快照，但遠端同步失敗');
+              setTimeout(() => setStatusMsg(''), 2400);
+              return;
           }
       }
 
@@ -3994,9 +4034,9 @@ export default function App() {
           title: '還原本機快照',
           detail: `${target.label}（${restoredStudents.length} 位學生）`
       });
-      setStatusMsg('已還原快照（成績請按儲存變更同步）');
+      setStatusMsg('已還原快照');
       setTimeout(() => setStatusMsg(''), 2200);
-  }, [activePublicCohortId, activeTeacherCohortId, appendOperationLog, getCohortCacheKey, getCohortSettingsDocRef, getTestDateID, localSnapshots, normalizeGrades, user]);
+  }, [activePublicCohortId, activeTeacherCohortId, allStudentsData, appendOperationLog, bumpStudentsVersion, canEditStudentGrades, getCohortCacheKey, getCohortSettingsDocRef, getCohortStudentDocRef, getTestDateID, hasPendingBatchChanges, localSnapshots, normalizeGrades, notifyPermissionDenied, resetBatchDraftState, user]);
 
   const loadStudentForTeacher = async (id, options = {}) => {
     if (!user) return;
@@ -4130,6 +4170,27 @@ export default function App() {
       }
 
       const sortedStudents = Object.values(studentsMap).sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
+      const touchedIdSet = new Set(touchedStudentIds.map((id) => String(id)));
+      const touchedStudents = sortedStudents.filter((student) => touchedIdSet.has(String(student.id || '')));
+
+      if (db && touchedStudents.length > 0) {
+          const nowIso = new Date().toISOString();
+          await Promise.all(
+              touchedStudents.map((student) =>
+                  setDoc(
+                      getCohortStudentDocRef(activeTeacherCohortId, student.id),
+                      {
+                          id: student.id,
+                          name: student.name || '',
+                          grades: student.grades || {},
+                          lastUpdated: nowIso
+                      }
+                  )
+              )
+          );
+          await bumpStudentsVersion(activeTeacherCohortId);
+      }
+
       setAllStudentsData(sortedStudents);
       setTeacherStudentsCohortId(activeTeacherCohortId);
       if (activeTeacherCohortId === activePublicCohortId) {
@@ -4137,12 +4198,7 @@ export default function App() {
           setPublicStudentsCohortId(activeTeacherCohortId);
       }
       writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.students, activeTeacherCohortId), sortedStudents);
-      setBatchDraftGradesByStudentId({});
-
-      if (touchedStudentIds.length > 0) {
-          touchedStudentIds.forEach((id) => batchDirtyStudentIdsRef.current.add(String(id)));
-          setIsBatchDirty(true);
-      }
+      resetBatchDraftState();
 
       const invalidDateSuffix = skippedInvalidDateCount > 0 ? `，略過 ${skippedInvalidDateCount} 筆日期錯誤` : '';
       appendOperationLog({
@@ -4150,9 +4206,9 @@ export default function App() {
           title: '匯入 Excel 完成',
           detail: `${importCount} 筆，${touchedStudentIds.length} 位學生`
       });
-      setStatusMsg(`匯入 ${importCount} 筆資料${invalidDateSuffix} (最新日期: ${lastImportedDate})`);
+      setStatusMsg(`已匯入並儲存 ${importCount} 筆資料${invalidDateSuffix} (最新日期: ${lastImportedDate})`);
       setTimeout(() => setStatusMsg(''), 2200);
-  }, [activePublicCohortId, activeTeacherCohortId, appendOperationLog, batchDate, getCohortCacheKey, getCohortSettingsDocRef, getTestDateID]);
+  }, [activePublicCohortId, activeTeacherCohortId, appendOperationLog, batchDate, bumpStudentsVersion, getCohortCacheKey, getCohortSettingsDocRef, getCohortStudentDocRef, getTestDateID, resetBatchDraftState]);
 
   const handleConfirmImportPreview = useCallback(async () => {
       const payload = pendingImportPayloadRef.current;
@@ -4665,7 +4721,7 @@ export default function App() {
     if (!studentName.trim()) { setStatusMsg('請輸入姓名'); return; }
     setStatusMsg('儲存中...');
     try {
-      if (db) await setDoc(getCohortStudentDocRef(activeTeacherCohortId, currentStudentId), { id: currentStudentId, name: studentName, grades: grades, lastUpdated: new Date().toISOString() }, { merge: true });
+      if (db) await setDoc(getCohortStudentDocRef(activeTeacherCohortId, currentStudentId), { id: currentStudentId, name: studentName, grades: grades, lastUpdated: new Date().toISOString() });
       await bumpStudentsVersion(activeTeacherCohortId);
       const savedStudent = { id: currentStudentId, name: studentName, grades };
       const exists = allStudentsData.find((s) => s.id === currentStudentId);
@@ -4728,8 +4784,7 @@ export default function App() {
               const batchPromises = dirtyStudents.map((student) =>
                   setDoc(
                       getCohortStudentDocRef(activeTeacherCohortId, student.id),
-                      { id: student.id, name: student.name, grades: student.grades, lastUpdated: nowIso },
-                      { merge: true }
+                      { id: student.id, name: student.name, grades: student.grades, lastUpdated: nowIso }
                   )
               );
               await Promise.all(batchPromises);
@@ -4763,9 +4818,9 @@ export default function App() {
   };
 
   const parentSearchScoreContext = useMemo(() => {
-      if (!parentClassData.length || !parentSortedAvailableDatesAsc.length) return null;
-      return buildProbabilityContext(parentClassData, parentSortedAvailableDatesAsc, parentGetTestDateID);
-  }, [parentClassData, parentGetTestDateID, parentSortedAvailableDatesAsc]);
+      if (!deferredParentClassData.length || !parentSortedAvailableDatesAsc.length) return null;
+      return buildProbabilityContext(deferredParentClassData, parentSortedAvailableDatesAsc, parentGetTestDateID);
+  }, [deferredParentClassData, parentGetTestDateID, parentSortedAvailableDatesAsc]);
 
   const cachedParentDateSignature = useMemo(
       () => sortedAvailableDatesAsc.join('|'),
@@ -5089,9 +5144,9 @@ export default function App() {
 
   const allSubjectScoresByWeekend = useMemo(() => {
       const buckets = {};
-      if (!shouldBuildParentAnalytics || !parentClassData.length) return buckets;
+      if (!shouldBuildParentAnalytics || !deferredParentClassData.length) return buckets;
 
-      parentClassData.forEach((student) => {
+      deferredParentClassData.forEach((student) => {
           const weekendEntries = buildWeekendGradeEntryMap(student.grades, parentGetTestDateID);
           Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
               const grade = entry.grade;
@@ -5114,7 +5169,7 @@ export default function App() {
       });
 
       return buckets;
-  }, [shouldBuildParentAnalytics, parentClassData, parentGetTestDateID]);
+  }, [deferredParentClassData, parentGetTestDateID, shouldBuildParentAnalytics]);
 
   const parentRadarData = useMemo(() => {
       if (!deferredParentPhaseData.length) return [];
@@ -5182,9 +5237,9 @@ export default function App() {
   const scoreIndexByWeekendAndClass = useMemo(() => {
       const index = {};
 
-      if (!shouldBuildParentAnalytics || !parentClassData.length) return index;
+      if (!shouldBuildParentAnalytics || !deferredParentClassData.length) return index;
 
-      parentClassData.forEach(student => {
+      deferredParentClassData.forEach(student => {
           const weekendEntries = buildWeekendGradeEntryMap(student.grades, parentGetTestDateID);
           Object.entries(weekendEntries).forEach(([weekendId, entry]) => {
               const g = entry.grade;
@@ -5222,7 +5277,7 @@ export default function App() {
       });
 
       return index;
-  }, [shouldBuildParentAnalytics, parentClassData, parentGetTestDateID]);
+  }, [deferredParentClassData, parentGetTestDateID, shouldBuildParentAnalytics]);
 
   const distributionProfileByWeekendClass = useMemo(() => {
       const profile = {};

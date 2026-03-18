@@ -7173,20 +7173,20 @@ export default function App() {
                    <div className={`absolute top-0 right-0 w-64 h-64 rounded-full -mr-20 -mt-20 blur-3xl ${darkMode ? 'bg-emerald-500 opacity-20' : 'bg-emerald-300 opacity-25'}`}></div>
                    
                    <div className="relative z-10 mb-6">
-                       <button onClick={() => setViewData(null)} className={`${BUTTON_SYSTEM.icon} absolute top-0 right-0 p-2 rounded-full backdrop-blur-md transition-colors ${darkMode ? 'text-slate-400 hover:text-white bg-white/5' : 'text-slate-500 hover:text-slate-700 bg-white border border-slate-200'}`}><LogOut className="w-4 h-4"/></button>
+                       <button onClick={() => setViewData(null)} className={`${BUTTON_SYSTEM.icon} absolute top-0 right-0 z-20 p-2 rounded-full backdrop-blur-md transition-colors ${darkMode ? 'text-slate-400 hover:text-white bg-white/5' : 'text-slate-500 hover:text-slate-700 bg-white border border-slate-200'}`}><LogOut className="w-4 h-4"/></button>
 
                        {viewData.prob && viewData.prob !== '-' && (
-                           <div className="absolute right-0 top-11 sm:top-12 text-right">
+                           <div className="absolute right-0 top-12 sm:top-[3.35rem] text-right">
                                <div className={`text-[9px] font-bold uppercase tracking-[0.28em] ${darkMode ? 'text-emerald-300/85' : 'text-emerald-700/85'}`}>錄取機率</div>
                                <div className="mt-1 flex items-end justify-end gap-1 leading-none">
                                    <span className="text-[2.45rem] sm:text-[3rem] font-black tracking-tight tabular-nums" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>{viewData.prob}</span>
                                    <span className="text-lg sm:text-xl font-black mb-[0.28rem]" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>%</span>
                                </div>
-                               <p className={`mt-1 text-[9px] font-medium ${darkMode ? 'text-slate-300/80' : 'text-slate-500'}`}>僅供參考</p>
+                               <p className={`mt-1 max-w-[8.75rem] text-[9px] leading-relaxed font-medium ${darkMode ? 'text-slate-300/80' : 'text-slate-500'}`}>系統綜合歷史成績運算，僅供參考</p>
                            </div>
                        )}
 
-                       <div className={viewData.prob && viewData.prob !== '-' ? 'pr-[7.8rem] sm:pr-[10rem]' : ''}>
+                       <div className={viewData.prob && viewData.prob !== '-' ? 'pr-[9rem] sm:pr-[12rem]' : ''}>
                            <div className={`text-[9px] font-bold uppercase tracking-widest border inline-block px-2 py-1 rounded ${darkMode ? 'text-emerald-300 border-emerald-300/25' : 'text-emerald-700 border-emerald-200'}`}>Student Profile</div>
                            <div className="mt-2">
                                <h3 className={`text-2xl sm:text-3xl font-bold tracking-tighter break-words ${darkMode ? 'text-white' : 'text-slate-800'}`}>{viewData.name}</h3>

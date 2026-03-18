@@ -97,6 +97,15 @@ const DEFAULT_COHORT_OPTIONS = Object.freeze([
     { id: LEGACY_COHORT_ID, label: '2025-2026', storageMode: COHORT_STORAGE_MODE.LEGACY, dateMode: COHORT_DATE_MODE.LINKED },
     { id: NEXT_COHORT_ID, label: '2026-2027', storageMode: COHORT_STORAGE_MODE.SCOPED, dateMode: COHORT_DATE_MODE.SINGLE }
 ]);
+const BUTTON_SYSTEM = Object.freeze({
+    primary: 'btn-premium btn-premium--primary btn-sheen',
+    secondary: 'btn-premium btn-premium--secondary btn-sheen',
+    danger: 'btn-premium btn-premium--danger btn-sheen',
+    segment: 'btn-premium btn-premium--segment btn-sheen',
+    segmentActive: 'btn-premium btn-premium--segment btn-premium--segment-active btn-sheen',
+    icon: 'btn-premium btn-premium--secondary btn-premium--icon btn-sheen',
+    iconDanger: 'btn-premium btn-premium--danger btn-premium--icon btn-sheen'
+});
 
 const runtimeFirebaseConfig =
   typeof window !== 'undefined' ? window.__firebase_config : undefined;
@@ -6048,7 +6057,7 @@ export default function App() {
                 <p className={`truncate block text-[8px] sm:text-[9px] font-black tracking-[0.2em] sm:tracking-[0.28em] uppercase leading-none ${darkMode ? 'text-slate-300/85' : 'text-[#64748b]'}`}>Grade Tracker</p>
             </div>
           </div>
-          <div className={`ml-2 flex shrink-0 items-center gap-1 sm:gap-1.5 rounded-full border px-1.5 sm:px-2 py-1 backdrop-blur-md ${darkMode ? 'border-white/15 bg-slate-900/35' : 'border-white/80 bg-white/72 shadow-[0_8px_24px_rgba(15,23,42,0.08)] ring-1 ring-white/45'}`}>
+          <div className={`premium-control-rail ml-2 flex shrink-0 items-center gap-1 sm:gap-1.5 rounded-full border px-1.5 sm:px-2 py-1 backdrop-blur-md ${darkMode ? 'border-white/15 bg-slate-900/35' : 'border-white/80 bg-white/72 shadow-[0_8px_24px_rgba(15,23,42,0.08)] ring-1 ring-white/45'}`}>
                 <button
                   onClick={() => runWithBatchDiscardGuard(() => {
                     if (isAuthenticated) {
@@ -6058,7 +6067,7 @@ export default function App() {
                       setMode('teacher_login');
                     }
                   })}
-                  className={`btn-sheen shrink-0 px-2.5 sm:px-4 py-1.5 rounded-full text-[10px] sm:text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : (darkMode ? 'text-slate-200 hover:text-white bg-slate-900/45 border border-emerald-200/20 hover:bg-slate-900/70' : 'text-slate-600 hover:text-slate-800 bg-white/70 border border-white/80 hover:bg-white/95')}`}
+                  className={`${mode.includes('teacher') ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.segment} shrink-0 px-2.5 sm:px-4 py-1.5 rounded-full text-[10px] sm:text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : (darkMode ? 'text-slate-200 hover:text-white bg-slate-900/45 border border-emerald-200/20 hover:bg-slate-900/70' : 'text-slate-600 hover:text-slate-800 bg-white/70 border border-white/80 hover:bg-white/95')}`}
                 >
                   {isAuthenticated ? '後台' : '老師'}
                 </button>
@@ -6068,12 +6077,12 @@ export default function App() {
                     setSearchError('');
                     setMode('parent');
                   })}
-                  className={`btn-sheen shrink-0 px-2.5 sm:px-4 py-1.5 rounded-full text-[10px] sm:text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : (darkMode ? 'text-slate-200 hover:text-white bg-slate-900/45 border border-emerald-200/20 hover:bg-slate-900/70' : 'text-slate-600 hover:text-slate-800 bg-white/70 border border-white/80 hover:bg-white/95')}`}
+                  className={`${mode === 'parent' ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.segment} shrink-0 px-2.5 sm:px-4 py-1.5 rounded-full text-[10px] sm:text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : (darkMode ? 'text-slate-200 hover:text-white bg-slate-900/45 border border-emerald-200/20 hover:bg-slate-900/70' : 'text-slate-600 hover:text-slate-800 bg-white/70 border border-white/80 hover:bg-white/95')}`}
                 >
                   家長
                 </button>
             {isAuthenticated && (
-                <button onClick={handleLogout} className="ml-0.5 p-1.5 sm:p-2 text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-full transition-colors" title="登出"><LogOut className="w-4 h-4 sm:w-5 sm:h-5"/></button>
+                <button onClick={handleLogout} className={`${BUTTON_SYSTEM.iconDanger} ml-0.5 p-1.5 sm:p-2 text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-full transition-colors`} title="登出"><LogOut className="w-4 h-4 sm:w-5 sm:h-5"/></button>
             )}
           </div>
         </div>
@@ -6139,7 +6148,7 @@ export default function App() {
                     <h2 className={`text-xl font-black mb-6 tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>身份驗證</h2>
                     <input type="password" value={passwordInput} onChange={(e) => { setPasswordInput(e.target.value); setLoginError(false); }} onKeyDown={(e) => e.key === 'Enter' && handleLoginSubmit()} className={`w-full p-4 rounded-2xl text-center text-xl font-bold tracking-widest outline-none transition-all mb-6 placeholder:text-base placeholder:tracking-normal placeholder:font-medium border shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5 text-white focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 placeholder:text-slate-500' : 'bg-slate-50 border-slate-200/60 text-slate-800 focus:bg-white focus:ring-2 focus:ring-blue-100 placeholder:text-slate-400'}`} placeholder="輸入密碼" autoFocus />
                     {loginError && <p className="text-red-500 text-xs font-bold mb-4">密碼錯誤</p>}
-                    <button onClick={handleLoginSubmit} className="btn-sheen w-full bg-blue-600 hover:bg-blue-500 text-white py-3.5 rounded-2xl font-bold shadow-lg shadow-blue-500/30 active:scale-[0.98] transition-all">登入</button>
+                    <button onClick={handleLoginSubmit} className={`${BUTTON_SYSTEM.primary} w-full bg-blue-600 hover:bg-blue-500 text-white py-3.5 rounded-2xl font-bold shadow-lg shadow-blue-500/30 active:scale-[0.98] transition-all`}>登入</button>
                 </div>
             </div>
         )}
@@ -6160,7 +6169,7 @@ export default function App() {
                                 <GraduationCap className="w-3.5 h-3.5 text-emerald-500" />
                                 Cohort
                             </span>
-                            <div className={`inline-flex rounded-2xl p-1 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-slate-100/90 border-slate-200/80 shadow-inner'}`}>
+                            <div className={`premium-control-rail inline-flex rounded-2xl p-1 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-slate-100/90 border-slate-200/80 shadow-inner'}`}>
                                 {cohortOptions.map((cohort) => {
                                     const isTeacherSelected = cohort.id === activeTeacherCohortId;
                                     return (
@@ -6168,7 +6177,7 @@ export default function App() {
                                             key={cohort.id}
                                             type="button"
                                             onClick={() => handleSwitchTeacherCohort(cohort.id)}
-                                            className={`btn-sheen rounded-[0.95rem] px-3 py-1.5 text-[11px] font-black transition-all ${isTeacherSelected ? (darkMode ? 'bg-slate-800 text-emerald-100 shadow-md' : 'bg-white text-emerald-700 shadow-sm') : (darkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700')}`}
+                                            className={`${isTeacherSelected ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.segment} rounded-[0.95rem] px-3 py-1.5 text-[11px] font-black transition-all ${isTeacherSelected ? (darkMode ? 'bg-slate-800 text-emerald-100 shadow-md' : 'bg-white text-emerald-700 shadow-sm') : (darkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700')}`}
                                         >
                                             {cohort.label}
                                         </button>
@@ -6183,7 +6192,7 @@ export default function App() {
                                   type="button"
                                   onClick={() => handleSetPublicCohort(activeTeacherCohortId)}
                                   disabled={publicCohortSaving || cohortRegistryLoading}
-                                  className={`btn-sheen rounded-full px-2.5 py-1 text-[10px] font-bold transition-colors ${darkMode ? 'bg-slate-800 text-slate-100 border border-white/10 hover:bg-slate-700' : 'bg-slate-800 text-white hover:bg-slate-700 shadow-sm'} disabled:opacity-50 disabled:cursor-not-allowed`}
+                                  className={`${BUTTON_SYSTEM.secondary} rounded-full px-2.5 py-1 text-[10px] font-bold transition-colors ${darkMode ? 'bg-slate-800 text-slate-100 border border-white/10 hover:bg-slate-700' : 'bg-slate-800 text-white hover:bg-slate-700 shadow-sm'} disabled:opacity-50 disabled:cursor-not-allowed`}
                                 >
                                   {publicCohortSaving ? '切換中...' : '同步為家長預設'}
                                 </button>
@@ -6222,19 +6231,19 @@ export default function App() {
                                 <button
                                     type="button"
                                     onClick={() => applyBatchDateChange(latestPopulatedWeekendID || latestAvailableDate)}
-                                    className={`btn-sheen rounded-full px-2.5 py-1 text-[10px] font-bold transition-colors border ${darkMode ? 'bg-slate-800 text-slate-200 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 shadow-sm'}`}
+                                    className={`${BUTTON_SYSTEM.secondary} rounded-full px-2.5 py-1 text-[10px] font-bold transition-colors border ${darkMode ? 'bg-slate-800 text-slate-200 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 shadow-sm'}`}
                                 >
                                     最新
                                 </button>
                             )}
                             <div className={`inline-flex items-center gap-1.5 rounded-2xl px-2 py-1.5 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-white/92 border-slate-200/80 shadow-sm'}`}>
                                 <input type="text" placeholder="MM/DD" className={`w-16 bg-transparent text-center text-[11px] font-black outline-none tracking-widest ${darkMode ? 'text-slate-200 placeholder:text-slate-500' : 'text-slate-700 placeholder:text-slate-400'}`} value={newDateInput} onChange={e=>setNewDateInput(e.target.value)} />
-                                <button onClick={addDate} className={`btn-sheen inline-flex items-center justify-center w-7 h-7 rounded-xl transition-colors ${darkMode ? 'bg-slate-800 text-white hover:bg-slate-700' : 'bg-slate-800 text-white hover:bg-slate-700'}`}>
+                                <button onClick={addDate} className={`${BUTTON_SYSTEM.icon} inline-flex items-center justify-center w-7 h-7 rounded-xl transition-colors ${darkMode ? 'bg-slate-800 text-white hover:bg-slate-700' : 'bg-slate-800 text-white hover:bg-slate-700'}`}>
                                     <Plus className="w-3.5 h-3.5"/>
                                 </button>
                             </div>
                             {selectedTeacherDateMeta && (canDeleteDates ? (
-                                <button onClick={() => handleDeleteDate(selectedTeacherDateMeta.weekendID)} className={`btn-sheen inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold transition-colors ${darkMode ? 'text-rose-300 hover:text-rose-200 bg-rose-500/10' : 'text-rose-600 hover:text-rose-700 bg-rose-50'}`} title="危險操作：刪除目前所選考次">
+                                <button onClick={() => handleDeleteDate(selectedTeacherDateMeta.weekendID)} className={`${BUTTON_SYSTEM.danger} inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold transition-colors ${darkMode ? 'text-rose-300 hover:text-rose-200 bg-rose-500/10' : 'text-rose-600 hover:text-rose-700 bg-rose-50'}`} title="危險操作：刪除目前所選考次">
                                     <X className="w-3 h-3"/> 刪除所選
                                 </button>
                             ) : (
@@ -6246,14 +6255,14 @@ export default function App() {
                     </div>
                 </div>
 
-                <div className={`flex p-1 rounded-xl mb-6 shadow-inner border ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-100/90 border-slate-200/70'}`}>
+                <div className={`premium-control-rail flex p-1 rounded-xl mb-6 shadow-inner border ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-100/90 border-slate-200/70'}`}>
                      <button
                        onClick={() => {
                          startTransition(() => {
                            setTeacherViewMode('batch');
                          });
                        }}
-                       className={`btn-sheen flex-1 py-2 text-xs font-bold rounded-lg transition-all ${teacherViewMode==='batch' ? (darkMode ? 'bg-slate-800 text-blue-400 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-blue-700 shadow-sm') : 'text-slate-500'}`}
+                       className={`${teacherViewMode==='batch' ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.segment} flex-1 py-2 text-xs font-bold rounded-lg transition-all ${teacherViewMode==='batch' ? (darkMode ? 'bg-slate-800 text-blue-400 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-blue-700 shadow-sm') : 'text-slate-500'}`}
                      >
                        批量檢視
                      </button>
@@ -6263,7 +6272,7 @@ export default function App() {
                          if (!confirmDiscardBatchChanges()) return;
                          setTeacherViewMode('single');
                        }}
-                       className={`btn-sheen flex-1 py-2 text-xs font-bold rounded-lg transition-all ${teacherViewMode==='single' ? (darkMode ? 'bg-slate-800 text-slate-200 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-700 shadow-sm') : 'text-slate-500'}`}
+                       className={`${teacherViewMode==='single' ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.segment} flex-1 py-2 text-xs font-bold rounded-lg transition-all ${teacherViewMode==='single' ? (darkMode ? 'bg-slate-800 text-slate-200 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-700 shadow-sm') : 'text-slate-500'}`}
                      >
                        個人檢視
                      </button>
@@ -6287,35 +6296,35 @@ export default function App() {
                               載入
                             </button>
                         </div>
-                        <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
-                            <button onClick={() => setShowAddStudentModal(true)} className="btn-sheen bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all whitespace-nowrap"><UserPlus className="w-4 h-4"/> 新增學生</button>
+                        <div className="premium-action-rail flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                            <button onClick={() => setShowAddStudentModal(true)} className={`${BUTTON_SYSTEM.primary} bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all whitespace-nowrap`}><UserPlus className="w-4 h-4"/> 新增學生</button>
                             {canImportExcel ? (
                                 <>
-                                    <button type="button" onClick={requestExcelImport} className="btn-sheen cursor-pointer bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all whitespace-nowrap">
+                                    <button type="button" onClick={requestExcelImport} className={`${BUTTON_SYSTEM.primary} cursor-pointer bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all whitespace-nowrap`}>
                                         <FileSpreadsheet className="w-4 h-4" /> {isLegacyCohort(activeTeacherCohortId) ? '匯入 Excel（需驗證）' : '匯入 Excel'}
                                     </button>
                                     <button
                                       type="button"
                                       onClick={handleDownloadImportTemplate}
-                                      className={`btn-sheen px-3 py-2.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors border ${darkMode ? 'text-slate-200 bg-slate-900/55 border-white/10 hover:bg-slate-800' : 'text-slate-600 bg-white border-slate-200 hover:bg-slate-50 shadow-sm'}`}
+                                      className={`${BUTTON_SYSTEM.secondary} px-3 py-2.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors border ${darkMode ? 'text-slate-200 bg-slate-900/55 border-white/10 hover:bg-slate-800' : 'text-slate-600 bg-white border-slate-200 hover:bg-slate-50 shadow-sm'}`}
                                     >
                                         <ArrowDownWideNarrow className="w-3.5 h-3.5" /> 下載範本.xlsx
                                     </button>
                                     <button
                                       type="button"
                                       onClick={() => setShowImportFormatGuide(true)}
-                                      className={`btn-sheen px-3 py-2.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors border ${darkMode ? 'text-slate-200 bg-slate-900/55 border-white/10 hover:bg-slate-800' : 'text-slate-600 bg-white border-slate-200 hover:bg-slate-50 shadow-sm'}`}
+                                      className={`${BUTTON_SYSTEM.secondary} px-3 py-2.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors border ${darkMode ? 'text-slate-200 bg-slate-900/55 border-white/10 hover:bg-slate-800' : 'text-slate-600 bg-white border-slate-200 hover:bg-slate-50 shadow-sm'}`}
                                     >
                                         <Info className="w-3.5 h-3.5" /> 匯入格式
                                     </button>
                                     <input ref={importFileInputRef} type="file" accept=".xlsx, .xls" className="hidden" onChange={handleExcelUpload} />
                                 </>
                             ) : (
-                                <button type="button" disabled className="bg-slate-300 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap cursor-not-allowed">
+                                <button type="button" disabled className={`${BUTTON_SYSTEM.primary} bg-slate-300 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap cursor-not-allowed`}>
                                     <FileSpreadsheet className="w-4 h-4" /> 匯入 Excel（唯讀）
                                 </button>
                             )}
-                            <button onClick={() => setShowAvgModal(true)} className={`btn-sheen px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors border ${darkMode ? 'text-indigo-300 bg-indigo-500/10 border-indigo-500/20 hover:bg-indigo-500/20' : 'text-indigo-700 bg-white border-indigo-100 hover:bg-indigo-50 shadow-sm'}`}><Edit3 className="w-4 h-4"/> 平均設定</button>
+                            <button onClick={() => setShowAvgModal(true)} className={`${BUTTON_SYSTEM.secondary} px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors border ${darkMode ? 'text-indigo-300 bg-indigo-500/10 border-indigo-500/20 hover:bg-indigo-500/20' : 'text-indigo-700 bg-white border-indigo-100 hover:bg-indigo-50 shadow-sm'}`}><Edit3 className="w-4 h-4"/> 平均設定</button>
                         </div>
                     </div>
                 )}
@@ -6342,19 +6351,19 @@ export default function App() {
                                 </span>
                             </div>
                             <div className="flex gap-2 flex-wrap items-center">
-                                <button onClick={() => { setSortByPR((prev) => !prev); setSortByProb(false); }} className={`btn-sheen px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByPR ? 'bg-indigo-600 text-white shadow-indigo-500/30' : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
+                                <button onClick={() => { setSortByPR((prev) => !prev); setSortByProb(false); }} className={`${sortByPR ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.secondary} px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByPR ? 'bg-indigo-600 text-white shadow-indigo-500/30' : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
                                     <ArrowDownWideNarrow className="w-3.5 h-3.5" /> PR排序
                                 </button>
-                                <button onClick={() => { setSortByProb((prev) => !prev); setSortByPR(false); }} className={`btn-sheen px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByProb ? (darkMode ? 'bg-emerald-700 text-white shadow-emerald-900/45 ring-1 ring-emerald-200/30' : 'bg-emerald-600 text-white shadow-emerald-600/25') : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
+                                <button onClick={() => { setSortByProb((prev) => !prev); setSortByPR(false); }} className={`${sortByProb ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.secondary} px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByProb ? (darkMode ? 'bg-emerald-700 text-white shadow-emerald-900/45 ring-1 ring-emerald-200/30' : 'bg-emerald-600 text-white shadow-emerald-600/25') : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
                                     <Percent className="w-3.5 h-3.5" /> 機率排序
                                 </button>
-                                <button onClick={handleExportBatchExcel} className={`btn-sheen px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1 border ${darkMode ? 'bg-slate-800 text-slate-300 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
+                                <button onClick={handleExportBatchExcel} className={`${BUTTON_SYSTEM.secondary} px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1 border ${darkMode ? 'bg-slate-800 text-slate-300 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
                                     <FileSpreadsheet className="w-3.5 h-3.5" /> 下載 Excel
                                 </button>
                                 <button
                                   onClick={handleSaveBatchGrades}
                                   disabled={!canEditStudentGrades}
-                                  className={`btn-sheen text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-md transition-all active:scale-[0.98] flex items-center gap-1 ${
+                                  className={`${BUTTON_SYSTEM.primary} text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-md transition-all active:scale-[0.98] flex items-center gap-1 ${
                                     !canEditStudentGrades
                                       ? 'bg-slate-400 cursor-not-allowed shadow-none'
                                       : isBatchDirty
@@ -6367,13 +6376,13 @@ export default function App() {
                             </div>
                         </div>
 
-                        <div className={`flex p-1 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
+                        <div className={`premium-control-rail flex p-1 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
                             {activeTeacherClassDefs.map(c => (
                                 <button key={c.id} onClick={() => {
                                     startTransition(() => {
                                         setTeacherClassFilter(c.id);
                                     });
-                                }} className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${teacherClassFilter === c.id ? (darkMode ? 'bg-slate-800 text-white shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-700 shadow-sm border border-slate-200/50') : 'text-slate-500 hover:text-slate-400'}`}>{c.label}</button>
+                                }} className={`${teacherClassFilter === c.id ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.segment} flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${teacherClassFilter === c.id ? (darkMode ? 'bg-slate-800 text-white shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-700 shadow-sm border border-slate-200/50') : 'text-slate-500 hover:text-slate-400'}`}>{c.label}</button>
                             ))}
                         </div>
 
@@ -6396,7 +6405,7 @@ export default function App() {
                             </div>
                         </div>
 
-                        <div className={`flex p-1 rounded-xl border overflow-x-auto shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
+                        <div className={`premium-control-rail flex p-1 rounded-xl border overflow-x-auto shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
                             {BATCH_INSIGHT_TABS.map((tab) => (
                                 <button
                                   key={tab.id}
@@ -6405,7 +6414,7 @@ export default function App() {
                                           setBatchInsightTab(tab.id);
                                       });
                                   }}
-                                  className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${batchInsightTab === tab.id ? (darkMode ? 'bg-slate-800 text-emerald-100 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-700 shadow-sm border border-slate-200/50') : 'text-slate-500 hover:text-slate-400'}`}
+                                  className={`${batchInsightTab === tab.id ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.segment} flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${batchInsightTab === tab.id ? (darkMode ? 'bg-slate-800 text-emerald-100 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-700 shadow-sm border border-slate-200/50') : 'text-slate-500 hover:text-slate-400'}`}
                                 >
                                   {tab.label}
                                 </button>
@@ -6609,7 +6618,7 @@ export default function App() {
                                         <button
                                           onClick={handleSaveGlobalTeacherMessage}
                                           disabled={teacherMessageSaving || teacherMessageLoading || !user}
-                                          className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                          className={`${BUTTON_SYSTEM.primary} px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors`}
                                         >
                                           {teacherMessageSaving ? '儲存中...' : '儲存全班訊息'}
                                         </button>
@@ -6649,7 +6658,7 @@ export default function App() {
                                                     <button
                                                       onClick={() => handleSaveStudentTeacherMessage(studentId)}
                                                       disabled={isSaving || teacherMessageLoading || !user}
-                                                      className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-white bg-sky-600 hover:bg-sky-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                                      className={`${BUTTON_SYSTEM.primary} px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-white bg-sky-600 hover:bg-sky-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors`}
                                                     >
                                                       {isSaving ? '儲存中' : '儲存'}
                                                     </button>
@@ -6706,7 +6715,7 @@ export default function App() {
                                         <button
                                           onClick={() => loadQueryStats({ force: true })}
                                           disabled={queryStatsLoading}
-                                          className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-colors ${
+                                          className={`${BUTTON_SYSTEM.secondary} px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-colors ${
                                             queryStatsLoading
                                               ? 'bg-slate-300 text-white cursor-not-allowed'
                                               : 'bg-slate-700 text-white hover:bg-slate-600'
@@ -6719,7 +6728,7 @@ export default function App() {
                                               title: '重置查詢次數'
                                           })}
                                           disabled={queryStatsLoading}
-                                          className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-colors ${
+                                          className={`${BUTTON_SYSTEM.danger} px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-colors ${
                                             queryStatsLoading
                                               ? 'bg-slate-300 text-white cursor-not-allowed'
                                               : 'bg-red-500 text-white hover:bg-red-400'
@@ -6756,7 +6765,7 @@ export default function App() {
                                           setQueryMonitorKeyword('');
                                           setQueryMonitorDateFilter('all');
                                       }}
-                                      className={`rounded-xl border px-3 py-1.5 text-[10px] font-bold transition-colors ${darkMode ? 'border-white/10 bg-slate-900/50 text-slate-200 hover:bg-slate-800' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+                                      className={`${BUTTON_SYSTEM.secondary} rounded-xl border px-3 py-1.5 text-[10px] font-bold transition-colors ${darkMode ? 'border-white/10 bg-slate-900/50 text-slate-200 hover:bg-slate-800' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
                                     >
                                       清除條件
                                     </button>
@@ -6896,7 +6905,7 @@ export default function App() {
                                             <div className={`text-[10px] font-black tracking-widest uppercase ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>系統操作歷程</div>
                                             <button
                                               onClick={handleCreateLocalSnapshot}
-                                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-colors ${darkMode ? 'bg-slate-800 text-slate-200 hover:bg-slate-700' : 'bg-slate-800 text-white hover:bg-slate-700'}`}
+                                              className={`${BUTTON_SYSTEM.secondary} px-2.5 py-1 rounded-lg text-[10px] font-bold transition-colors ${darkMode ? 'bg-slate-800 text-slate-200 hover:bg-slate-700' : 'bg-slate-800 text-white hover:bg-slate-700'}`}
                                             >
                                               建立快照
                                             </button>
@@ -6912,13 +6921,13 @@ export default function App() {
                                                             <div className="flex items-center gap-1">
                                                                 <button
                                                                   onClick={() => executeWithSecurity(() => handleRestoreLocalSnapshot(snapshot.id), { title: '還原本機快照' })}
-                                                                  className="text-[10px] font-black px-2 py-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-500 transition-colors"
+                                                                  className={`${BUTTON_SYSTEM.primary} text-[10px] font-black px-2 py-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-500 transition-colors`}
                                                                 >
                                                                   還原
                                                                 </button>
                                                                 <button
                                                                   onClick={() => executeWithSecurity(() => handleDeleteLocalSnapshot(snapshot.id), { title: '刪除本機快照' })}
-                                                                  className="text-[10px] font-black px-2 py-0.5 rounded bg-rose-500 text-white hover:bg-rose-400 transition-colors"
+                                                                  className={`${BUTTON_SYSTEM.danger} text-[10px] font-black px-2 py-0.5 rounded bg-rose-500 text-white hover:bg-rose-400 transition-colors`}
                                                                 >
                                                                   刪除
                                                                 </button>
@@ -6998,9 +7007,9 @@ export default function App() {
                   </div>
                   <div className="flex gap-2">
                     {canEditStudentGrades ? (
-                      <button onClick={handleDeleteStudent} className="bg-red-500/10 text-red-500 p-2.5 rounded-xl hover:bg-red-500/20 transition-colors active:scale-95"><Trash2 className="w-5 h-5"/></button>
+                      <button onClick={handleDeleteStudent} className={`${BUTTON_SYSTEM.iconDanger} bg-red-500/10 text-red-500 p-2.5 rounded-xl hover:bg-red-500/20 transition-colors active:scale-95`}><Trash2 className="w-5 h-5"/></button>
                     ) : (
-                      <button type="button" disabled className="bg-slate-200 text-slate-400 p-2.5 rounded-xl cursor-not-allowed" title="2491212 權限不可刪除學生">
+                      <button type="button" disabled className={`${BUTTON_SYSTEM.icon} bg-slate-200 text-slate-400 p-2.5 rounded-xl cursor-not-allowed`} title="2491212 權限不可刪除學生">
                         <Trash2 className="w-5 h-5"/>
                       </button>
                     )}
@@ -7068,7 +7077,7 @@ export default function App() {
               <div className={`w-full p-2 rounded-2xl border transition-all mb-6 shadow-inner ${darkMode ? 'bg-[#08120d]/70 border-emerald-200/15 focus-within:ring-2 focus-within:ring-emerald-500/20' : 'bg-white/75 border-white/85 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100'}`}>
                 <input type="text" placeholder="請輸入學號或姓名" className={`w-full bg-transparent border-none px-4 py-3 outline-none text-xl font-bold text-center tracking-widest placeholder:text-base placeholder:tracking-normal placeholder:font-medium ${darkMode ? 'text-white placeholder:text-slate-600' : 'text-slate-800 placeholder:text-slate-400'}`} value={searchId} onChange={(e) => setSearchId(e.target.value)} />
               </div>
-              <button onClick={handleParentSearch} disabled={loading || !user} className="btn-sheen w-full bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-2xl font-bold text-lg shadow-sm transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 tracking-wide">{loading ? '查詢中...' : (!user ? '連線中...' : '開始查詢')}</button>
+              <button onClick={handleParentSearch} disabled={loading || !user} className={`${BUTTON_SYSTEM.primary} w-full bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-2xl font-bold text-lg shadow-sm transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 tracking-wide`}>{loading ? '查詢中...' : (!user ? '連線中...' : '開始查詢')}</button>
               {searchError && <p className="mt-6 text-red-500 text-xs font-bold bg-red-500/10 inline-block px-4 py-2 rounded-full animate-pulse">{searchError}</p>}
             </div>
             )}
@@ -7079,7 +7088,7 @@ export default function App() {
                    <div className={`absolute top-0 right-0 w-64 h-64 rounded-full -mr-20 -mt-20 blur-3xl ${darkMode ? 'bg-emerald-500 opacity-20' : 'bg-emerald-300 opacity-25'}`}></div>
                    
                    <div className="relative z-10 mb-6">
-                       <button onClick={() => setViewData(null)} className={`absolute top-0 right-0 p-2 rounded-full backdrop-blur-md transition-colors ${darkMode ? 'text-slate-400 hover:text-white bg-white/5' : 'text-slate-500 hover:text-slate-700 bg-white border border-slate-200'}`}><LogOut className="w-4 h-4"/></button>
+                       <button onClick={() => setViewData(null)} className={`${BUTTON_SYSTEM.icon} absolute top-0 right-0 p-2 rounded-full backdrop-blur-md transition-colors ${darkMode ? 'text-slate-400 hover:text-white bg-white/5' : 'text-slate-500 hover:text-slate-700 bg-white border border-slate-200'}`}><LogOut className="w-4 h-4"/></button>
 
                        {viewData.prob && viewData.prob !== '-' && (
                            <div className="absolute right-0 top-10 text-right">
@@ -7117,17 +7126,17 @@ export default function App() {
                   </div>
                   )}
 
-                  <div className={`flex p-1 mb-6 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#08120d]/70 border-emerald-200/10' : 'bg-slate-50 border-slate-100'}`}>
+                  <div className={`premium-control-rail flex p-1 mb-6 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#08120d]/70 border-emerald-200/10' : 'bg-slate-50 border-slate-100'}`}>
                       {PHASES.map(phase => (
                           <button key={phase.id} onClick={() => {
                               startTransition(() => {
                                   setActivePhase(phase.id);
                               });
-                          }} className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${activePhase === phase.id ? (darkMode ? 'bg-[#1f2a24] text-emerald-100 shadow-md border border-emerald-200/20 ring-1 ring-emerald-200/10' : 'bg-white text-slate-800 shadow-sm border border-slate-100') : 'text-slate-500 hover:text-slate-400'}`}>{phase.name}</button>
+                          }} className={`${activePhase === phase.id ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.segment} flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${activePhase === phase.id ? (darkMode ? 'bg-[#1f2a24] text-emerald-100 shadow-md border border-emerald-200/20 ring-1 ring-emerald-200/10' : 'bg-white text-slate-800 shadow-sm border border-slate-100') : 'text-slate-500 hover:text-slate-400'}`}>{phase.name}</button>
                       ))}
                   </div>
 
-                  <div className={`flex p-1 rounded-2xl mb-8 justify-center shadow-inner ${darkMode ? 'bg-[#08120d]/70' : 'bg-slate-100'}`}>
+                  <div className={`premium-control-rail flex p-1 rounded-2xl mb-8 justify-center shadow-inner ${darkMode ? 'bg-[#08120d]/70' : 'bg-slate-100'}`}>
                       {['總分', '國文', '英文', '數學'].map(tab => {
                           const tabKey = tab === '總分' ? 'total' : tab === '國文' ? 'chi' : tab === '英文' ? 'eng' : 'math';
                           const isActive = activeTab === tabKey;
@@ -7136,7 +7145,7 @@ export default function App() {
                                   startTransition(() => {
                                       setActiveTab(tabKey);
                                   });
-                              }} className={`flex-1 py-2.5 text-xs font-bold rounded-xl transition-all duration-300 ${isActive ? (darkMode ? 'bg-[#1f2a24] text-emerald-100 shadow-md border border-emerald-200/15 ring-1 ring-emerald-200/10' : 'bg-white text-slate-800 shadow-sm border border-slate-100') : 'text-slate-400'}`}>
+                              }} className={`${isActive ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.segment} flex-1 py-2.5 text-xs font-bold rounded-xl transition-all duration-300 ${isActive ? (darkMode ? 'bg-[#1f2a24] text-emerald-100 shadow-md border border-emerald-200/15 ring-1 ring-emerald-200/10' : 'bg-white text-slate-800 shadow-sm border border-slate-100') : 'text-slate-400'}`}>
                                 {isActive && <span className={`inline-block w-1.5 h-1.5 rounded-full ${TAB_DOT_BG_CLASS[tabKey]} mr-1.5 mb-0.5`}></span>}{tab}
                               </button>
                           )
@@ -7176,7 +7185,7 @@ export default function App() {
                                             <span className="text-sm font-bold text-slate-400 font-mono">{d.date}</span>
                                             {d.class && <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold opacity-60 ${darkMode ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-600'}`}>{d.class}</span>}
                                         </div>
-                                        <button onClick={() => openStatsModal(dateForRank, { total: d.total, chi: d.chi, eng: d.eng, math: d.math }, d.class)} className={`btn-sheen px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-95 shadow-sm backdrop-blur-md ${darkMode ? 'bg-slate-800/85 text-emerald-100 hover:bg-slate-700/88 border border-emerald-200/20 shadow-black/25' : 'bg-white/88 text-slate-700 hover:bg-white border border-white/90 ring-1 ring-white/60 shadow-[0_8px_20px_rgba(15,23,42,0.08)]'}`}>
+                                        <button onClick={() => openStatsModal(dateForRank, { total: d.total, chi: d.chi, eng: d.eng, math: d.math }, d.class)} className={`${BUTTON_SYSTEM.secondary} px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-95 shadow-sm backdrop-blur-md ${darkMode ? 'bg-slate-800/85 text-emerald-100 hover:bg-slate-700/88 border border-emerald-200/20 shadow-black/25' : 'bg-white/88 text-slate-700 hover:bg-white border border-white/90 ring-1 ring-white/60 shadow-[0_8px_20px_rgba(15,23,42,0.08)]'}`}>
                                             <BarChart2 className="w-3.5 h-3.5" /> 
                                             查看落點分析
                                             <ChevronRight className="w-3 h-3 opacity-80" />
@@ -7239,8 +7248,8 @@ export default function App() {
                     autoFocus
                   />
                   <div className="flex justify-end gap-2 mt-5">
-                      <button onClick={() => setShowAddStudentModal(false)} className={`px-4 py-2 rounded-lg text-sm font-bold ${darkMode ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-500 hover:bg-slate-100'}`}>取消</button>
-                      <button onClick={handleAddNewStudent} className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold">確認</button>
+                      <button onClick={() => setShowAddStudentModal(false)} className={`${BUTTON_SYSTEM.secondary} px-4 py-2 rounded-lg text-sm font-bold ${darkMode ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-500 hover:bg-slate-100'}`}>取消</button>
+                      <button onClick={handleAddNewStudent} className={`${BUTTON_SYSTEM.primary} px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold`}>確認</button>
                   </div>
               </div>
           </div>
@@ -7251,12 +7260,12 @@ export default function App() {
               <div className={`modal-panel-animate rounded-[2.5rem] w-full max-w-2xl max-h-[85vh] flex flex-col ${darkMode ? 'bg-slate-800 border border-white/10' : 'bg-white shadow-2xl'}`} onClick={e => e.stopPropagation()}>
                   <div className={`p-6 border-b flex justify-between items-center ${darkMode ? 'border-white/5' : 'border-slate-100'}`}>
                       <h3 className={`text-xl font-bold flex items-center gap-3 ${darkMode ? 'text-white' : 'text-slate-800'}`}><Edit3 className="w-5 h-5 text-indigo-500"/> 設定班級平均</h3>
-                      <button onClick={() => setShowAvgModal(false)} className={`p-2 rounded-full transition ${darkMode ? 'bg-white/5 hover:bg-white/10 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-500'}`}><X className="w-5 h-5"/></button>
+                      <button onClick={() => setShowAvgModal(false)} className={`${BUTTON_SYSTEM.icon} p-2 rounded-full transition ${darkMode ? 'bg-white/5 hover:bg-white/10 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-500'}`}><X className="w-5 h-5"/></button>
                   </div>
                   <div className={`px-6 pt-6 pb-2`}>
-                      <div className={`flex p-1 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
+                      <div className={`premium-control-rail flex p-1 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
                           {activeTeacherClassDefs.map(c => (
-                              <button key={c.id} onClick={() => setAvgSettingsClassFilter(c.id)} className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${avgSettingsClassFilter === c.id ? (darkMode ? 'bg-slate-800 text-white shadow-md border border-white/5' : 'bg-white text-slate-800 shadow-sm border border-slate-200') : 'text-slate-500 hover:text-slate-400'}`}>{c.label}</button>
+                              <button key={c.id} onClick={() => setAvgSettingsClassFilter(c.id)} className={`${avgSettingsClassFilter === c.id ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.segment} flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${avgSettingsClassFilter === c.id ? (darkMode ? 'bg-slate-800 text-white shadow-md border border-white/5' : 'bg-white text-slate-800 shadow-sm border border-slate-200') : 'text-slate-500 hover:text-slate-400'}`}>{c.label}</button>
                           ))}
                       </div>
                   </div>
@@ -7294,8 +7303,8 @@ export default function App() {
                       </table>
                   </div>
                   <div className={`p-6 border-t rounded-b-[2rem] flex justify-end gap-3 ${darkMode ? 'border-white/5 bg-slate-800' : 'border-slate-100 bg-white'}`}>
-                      <button onClick={() => setShowAvgModal(false)} className={`px-6 py-3 rounded-xl font-bold transition text-sm ${darkMode ? 'text-slate-400 hover:bg-white/5' : 'text-slate-500 hover:bg-slate-100'}`}>取消</button>
-                      <button onClick={saveManualClassAverages} className="px-6 py-3 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-500 shadow-lg shadow-indigo-900/20 transition active:scale-95 text-sm">儲存設定</button>
+                      <button onClick={() => setShowAvgModal(false)} className={`${BUTTON_SYSTEM.secondary} px-6 py-3 rounded-xl font-bold transition text-sm ${darkMode ? 'text-slate-400 hover:bg-white/5' : 'text-slate-500 hover:bg-slate-100'}`}>取消</button>
+                      <button onClick={saveManualClassAverages} className={`${BUTTON_SYSTEM.primary} px-6 py-3 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-500 shadow-lg shadow-indigo-900/20 transition active:scale-95 text-sm`}>儲存設定</button>
                   </div>
               </div>
           </div>
@@ -7305,7 +7314,7 @@ export default function App() {
             <div className="modal-backdrop-animate fixed inset-0 bg-black/62 backdrop-blur-sm flex items-start sm:items-center justify-center z-[70] px-4 pb-4 pt-[calc(5rem+env(safe-area-inset-top))] sm:p-4" onClick={() => setStatsModalData(null)}>
                 <div className={`modal-panel-animate rounded-[2.2rem] w-full max-w-2xl overflow-hidden flex flex-col max-h-[calc(100svh-6rem-env(safe-area-inset-top))] sm:max-h-[92vh] border ${darkMode ? 'bg-slate-800 border-white/10' : 'bg-white/95 border-slate-200/95 shadow-[0_30px_70px_rgba(15,23,42,0.22)]'}`} onClick={e => e.stopPropagation()}>
                     <div className={`p-6 sm:p-7 border-b relative ${darkMode ? 'border-white/5 bg-slate-800/75' : 'border-slate-200/95 bg-[linear-gradient(112deg,rgba(224,242,254,0.96)_0%,rgba(255,255,255,0.98)_46%,rgba(236,253,245,0.96)_100%)]'}`}>
-                        <button onClick={() => setStatsModalData(null)} className={`absolute top-5 right-5 p-2 rounded-full transition ${darkMode ? 'bg-white/5 hover:bg-white/10 text-white' : 'bg-white hover:bg-slate-50 text-slate-500 border border-slate-200'}`}><X className="w-5 h-5"/></button>
+                        <button onClick={() => setStatsModalData(null)} className={`${BUTTON_SYSTEM.icon} absolute top-5 right-5 p-2 rounded-full transition ${darkMode ? 'bg-white/5 hover:bg-white/10 text-white' : 'bg-white hover:bg-slate-50 text-slate-500 border border-slate-200'}`}><X className="w-5 h-5"/></button>
                         <div className="pr-12">
                             <div className={`text-[10px] font-black uppercase tracking-[0.18em] mb-2 ${darkMode ? 'text-blue-400' : 'text-sky-700'}`}>落點分析報告</div>
                             <h3 className={`text-2xl font-black tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>{statsModalData.date} 落點分析</h3>
@@ -7322,7 +7331,7 @@ export default function App() {
                                     const tabKey = tab === '總分' ? 'total' : tab === '國文' ? 'chi' : tab === '英文' ? 'eng' : 'math';
                                     const isActive = statsActiveTab === tabKey;
                                     return (
-                                        <button key={tabKey} onClick={() => setStatsActiveTab(tabKey)} className={`py-2 text-xs font-black rounded-xl transition-all ${isActive ? (darkMode ? 'bg-slate-800 text-white shadow-md border border-white/5' : 'bg-white text-slate-800 shadow-sm border border-slate-200') : 'text-slate-500'}`}>
+                                        <button key={tabKey} onClick={() => setStatsActiveTab(tabKey)} className={`${isActive ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.segment} py-2 text-xs font-black rounded-xl transition-all ${isActive ? (darkMode ? 'bg-slate-800 text-white shadow-md border border-white/5' : 'bg-white text-slate-800 shadow-sm border border-slate-200') : 'text-slate-500'}`}>
                                             {isActive && <span className={`inline-block w-1.5 h-1.5 rounded-full ${TAB_DOT_BG_CLASS[tabKey]} mr-1.5 mb-0.5`}></span>}{tab}
                                         </button>
                                     );
@@ -7430,7 +7439,7 @@ export default function App() {
                                 <h3 className={`text-base font-black tracking-tight ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>匯入格式說明</h3>
                                 <p className={`text-[11px] mt-1 font-semibold ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>匯入前先對照這份格式，能減少預檢失敗與錯誤日期被略過。</p>
                             </div>
-                            <button onClick={() => setShowImportFormatGuide(false)} className={`p-1.5 rounded-full transition ${darkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-white text-slate-500 border border-slate-200'}`}>
+                            <button onClick={() => setShowImportFormatGuide(false)} className={`${BUTTON_SYSTEM.icon} p-1.5 rounded-full transition ${darkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-white text-slate-500 border border-slate-200'}`}>
                                 <X className="w-4 h-4" />
                             </button>
                         </div>
@@ -7494,7 +7503,7 @@ export default function App() {
                     <div className={`px-5 py-4 border-t flex justify-end ${darkMode ? 'border-white/10 bg-slate-900/50' : 'border-slate-200 bg-white'}`}>
                         <button
                           onClick={() => setShowImportFormatGuide(false)}
-                          className={`px-4 py-2 rounded-lg text-xs font-bold ${darkMode ? 'bg-slate-800 text-slate-200 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                          className={`${BUTTON_SYSTEM.secondary} px-4 py-2 rounded-lg text-xs font-bold ${darkMode ? 'bg-slate-800 text-slate-200 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                         >
                           關閉
                         </button>
@@ -7512,7 +7521,7 @@ export default function App() {
                                 <h3 className={`text-base font-black tracking-tight ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>匯入預檢確認</h3>
                                 <p className={`text-[11px] mt-1 font-semibold ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>{importPreview.fileName}</p>
                             </div>
-                            <button onClick={handleCancelImportPreview} className={`p-1.5 rounded-full transition ${darkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-white text-slate-500 border border-slate-200'}`}>
+                            <button onClick={handleCancelImportPreview} className={`${BUTTON_SYSTEM.icon} p-1.5 rounded-full transition ${darkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-white text-slate-500 border border-slate-200'}`}>
                                 <X className="w-4 h-4" />
                             </button>
                         </div>
@@ -7572,14 +7581,14 @@ export default function App() {
                         <button
                           onClick={handleCancelImportPreview}
                           disabled={isApplyingImport}
-                          className={`px-4 py-2 rounded-lg text-xs font-bold ${darkMode ? 'bg-slate-800 text-slate-200 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                          className={`${BUTTON_SYSTEM.secondary} px-4 py-2 rounded-lg text-xs font-bold ${darkMode ? 'bg-slate-800 text-slate-200 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                         >
                           取消
                         </button>
                         <button
                           onClick={handleConfirmImportPreview}
                           disabled={isApplyingImport}
-                          className={`px-4 py-2 rounded-lg text-xs font-bold text-white ${isApplyingImport ? 'bg-slate-400 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500'}`}
+                          className={`${BUTTON_SYSTEM.primary} px-4 py-2 rounded-lg text-xs font-bold text-white ${isApplyingImport ? 'bg-slate-400 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500'}`}
                         >
                           {isApplyingImport ? '套用中...' : '確認匯入'}
                         </button>
@@ -7599,12 +7608,12 @@ export default function App() {
                     確定要刪除 <span className={`font-bold px-2 py-0.5 rounded-md mx-1 text-base ${darkMode ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-900'}`}>{deleteTarget || studentToDelete?.name}</span> 的資料嗎？
                   </p>
                   <div className="flex gap-3 justify-end">
-                      <button onClick={() => { setDeleteTarget(null); setStudentToDelete(null); }} className={`flex-1 px-4 py-3.5 rounded-xl font-bold text-sm transition-colors ${darkMode ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>取消</button>
+                      <button onClick={() => { setDeleteTarget(null); setStudentToDelete(null); }} className={`${BUTTON_SYSTEM.secondary} flex-1 px-4 py-3.5 rounded-xl font-bold text-sm transition-colors ${darkMode ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>取消</button>
                       <button
                         onClick={() => executeWithSecurity(deleteTarget ? confirmDeleteDate : confirmDeleteStudent, {
                             title: deleteTarget ? '刪除測驗日期' : '刪除學生資料'
                         })}
-                        className="flex-1 px-4 py-3.5 rounded-xl bg-red-500 text-white hover:bg-red-600 font-bold text-sm shadow-lg shadow-red-900/20 transition-all active:scale-95"
+                        className={`${BUTTON_SYSTEM.danger} flex-1 px-4 py-3.5 rounded-xl bg-red-500 text-white hover:bg-red-600 font-bold text-sm shadow-lg shadow-red-900/20 transition-all active:scale-95`}
                       >
                         刪除
                       </button>

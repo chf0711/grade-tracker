@@ -521,8 +521,11 @@ button[class*="bg-slate-900"]:hover:not(:disabled) {
 }
 
 .premium-control-rail {
+  display: flex;
+  gap: 0.38rem;
+  align-items: center;
   border-radius: 999px;
-  padding: 0.32rem;
+  padding: 0.34rem 0.38rem;
   border: 1px solid rgba(226, 232, 240, 0.88);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.82) 0%, rgba(248, 250, 252, 0.92) 100%);
@@ -534,8 +537,11 @@ button[class*="bg-slate-900"]:hover:not(:disabled) {
 }
 
 .premium-action-rail {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
   border-radius: 1.5rem;
-  padding: 0.45rem;
+  padding: 0.48rem;
   border: 1px solid rgba(226, 232, 240, 0.8);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.78) 0%, rgba(248, 250, 252, 0.94) 100%);

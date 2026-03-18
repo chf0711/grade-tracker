@@ -106,6 +106,58 @@ const BUTTON_SYSTEM = Object.freeze({
     icon: 'btn-premium btn-premium--secondary btn-premium--icon btn-sheen',
     iconDanger: 'btn-premium btn-premium--danger btn-premium--icon btn-sheen'
 });
+const CLASS_PILL_THEME = Object.freeze({
+    'A班': {
+        dot: 'bg-indigo-500',
+        activeLight: 'text-indigo-700 border-indigo-200/95 ring-2 ring-indigo-200/70 shadow-[0_16px_30px_rgba(79,70,229,0.16)] bg-[linear-gradient(135deg,rgba(224,231,255,0.95)_0%,rgba(255,255,255,0.98)_56%,rgba(199,210,254,0.88)_100%)]',
+        inactiveLight: 'text-slate-500 hover:text-indigo-700 hover:border-indigo-100/90',
+        activeDark: 'text-indigo-100 border-indigo-300/25 ring-2 ring-indigo-300/20 shadow-[0_18px_36px_rgba(49,46,129,0.28)] bg-[linear-gradient(135deg,rgba(55,48,163,0.52)_0%,rgba(15,23,42,0.92)_68%,rgba(67,56,202,0.42)_100%)]',
+        inactiveDark: 'text-slate-400 hover:text-indigo-100 hover:border-indigo-300/15'
+    },
+    'B班': {
+        dot: 'bg-sky-500',
+        activeLight: 'text-sky-700 border-sky-200/95 ring-2 ring-sky-200/70 shadow-[0_16px_30px_rgba(2,132,199,0.16)] bg-[linear-gradient(135deg,rgba(224,242,254,0.95)_0%,rgba(255,255,255,0.98)_56%,rgba(186,230,253,0.88)_100%)]',
+        inactiveLight: 'text-slate-500 hover:text-sky-700 hover:border-sky-100/90',
+        activeDark: 'text-sky-100 border-sky-300/25 ring-2 ring-sky-300/20 shadow-[0_18px_36px_rgba(12,74,110,0.28)] bg-[linear-gradient(135deg,rgba(3,105,161,0.52)_0%,rgba(15,23,42,0.92)_68%,rgba(14,116,144,0.42)_100%)]',
+        inactiveDark: 'text-slate-400 hover:text-sky-100 hover:border-sky-300/15'
+    },
+    'C班': {
+        dot: 'bg-emerald-500',
+        activeLight: 'text-emerald-700 border-emerald-200/95 ring-2 ring-emerald-200/70 shadow-[0_16px_30px_rgba(5,150,105,0.16)] bg-[linear-gradient(135deg,rgba(220,252,231,0.95)_0%,rgba(255,255,255,0.98)_56%,rgba(167,243,208,0.88)_100%)]',
+        inactiveLight: 'text-slate-500 hover:text-emerald-700 hover:border-emerald-100/90',
+        activeDark: 'text-emerald-100 border-emerald-300/25 ring-2 ring-emerald-300/20 shadow-[0_18px_36px_rgba(6,78,59,0.28)] bg-[linear-gradient(135deg,rgba(5,150,105,0.5)_0%,rgba(15,23,42,0.92)_68%,rgba(4,120,87,0.42)_100%)]',
+        inactiveDark: 'text-slate-400 hover:text-emerald-100 hover:border-emerald-300/15'
+    },
+    '東興': {
+        dot: 'bg-amber-500',
+        activeLight: 'text-amber-700 border-amber-200/95 ring-2 ring-amber-200/70 shadow-[0_16px_30px_rgba(217,119,6,0.16)] bg-[linear-gradient(135deg,rgba(254,243,199,0.95)_0%,rgba(255,255,255,0.98)_56%,rgba(253,230,138,0.86)_100%)]',
+        inactiveLight: 'text-slate-500 hover:text-amber-700 hover:border-amber-100/90',
+        activeDark: 'text-amber-100 border-amber-300/25 ring-2 ring-amber-300/20 shadow-[0_18px_36px_rgba(120,53,15,0.28)] bg-[linear-gradient(135deg,rgba(180,83,9,0.5)_0%,rgba(15,23,42,0.92)_68%,rgba(217,119,6,0.38)_100%)]',
+        inactiveDark: 'text-slate-400 hover:text-amber-100 hover:border-amber-300/15'
+    },
+    '日A班': {
+        dot: 'bg-violet-500',
+        activeLight: 'text-violet-700 border-violet-200/95 ring-2 ring-violet-200/70 shadow-[0_16px_30px_rgba(124,58,237,0.16)] bg-[linear-gradient(135deg,rgba(237,233,254,0.95)_0%,rgba(255,255,255,0.98)_56%,rgba(221,214,254,0.88)_100%)]',
+        inactiveLight: 'text-slate-500 hover:text-violet-700 hover:border-violet-100/90',
+        activeDark: 'text-violet-100 border-violet-300/25 ring-2 ring-violet-300/20 shadow-[0_18px_36px_rgba(76,29,149,0.28)] bg-[linear-gradient(135deg,rgba(109,40,217,0.5)_0%,rgba(15,23,42,0.92)_68%,rgba(124,58,237,0.4)_100%)]',
+        inactiveDark: 'text-slate-400 hover:text-violet-100 hover:border-violet-300/15'
+    },
+    '日B班': {
+        dot: 'bg-rose-500',
+        activeLight: 'text-rose-700 border-rose-200/95 ring-2 ring-rose-200/70 shadow-[0_16px_30px_rgba(225,29,72,0.16)] bg-[linear-gradient(135deg,rgba(255,228,230,0.95)_0%,rgba(255,255,255,0.98)_56%,rgba(254,205,211,0.88)_100%)]',
+        inactiveLight: 'text-slate-500 hover:text-rose-700 hover:border-rose-100/90',
+        activeDark: 'text-rose-100 border-rose-300/25 ring-2 ring-rose-300/20 shadow-[0_18px_36px_rgba(136,19,55,0.28)] bg-[linear-gradient(135deg,rgba(190,24,93,0.5)_0%,rgba(15,23,42,0.92)_68%,rgba(225,29,72,0.4)_100%)]',
+        inactiveDark: 'text-slate-400 hover:text-rose-100 hover:border-rose-300/15'
+    }
+});
+const getClassPillTheme = (classId, isDarkMode) => {
+    const theme = CLASS_PILL_THEME[classId] || CLASS_PILL_THEME['A班'];
+    return {
+        dot: theme.dot,
+        active: isDarkMode ? theme.activeDark : theme.activeLight,
+        inactive: isDarkMode ? theme.inactiveDark : theme.inactiveLight
+    };
+};
 
 const runtimeFirebaseConfig =
   typeof window !== 'undefined' ? window.__firebase_config : undefined;
@@ -1300,6 +1352,7 @@ export default function App() {
   const autoPruneNoticeKeyRef = useRef('');
   const currentBatchGradeInfoRef = useRef({});
   const batchRowsForDisplayRef = useRef([]);
+  const batchAutoClassScopeRef = useRef('');
   const parentQueryPerfRef = useRef({
       cacheHit: 0,
       cacheMiss: 0,
@@ -5342,8 +5395,11 @@ export default function App() {
       if (!shouldBuildBatchAnalytics || isBatchDirty) return;
       if (batchRowsForDisplay.length > 0) return;
       if (!fallbackBatchClassId || fallbackBatchClassId === teacherClassFilter) return;
+      const autoScopeKey = `${activeTeacherCohortId || ''}::${selectedBatchWeekendID || batchDate || ''}`;
+      if (batchAutoClassScopeRef.current === autoScopeKey) return;
+      batchAutoClassScopeRef.current = autoScopeKey;
       setTeacherClassFilter(fallbackBatchClassId);
-  }, [batchRowsForDisplay.length, fallbackBatchClassId, isBatchDirty, shouldBuildBatchAnalytics, teacherClassFilter]);
+  }, [activeTeacherCohortId, batchDate, batchRowsForDisplay.length, fallbackBatchClassId, isBatchDirty, selectedBatchWeekendID, shouldBuildBatchAnalytics, teacherClassFilter]);
 
   const handleExportBatchExcel = async () => {
       if (!window.XLSX) {
@@ -6377,13 +6433,26 @@ export default function App() {
                         </div>
 
                         <div className={`premium-control-rail flex p-1 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
-                            {activeTeacherClassDefs.map(c => (
-                                <button key={c.id} onClick={() => {
-                                    startTransition(() => {
-                                        setTeacherClassFilter(c.id);
-                                    });
-                                }} className={`${teacherClassFilter === c.id ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.segment} flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${teacherClassFilter === c.id ? (darkMode ? 'bg-slate-800 text-white shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-700 shadow-sm border border-slate-200/50') : 'text-slate-500 hover:text-slate-400'}`}>{c.label}</button>
-                            ))}
+                            {activeTeacherClassDefs.map(c => {
+                                const isActive = teacherClassFilter === c.id;
+                                const classTheme = getClassPillTheme(c.id, darkMode);
+                                return (
+                                    <button
+                                      key={c.id}
+                                      onClick={() => {
+                                          startTransition(() => {
+                                              setTeacherClassFilter(c.id);
+                                          });
+                                      }}
+                                      className={`${isActive ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.segment} flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${isActive ? classTheme.active : classTheme.inactive}`}
+                                    >
+                                      <span className="inline-flex items-center justify-center gap-1.5">
+                                        <span className={`h-1.5 w-1.5 rounded-full ${classTheme.dot} ${isActive ? 'opacity-100' : 'opacity-72'}`} />
+                                        <span>{c.label}</span>
+                                      </span>
+                                    </button>
+                                );
+                            })}
                         </div>
 
                         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
@@ -7264,9 +7333,22 @@ export default function App() {
                   </div>
                   <div className={`px-6 pt-6 pb-2`}>
                       <div className={`premium-control-rail flex p-1 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
-                          {activeTeacherClassDefs.map(c => (
-                              <button key={c.id} onClick={() => setAvgSettingsClassFilter(c.id)} className={`${avgSettingsClassFilter === c.id ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.segment} flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${avgSettingsClassFilter === c.id ? (darkMode ? 'bg-slate-800 text-white shadow-md border border-white/5' : 'bg-white text-slate-800 shadow-sm border border-slate-200') : 'text-slate-500 hover:text-slate-400'}`}>{c.label}</button>
-                          ))}
+                          {activeTeacherClassDefs.map(c => {
+                              const isActive = avgSettingsClassFilter === c.id;
+                              const classTheme = getClassPillTheme(c.id, darkMode);
+                              return (
+                                  <button
+                                    key={c.id}
+                                    onClick={() => setAvgSettingsClassFilter(c.id)}
+                                    className={`${isActive ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.segment} flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${isActive ? classTheme.active : classTheme.inactive}`}
+                                  >
+                                    <span className="inline-flex items-center justify-center gap-1.5">
+                                      <span className={`h-1.5 w-1.5 rounded-full ${classTheme.dot} ${isActive ? 'opacity-100' : 'opacity-72'}`} />
+                                      <span>{c.label}</span>
+                                    </span>
+                                  </button>
+                              );
+                          })}
                       </div>
                   </div>
                   <div className={`px-6 pb-6 overflow-y-auto flex-1 ${darkMode ? 'bg-[#020617]/30' : 'bg-slate-50/50'}`}>

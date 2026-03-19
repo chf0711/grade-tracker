@@ -6232,8 +6232,6 @@ export default function App() {
       [viewData, darkMode]
   );
 
-  const shouldShowParentWideShell = Boolean(viewData || parentSearchShell);
-
   const teacherMessageForParent = useMemo(
       () => {
           const studentId = String(viewData?.id || '').toUpperCase().trim();
@@ -7390,16 +7388,18 @@ export default function App() {
 
         {/* ... Parent View ... */}
         {mode === 'parent' && (
-          <div className={`${shouldShowParentWideShell ? 'max-w-5xl pt-1 sm:pt-2' : 'max-w-md pt-6'} mx-auto space-y-6 transition-all duration-300`}> 
+          <div className="max-w-5xl pt-1 sm:pt-2 mx-auto space-y-6 transition-all duration-300"> 
             {!viewData && !parentSearchShell && (
-            <div className={`panel-fade-in backdrop-blur-[26px] p-8 rounded-[2.5rem] shadow-2xl border text-center relative overflow-hidden ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/15 shadow-black/30' : 'bg-white/78 border-white/85 ring-1 ring-white/55 shadow-[0_24px_55px_rgba(15,23,42,0.12)]'}`}>
-              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-sky-500 via-emerald-500 to-indigo-500"></div>
-              <h2 className={`text-2xl font-black mb-8 tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>查詢成績</h2>
-              <div className={`w-full p-2 rounded-2xl border transition-all mb-6 shadow-inner ${darkMode ? 'bg-[#08120d]/70 border-emerald-200/15 focus-within:ring-2 focus-within:ring-emerald-500/20' : 'bg-white/75 border-white/85 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100'}`}>
-                <input type="text" placeholder="請輸入學號" className={`w-full bg-transparent border-none px-4 py-3 outline-none text-xl font-bold text-center tracking-widest placeholder:text-base placeholder:tracking-normal placeholder:font-medium ${darkMode ? 'text-white placeholder:text-slate-600' : 'text-slate-800 placeholder:text-slate-400'}`} value={searchId} onChange={(e) => setSearchId(e.target.value)} />
+            <div className="max-w-md mx-auto pt-6">
+              <div className={`panel-fade-in backdrop-blur-[26px] p-8 rounded-[2.5rem] shadow-2xl border text-center relative overflow-hidden ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/15 shadow-black/30' : 'bg-white/78 border-white/85 ring-1 ring-white/55 shadow-[0_24px_55px_rgba(15,23,42,0.12)]'}`}>
+                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-sky-500 via-emerald-500 to-indigo-500"></div>
+                <h2 className={`text-2xl font-black mb-8 tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>查詢成績</h2>
+                <div className={`w-full p-2 rounded-2xl border transition-all mb-6 shadow-inner ${darkMode ? 'bg-[#08120d]/70 border-emerald-200/15 focus-within:ring-2 focus-within:ring-emerald-500/20' : 'bg-white/75 border-white/85 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100'}`}>
+                  <input type="text" placeholder="請輸入學號" className={`w-full bg-transparent border-none px-4 py-3 outline-none text-xl font-bold text-center tracking-widest placeholder:text-base placeholder:tracking-normal placeholder:font-medium ${darkMode ? 'text-white placeholder:text-slate-600' : 'text-slate-800 placeholder:text-slate-400'}`} value={searchId} onChange={(e) => setSearchId(e.target.value)} />
+                </div>
+                <button onClick={handleParentSearch} disabled={loading || !user} className={`${BUTTON_SYSTEM.primary} w-full bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-2xl font-bold text-lg shadow-sm transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 tracking-wide`}>{loading ? '查詢中...' : (!user ? '連線中...' : '開始查詢')}</button>
+                {searchError && <p className="mt-6 text-red-500 text-xs font-bold bg-red-500/10 inline-block px-4 py-2 rounded-full animate-pulse">{searchError}</p>}
               </div>
-              <button onClick={handleParentSearch} disabled={loading || !user} className={`${BUTTON_SYSTEM.primary} w-full bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-2xl font-bold text-lg shadow-sm transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 tracking-wide`}>{loading ? '查詢中...' : (!user ? '連線中...' : '開始查詢')}</button>
-              {searchError && <p className="mt-6 text-red-500 text-xs font-bold bg-red-500/10 inline-block px-4 py-2 rounded-full animate-pulse">{searchError}</p>}
             </div>
             )}
 

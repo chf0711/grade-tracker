@@ -1391,6 +1391,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [searchId, setSearchId] = useState('');
   const [viewData, setViewData] = useState(null);
+  const [parentSearchShell, setParentSearchShell] = useState(null);
   const [parentViewContext, setParentViewContext] = useState({
       cohortId: '',
       dates: [],
@@ -4915,6 +4916,7 @@ export default function App() {
     if (!searchId.trim()) return;
     if (!user) {
       setSearchError('系統連線中，請稍候再查詢');
+      setParentSearchShell(null);
       return;
     }
     const searchStartTs = performance.now();
@@ -4934,9 +4936,11 @@ export default function App() {
       const likelyStudentId = /^[A-Z0-9_-]{3,24}$/.test(normalizedSearchId);
       if (!likelyStudentId) {
           setSearchError('請輸入正確學號');
+          setParentSearchShell(null);
           updateParentQueryPerf(performance.now() - searchStartTs, false);
           return;
       }
+      setParentSearchShell({ id: normalizedSearchId });
       let resolvedSearch = null;
 
       for (const cohortId of parentSearchCohortOrder) {
@@ -5005,6 +5009,7 @@ export default function App() {
 
       if (!resolvedSearch) {
           setSearchError('查無此學號');
+          setParentSearchShell(null);
           updateParentQueryPerf(performance.now() - searchStartTs, false);
           return;
       }
@@ -5213,8 +5218,10 @@ export default function App() {
     } catch (e) {
       console.error('Parent search error:', e);
       setSearchError('系統忙碌');
+      setParentSearchShell(null);
       updateParentQueryPerf(performance.now() - searchStartTs, false);
     } finally {
+      setParentSearchShell(null);
       setLoading(false);
     }
   };
@@ -6224,6 +6231,8 @@ export default function App() {
       () => getProbabilityVisual(viewData?.prob, darkMode),
       [viewData, darkMode]
   );
+
+  const shouldShowParentWideShell = Boolean(viewData || parentSearchShell);
 
   const teacherMessageForParent = useMemo(
       () => {
@@ -7381,8 +7390,8 @@ export default function App() {
 
         {/* ... Parent View ... */}
         {mode === 'parent' && (
-          <div className={`${viewData ? 'max-w-5xl pt-1 sm:pt-2' : 'max-w-md pt-6'} mx-auto space-y-6 transition-all duration-300`}> 
-            {!viewData && (
+          <div className={`${shouldShowParentWideShell ? 'max-w-5xl pt-1 sm:pt-2' : 'max-w-md pt-6'} mx-auto space-y-6 transition-all duration-300`}> 
+            {!viewData && !parentSearchShell && (
             <div className={`panel-fade-in backdrop-blur-[26px] p-8 rounded-[2.5rem] shadow-2xl border text-center relative overflow-hidden ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/15 shadow-black/30' : 'bg-white/78 border-white/85 ring-1 ring-white/55 shadow-[0_24px_55px_rgba(15,23,42,0.12)]'}`}>
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-sky-500 via-emerald-500 to-indigo-500"></div>
               <h2 className={`text-2xl font-black mb-8 tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>查詢成績</h2>
@@ -7392,6 +7401,49 @@ export default function App() {
               <button onClick={handleParentSearch} disabled={loading || !user} className={`${BUTTON_SYSTEM.primary} w-full bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-2xl font-bold text-lg shadow-sm transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 tracking-wide`}>{loading ? '查詢中...' : (!user ? '連線中...' : '開始查詢')}</button>
               {searchError && <p className="mt-6 text-red-500 text-xs font-bold bg-red-500/10 inline-block px-4 py-2 rounded-full animate-pulse">{searchError}</p>}
             </div>
+            )}
+
+            {!viewData && parentSearchShell && (
+              <div className={`panel-fade-in rounded-[2.5rem] shadow-2xl overflow-hidden border backdrop-blur-[28px] animate-pulse ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/15 shadow-black/30' : 'bg-white/74 border-white/85 ring-1 ring-white/55 shadow-[0_26px_60px_rgba(15,23,42,0.13)]'}`}>
+                <div className={`p-8 pb-6 relative overflow-hidden ${darkMode ? 'bg-[#0d1712] border-b border-emerald-200/10' : 'bg-[linear-gradient(112deg,rgba(236,253,245,0.93)_0%,rgba(224,242,254,0.9)_54%,rgba(255,255,255,0.92)_100%)] border-b border-white/70'}`}>
+                  <div className={`absolute top-0 right-0 w-64 h-64 rounded-full -mr-20 -mt-20 blur-3xl ${darkMode ? 'bg-emerald-500 opacity-20' : 'bg-emerald-300 opacity-25'}`}></div>
+                  <div className="relative z-10 mb-6 pr-[9.5rem] sm:pr-[12.5rem]">
+                    <div className={`h-5 w-28 rounded-full ${darkMode ? 'bg-white/10' : 'bg-emerald-100/80'}`} />
+                    <div className={`mt-4 h-10 w-44 rounded-2xl ${darkMode ? 'bg-white/10' : 'bg-slate-200/85'}`} />
+                    <div className={`mt-3 h-4 w-28 rounded-full ${darkMode ? 'bg-white/10' : 'bg-slate-200/85'}`} />
+                  </div>
+                  <div className="absolute top-0 right-0 z-20 flex flex-col items-end gap-3.5 sm:gap-4">
+                    <div className={`h-9 w-9 rounded-full ${darkMode ? 'bg-white/10' : 'bg-white border border-slate-200'}`} />
+                    <div className="w-[9rem] sm:w-[11rem] text-right">
+                      <div className={`ml-auto h-3 w-16 rounded-full ${darkMode ? 'bg-white/10' : 'bg-emerald-100/90'}`} />
+                      <div className={`mt-3 ml-auto h-12 w-24 rounded-2xl ${darkMode ? 'bg-white/10' : 'bg-slate-200/85'}`} />
+                      <div className={`mt-2 ml-auto h-3 w-28 rounded-full ${darkMode ? 'bg-white/10' : 'bg-slate-200/85'}`} />
+                    </div>
+                  </div>
+                </div>
+                <div className="p-6 space-y-6">
+                  <div className={`h-16 rounded-2xl ${darkMode ? 'bg-white/5' : 'bg-slate-100/90'}`} />
+                  <div className={`premium-control-rail flex p-1 rounded-xl ${darkMode ? 'bg-[#08120d]/70' : 'bg-slate-100'}`}>
+                    {Array.from({ length: 3 }).map((_, idx) => (
+                      <div key={`parent-shell-phase-${idx}`} className={`flex-1 h-9 rounded-lg ${darkMode ? 'bg-white/10' : 'bg-white/90 border border-slate-100'}`} />
+                    ))}
+                  </div>
+                  <div className={`premium-control-rail flex p-1 rounded-2xl ${darkMode ? 'bg-[#08120d]/70' : 'bg-slate-100'}`}>
+                    {Array.from({ length: 4 }).map((_, idx) => (
+                      <div key={`parent-shell-tab-${idx}`} className={`flex-1 h-10 rounded-xl ${darkMode ? 'bg-white/10' : 'bg-white/90 border border-slate-100'}`} />
+                    ))}
+                  </div>
+                  <div className={`h-72 rounded-3xl border ${darkMode ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200'}`} />
+                  <div className="space-y-4">
+                    {Array.from({ length: 2 }).map((_, idx) => (
+                      <div key={`parent-shell-detail-${idx}`} className={`rounded-3xl border p-5 ${darkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200/90'}`}>
+                        <div className={`h-4 w-24 rounded-full ${darkMode ? 'bg-white/10' : 'bg-slate-200/85'}`} />
+                        <div className={`mt-4 h-10 w-full rounded-2xl ${darkMode ? 'bg-white/10' : 'bg-slate-100/90'}`} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
             )}
 
             {viewData && (

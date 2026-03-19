@@ -540,6 +540,27 @@ const normalizeAverageGrade = (gradeObj) => {
     return normalized;
 };
 
+const normalizeStudentGrade = (gradeObj) => {
+    const normalized = {
+        chi: gradeObj?.chi ?? '',
+        eng: gradeObj?.eng ?? '',
+        math: gradeObj?.math ?? '',
+        total: gradeObj?.total ?? '',
+        class: gradeObj?.class ?? 'A班'
+    };
+    if (
+        normalized.total === ''
+        && (
+            normalized.chi !== ''
+            || normalized.eng !== ''
+            || normalized.math !== ''
+        )
+    ) {
+        normalized.total = calculateTotal(normalized.chi, normalized.eng, normalized.math);
+    }
+    return normalized;
+};
+
 const normalizeClassAveragesByWeekend = (rawAverages, getDateID) => {
     if (!rawAverages || typeof rawAverages !== 'object') return {};
     const normalized = {};
@@ -2665,17 +2686,18 @@ export default function App() {
           const g = grades[date];
           let normalizedG;
           if (Array.isArray(g)) {
-              normalizedG = { math: g[0]||0, eng: g[1]||0, chi: g[2]||0, total: (g[0]||0)+(g[1]||0)+(g[2]||0), class: 'A班' };
+              normalizedG = normalizeStudentGrade({ math: g[0] || 0, eng: g[1] || 0, chi: g[2] || 0, total: (g[0] || 0) + (g[1] || 0) + (g[2] || 0), class: 'A班' });
               changed = true;
           } else if (g && typeof g === 'object') {
-              normalizedG = { ...g };
+              normalizedG = normalizeStudentGrade(g);
+              if (
+                  normalizedG.total !== (g?.total ?? '')
+                  || normalizedG.class !== (g?.class ?? 'A班')
+              ) {
+                  changed = true;
+              }
           } else {
-              normalizedG = { chi: '', eng: '', math: '', total: '', class: 'A班' };
-              changed = true;
-          }
-
-          if (!normalizedG.class) {
-              normalizedG.class = 'A班';
+              normalizedG = normalizeStudentGrade({});
               changed = true;
           }
           if (date !== normalizedDate) changed = true;

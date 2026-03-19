@@ -31,6 +31,11 @@ test('getWeekendID keeps sunday->saturday fallback without availableDates', () =
     assert.equal(getWeekendID('03/01'), '02/28');
 });
 
+test('getWeekendID does not invent saturday when explicit pool has no related pair', () => {
+    assert.equal(getWeekendID('04/11', ['04/12', '04/19']), '04/11');
+    assert.equal(getWeekendID('03/09', ['03/08']), '03/08');
+});
+
 test('resolvePhaseByDate follows phase boundaries', () => {
     assert.equal(resolvePhaseByDate('04/19'), 'p1');
     assert.equal(resolvePhaseByDate('08/02'), 'p1');

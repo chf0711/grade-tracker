@@ -70,7 +70,7 @@ const INITIAL_BATCH_RENDER_ROWS = 42;
 const BATCH_RENDER_CHUNK_ROWS = 56;
 const SCORE_KEYS = ['chi', 'eng', 'math'];
 const LOCAL_CACHE_KEYS = Object.freeze({
-    dates: 'grade_tracker_cache_dates_v1',
+    dates: 'grade_tracker_cache_dates_v2',
     classAverages: 'grade_tracker_cache_class_averages_v18',
     students: 'grade_tracker_cache_students_v1',
     studentsVersion: 'grade_tracker_cache_students_version_v1',
@@ -271,11 +271,20 @@ const resolveDateIdForCohort = (dateStr, cohortId, rawDatePool = [], rawCohorts 
 };
 
 const getDateDisplayLabelForCohort = (dateStr, cohortId, rawDatePool = [], rawCohorts = DEFAULT_COHORT_OPTIONS) => {
+    const normalized = normalizeDateToken(dateStr) || String(dateStr || '');
     const dateId = resolveDateIdForCohort(dateStr, cohortId, rawDatePool, rawCohorts);
-    if (!dateId) return normalizeDateToken(dateStr) || String(dateStr || '');
-    return resolveCohortDateMode(cohortId, rawCohorts) === COHORT_DATE_MODE.SINGLE
-        ? dateId
-        : getWeekendDisplayLabel(dateId);
+    if (!dateId) return normalized;
+    if (resolveCohortDateMode(cohortId, rawCohorts) === COHORT_DATE_MODE.SINGLE) {
+        return dateId;
+    }
+
+    const datePool = sanitizeDateList(rawDatePool);
+    if (!datePool.length) {
+        return getWeekendDisplayLabel(dateId);
+    }
+
+    const linkedCount = datePool.filter((candidate) => resolveDateIdForCohort(candidate, cohortId, datePool, rawCohorts) === dateId).length;
+    return linkedCount > 1 ? getWeekendDisplayLabel(dateId) : normalized;
 };
 
 const resolvePreferredPublicCohortId = (cohorts, requestedId = '') => {
@@ -2301,9 +2310,8 @@ export default function App() {
           try {
               const docRef = getCohortSettingsDocRef(cohortId, 'dates');
               const docSnap = await getDoc(docRef);
-              const rawList = docSnap.exists() && Array.isArray(docSnap.data().list)
-                  ? docSnap.data().list
-                  : fallbackDates;
+              const hasStoredList = docSnap.exists() && Array.isArray(docSnap.data().list);
+              const rawList = hasStoredList ? docSnap.data().list : [];
               const cleanedDates = sanitizeDateList(rawList);
               const nextDates = cleanedDates.length ? cleanedDates : fallbackDates;
 
@@ -2315,7 +2323,7 @@ export default function App() {
 
               const rawFingerprint = (Array.isArray(rawList) ? rawList : []).map((date) => String(date || '')).join('|');
               const cleanedFingerprint = nextDates.join('|');
-              if (cleanedFingerprint !== rawFingerprint) {
+              if (hasStoredList && cleanedFingerprint !== rawFingerprint) {
                   await setDoc(docRef, { list: nextDates }, { merge: true });
               }
               return nextDates;
@@ -2917,6 +2925,10 @@ export default function App() {
 
       const sortedStudents = Object.values(studentsMap).sort((a, b) => a.id.localeCompare(b.id));
       writeLocalCache(cacheKey, sortedStudents);
+      const derivedDates = deriveDatePoolFromStudents(sortedStudents);
+      if (derivedDates.length > 0) {
+          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, normalizedId), mergeDatePools(datePool, derivedDates));
+      }
       let remoteVersion = await loadStudentsVersion(normalizedId, { force: true });
       if (!remoteVersion) {
           remoteVersion = await bumpStudentsVersion(normalizedId);
@@ -4958,27 +4970,31 @@ export default function App() {
           fullClassData
       } = resolvedSearch;
 
-      const sortedDates = datesCohortId === foundCohortId && sortedAvailableDatesAsc.length > 0
+      const loadedDates = datesCohortId === foundCohortId && sortedAvailableDatesAsc.length > 0
           ? sortedAvailableDatesAsc
           : await loadDates({ cohortId: foundCohortId });
-      const getSearchDateID = (dateStr) => resolveScopedDateId(dateStr, foundCohortId, sortedDates);
-      const [contextData, effectiveClassAverages, teacherMessagePayload] = await Promise.all([
+      const getSearchDateID = (dateStr, datePool = loadedDates) => resolveScopedDateId(dateStr, foundCohortId, datePool);
+      const [contextData, teacherMessagePayload] = await Promise.all([
           fullClassData.length > 0
               ? Promise.resolve(fullClassData)
-              : loadParentSearchStudents(foundCohortId, { datePool: sortedDates }),
-          loadClassAverages({ cohortId: foundCohortId, datePool: sortedDates }),
+              : loadParentSearchStudents(foundCohortId, { datePool: loadedDates }),
           loadTeacherMessage({ cohortId: foundCohortId, hydrateState: false })
       ]);
+      const derivedSearchDates = deriveDatePoolFromStudents(contextData);
+      const sortedDates = mergeDatePools(loadedDates, derivedSearchDates);
+      const effectiveDatePool = sortedDates.length ? sortedDates : loadedDates;
+      const effectiveClassAverages = await loadClassAverages({ cohortId: foundCohortId, datePool: effectiveDatePool });
+      writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, foundCohortId), effectiveDatePool);
       const data = contextData.find((student) => String(student?.id || '').toUpperCase() === String(matchedStudent?.id || '').toUpperCase()) || matchedStudent;
       const weekendOrder = new Map();
-      sortedDates.forEach((date, index) => {
-          const weekendID = getSearchDateID(date);
+      effectiveDatePool.forEach((date, index) => {
+          const weekendID = getSearchDateID(date, effectiveDatePool);
           if (weekendID && !weekendOrder.has(weekendID)) {
               weekendOrder.set(weekendID, index);
           }
       });
       if (foundCohortId === activePublicCohortId) {
-          setAvailableDates(sortedDates);
+          setAvailableDates(effectiveDatePool);
           setDatesCohortId(foundCohortId);
           setClassAverages(effectiveClassAverages);
           setClassAveragesCohortId(foundCohortId);
@@ -4987,7 +5003,7 @@ export default function App() {
       }
       const nextParentViewContext = {
           cohortId: foundCohortId,
-          dates: sortedDates,
+          dates: effectiveDatePool,
           classData: contextData,
           classAverages: effectiveClassAverages,
           teacherMessage: teacherMessagePayload && typeof teacherMessagePayload === 'object'
@@ -5008,15 +5024,15 @@ export default function App() {
           && contextData === cachedClassData
           && datesCohortId === activePublicCohortId
           && classAveragesCohortId === activePublicCohortId
-          && sortedDates === sortedAvailableDatesAsc;
+          && effectiveDatePool === sortedAvailableDatesAsc;
       const parentQueryDataVersion = shouldReuseCachedVersionBase
-          ? hashFingerprint(`${cachedParentVersionBase}||${cachedParentStudentSignatureById[cacheStudentId] || buildStudentGradesSignature(data, getSearchDateID)}`)
+          ? hashFingerprint(`${cachedParentVersionBase}||${cachedParentStudentSignatureById[cacheStudentId] || buildStudentGradesSignature(data, (dateStr) => getSearchDateID(dateStr, effectiveDatePool))}`)
           : buildParentQueryDataVersion({
               student: data,
               classData: contextData,
-              dates: sortedDates,
+              dates: effectiveDatePool,
               classAveragesMap: effectiveClassAverages,
-              getDateID: getSearchDateID
+              getDateID: (dateStr) => getSearchDateID(dateStr, effectiveDatePool)
           });
       const cachedView = readParentQueryCache(cacheStudentKey, parentQueryDataVersion);
       if (cachedView) {
@@ -5031,7 +5047,7 @@ export default function App() {
       const availableWeekendIDs = new Set(weekendOrder.keys());
 
       if (data.grades) {
-          const weekendGradeEntries = buildWeekendGradeEntryMap(data.grades, getSearchDateID);
+          const weekendGradeEntries = buildWeekendGradeEntryMap(data.grades, (dateStr) => getSearchDateID(dateStr, effectiveDatePool));
           Object.entries(weekendGradeEntries).forEach(([weekendID, entry]) => {
               const weekData = entry.grade;
               if (!weekData || !weekData.total) return;
@@ -5092,15 +5108,15 @@ export default function App() {
           const shouldReuseParentContext =
               foundCohortId === activePublicCohortId
               && sortedAvailableDatesAsc.length > 0
-              && sortedDates === sortedAvailableDatesAsc
+              && effectiveDatePool === sortedAvailableDatesAsc
               && publicStudentsCohortId === activePublicCohortId
               && datesCohortId === activePublicCohortId;
           const scoreContext = shouldReuseParentContext && parentSearchScoreContext
               ? parentSearchScoreContext
-              : buildProbabilityContext(contextData, sortedDates, getSearchDateID);
+              : buildProbabilityContext(contextData, effectiveDatePool, (dateStr) => getSearchDateID(dateStr, effectiveDatePool));
 
           const studentGradeMap = { [data.id]: {} };
-          const weekendEntries = buildWeekendGradeEntryMap(data.grades, getSearchDateID);
+          const weekendEntries = buildWeekendGradeEntryMap(data.grades, (dateStr) => getSearchDateID(dateStr, effectiveDatePool));
           Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
               studentGradeMap[data.id][weekendID] = entry.grade;
           });

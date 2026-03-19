@@ -83,11 +83,13 @@ export const getWeekendID = (dateStr, availableDates = null) => {
     if (!dateStr || !String(dateStr).includes('/')) return '';
 
     try {
-        const currentDate = parseDateStr(dateStr);
+        const normalizedDate = normalizeDateToken(dateStr);
+        const currentDate = parseDateStr(normalizedDate);
         if (!currentDate) return '';
 
         if (availableDates && Array.isArray(availableDates)) {
-            const parsedPool = sanitizeDateList(availableDates)
+            const sanitizedPool = sanitizeDateList(availableDates);
+            const parsedPool = sanitizedPool
                 .map((rawDate) => parseDateStr(rawDate))
                 .filter(Boolean);
 
@@ -115,6 +117,12 @@ export const getWeekendID = (dateStr, availableDates = null) => {
                     if (candidate < earliestDate) earliestDate = candidate;
                 });
                 return formatDateStr(earliestDate);
+            }
+
+            // If an explicit date pool exists but cannot prove a linked weekend pair,
+            // keep the original normalized date instead of inventing a previous Saturday.
+            if (sanitizedPool.length > 0) {
+                return normalizedDate;
             }
         }
 

@@ -72,15 +72,15 @@ const SCORE_KEYS = ['chi', 'eng', 'math'];
 const LOCAL_CACHE_KEYS = Object.freeze({
     dates: 'grade_tracker_cache_dates_v2',
     classAverages: 'grade_tracker_cache_class_averages_v18',
-    students: 'grade_tracker_cache_students_v1',
+    students: 'grade_tracker_cache_students_v2',
     studentsVersion: 'grade_tracker_cache_students_version_v1',
     teacherMessage: 'grade_tracker_cache_teacher_message_v1',
     queryStats: 'grade_tracker_cache_query_stats_v1',
-    parentQueryResults: 'grade_tracker_cache_parent_query_results_v3',
+    parentQueryResults: 'grade_tracker_cache_parent_query_results_v4',
     operationLog: 'grade_tracker_cache_operation_log_v1',
     snapshots: 'grade_tracker_cache_snapshots_v1'
 });
-const STUDENTS_SESSION_SYNC_KEY = 'grade_tracker_students_session_synced_v1';
+const STUDENTS_SESSION_SYNC_KEY = 'grade_tracker_students_session_synced_v2';
 const COHORT_STORAGE_MODE = Object.freeze({
     LEGACY: 'legacy',
     SCOPED: 'scoped'

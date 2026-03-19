@@ -6,10 +6,19 @@ export const normalizeDateToken = (dateStr) => {
         .replace(/-/g, '/')
         .replace(/[^0-9/]/g, '')
         .replace(/\/+/g, '/');
-    if (!clean.includes('/')) return '';
-    const parts = clean.split('/').filter(Boolean);
-    if (parts.length !== 2) return '';
-    const [mStr, dStr] = parts;
+    let mStr = '';
+    let dStr = '';
+
+    if (!clean.includes('/')) {
+        if (!/^\d{3,4}$/.test(clean)) return '';
+        mStr = clean.length === 3 ? clean.slice(0, 1) : clean.slice(0, 2);
+        dStr = clean.slice(-2);
+    } else {
+        const parts = clean.split('/').filter(Boolean);
+        if (parts.length !== 2) return '';
+        [mStr, dStr] = parts;
+    }
+
     const m = parseInt(mStr, 10);
     const d = parseInt(dStr, 10);
     if (Number.isNaN(m) || Number.isNaN(d)) return '';

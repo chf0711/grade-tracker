@@ -76,7 +76,7 @@ const LOCAL_CACHE_KEYS = Object.freeze({
     studentsVersion: 'grade_tracker_cache_students_version_v1',
     teacherMessage: 'grade_tracker_cache_teacher_message_v1',
     queryStats: 'grade_tracker_cache_query_stats_v1',
-    parentQueryResults: 'grade_tracker_cache_parent_query_results_v4',
+    parentQueryResults: 'grade_tracker_cache_parent_query_results_v5',
     operationLog: 'grade_tracker_cache_operation_log_v1',
     snapshots: 'grade_tracker_cache_snapshots_v1'
 });
@@ -5037,6 +5037,10 @@ export default function App() {
       const cachedView = readParentQueryCache(cacheStudentKey, parentQueryDataVersion);
       if (cachedView) {
           setParentViewContext(nextParentViewContext);
+          if (Array.isArray(cachedView.chartData) && cachedView.chartData.length > 0) {
+              const latestCached = cachedView.chartData[cachedView.chartData.length - 1];
+              setActivePhase(resolvePhaseByDate(latestCached.weekendID || latestCached.date, effectiveDatePool));
+          }
           setViewData(cachedView);
           incrementQueryCount(data.id, foundCohortId);
           updateParentQueryPerf(performance.now() - searchStartTs, true);
@@ -5044,14 +5048,19 @@ export default function App() {
       }
 
       const allChartData = [];
-      const availableWeekendIDs = new Set(weekendOrder.keys());
 
       if (data.grades) {
           const weekendGradeEntries = buildWeekendGradeEntryMap(data.grades, (dateStr) => getSearchDateID(dateStr, effectiveDatePool));
+          Object.keys(weekendGradeEntries)
+              .sort(customDateSort)
+              .forEach((weekendID) => {
+                  if (!weekendOrder.has(weekendID)) {
+                      weekendOrder.set(weekendID, weekendOrder.size);
+                  }
+              });
           Object.entries(weekendGradeEntries).forEach(([weekendID, entry]) => {
               const weekData = entry.grade;
               if (!weekData || !weekData.total) return;
-              if (!availableWeekendIDs.has(weekendID)) return;
 
               const t = parseFloat(weekData.total);
               if (isNaN(t) || t <= 0) return;
@@ -5133,6 +5142,10 @@ export default function App() {
           );
       }
 
+      if (allChartData.length > 0) {
+          const latestChartData = allChartData[allChartData.length - 1];
+          setActivePhase(resolvePhaseByDate(latestChartData.weekendID || latestChartData.date, effectiveDatePool));
+      }
       const nextViewData = { ...data, chartData: allChartData, average: avg, prob: studentProb, cohortId: foundCohortId };
       setViewData(nextViewData);
       writeParentQueryCache(cacheStudentKey, parentQueryDataVersion, nextViewData);

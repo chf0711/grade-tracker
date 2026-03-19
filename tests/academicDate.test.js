@@ -13,6 +13,9 @@ test('normalizeDateToken validates and normalizes dates', () => {
     assert.equal(normalizeDateToken(' 02-28 '), '02/28');
     assert.equal(normalizeDateToken('228'), '02/28');
     assert.equal(normalizeDateToken('0411'), '04/11');
+    assert.equal(normalizeDateToken('2025/4/19'), '04/19');
+    assert.equal(normalizeDateToken('20250419'), '04/19');
+    assert.equal(normalizeDateToken('114/04/19'), '04/19');
     assert.equal(normalizeDateToken('02/51'), '');
     assert.equal(normalizeDateToken('13/01'), '');
 });

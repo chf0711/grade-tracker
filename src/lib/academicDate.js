@@ -10,13 +10,23 @@ export const normalizeDateToken = (dateStr) => {
     let dStr = '';
 
     if (!clean.includes('/')) {
-        if (!/^\d{3,4}$/.test(clean)) return '';
-        mStr = clean.length === 3 ? clean.slice(0, 1) : clean.slice(0, 2);
-        dStr = clean.slice(-2);
+        if (/^\d{7,8}$/.test(clean)) {
+            mStr = clean.slice(-4, -2);
+            dStr = clean.slice(-2);
+        } else {
+            if (!/^\d{3,4}$/.test(clean)) return '';
+            mStr = clean.length === 3 ? clean.slice(0, 1) : clean.slice(0, 2);
+            dStr = clean.slice(-2);
+        }
     } else {
         const parts = clean.split('/').filter(Boolean);
-        if (parts.length !== 2) return '';
-        [mStr, dStr] = parts;
+        if (parts.length === 2) {
+            [mStr, dStr] = parts;
+        } else if (parts.length === 3) {
+            [, mStr, dStr] = parts;
+        } else {
+            return '';
+        }
     }
 
     const m = parseInt(mStr, 10);
@@ -89,7 +99,7 @@ export const isConsecutiveDate = (date1, date2) => {
 };
 
 export const getWeekendID = (dateStr, availableDates = null) => {
-    if (!dateStr || !String(dateStr).includes('/')) return '';
+    if (!dateStr) return '';
 
     try {
         const normalizedDate = normalizeDateToken(dateStr);

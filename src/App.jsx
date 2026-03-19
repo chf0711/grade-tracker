@@ -8,7 +8,6 @@ import {
     normalizeDateToken,
     sanitizeDateList,
     getWeekendID,
-    getSundayDate,
     getWeekendDisplayLabel,
     resolvePhaseByDate
 } from './lib/academicDate';
@@ -549,12 +548,21 @@ const normalizeAverageGrade = (gradeObj) => {
 };
 
 const normalizeStudentGrade = (gradeObj) => {
+    const pickFirstFilled = (keys, fallback = '') => {
+        for (const key of keys) {
+            const value = gradeObj?.[key];
+            if (value === undefined || value === null) continue;
+            if (typeof value === 'string' && value.trim() === '') continue;
+            return value;
+        }
+        return fallback;
+    };
     const normalized = {
-        chi: gradeObj?.chi ?? '',
-        eng: gradeObj?.eng ?? '',
-        math: gradeObj?.math ?? '',
-        total: gradeObj?.total ?? '',
-        class: gradeObj?.class ?? 'A班'
+        chi: pickFirstFilled(['chi', '國文', '國', 'chinese', 'Chinese']),
+        eng: pickFirstFilled(['eng', '英文', '英', 'english', 'English']),
+        math: pickFirstFilled(['math', '數學', '數', 'mathematics', 'Mathematics']),
+        total: pickFirstFilled(['total', '總分', 'sum', 'Sum', 'scoreTotal', 'totalScore']),
+        class: String(pickFirstFilled(['class', '班級', 'className', '類別'], 'A班') || 'A班').trim() || 'A班'
     };
     if (
         normalized.total === ''
@@ -1426,10 +1434,6 @@ export default function App() {
       (cohortId) => (cohortOptionsById[cohortId]?.storageMode || COHORT_STORAGE_MODE.LEGACY) === COHORT_STORAGE_MODE.LEGACY,
       [cohortOptionsById]
   );
-  const getCohortDateMode = useCallback(
-      (cohortId) => resolveCohortDateMode(cohortId, cohortOptions),
-      [cohortOptions]
-  );
   const activeTeacherClassDefs = useMemo(
       () => getClassDefsForCohort(activeTeacherCohortId),
       [activeTeacherCohortId]
@@ -1463,10 +1467,6 @@ export default function App() {
           ]
       };
   }, [activeTeacherClassDefs, activeTeacherCohortId]);
-  const isSingleDayCohort = useCallback(
-      (cohortId) => getCohortDateMode(cohortId) === COHORT_DATE_MODE.SINGLE,
-      [getCohortDateMode]
-  );
   const resolveScopedDateId = useCallback((dateStr, cohortId, datePool = []) => (
       resolveDateIdForCohort(dateStr, cohortId, datePool, cohortOptions)
   ), [cohortOptions]);
@@ -5096,6 +5096,20 @@ export default function App() {
 
       if (data.grades) {
           const weekendGradeEntries = buildWeekendGradeEntryMap(data.grades, (dateStr) => getSearchDateID(dateStr, effectiveDatePool));
+          if (Object.keys(weekendGradeEntries).length === 0) {
+              Object.entries(data.grades || {}).forEach(([sourceDate, grade]) => {
+                  const normalizedSourceDate = normalizeDateToken(sourceDate);
+                  if (!normalizedSourceDate) return;
+                  const weekendID = getSearchDateID(normalizedSourceDate, effectiveDatePool) || normalizedSourceDate;
+                  if (!weekendID) return;
+                  if (!weekendGradeEntries[weekendID]) {
+                      weekendGradeEntries[weekendID] = {
+                          sourceDate: normalizedSourceDate,
+                          grade: normalizeStudentGrade(grade)
+                      };
+                  }
+              });
+          }
           Object.keys(weekendGradeEntries)
               .sort(customDateSort)
               .forEach((weekendID) => {
@@ -5104,11 +5118,14 @@ export default function App() {
                   }
               });
           Object.entries(weekendGradeEntries).forEach(([weekendID, entry]) => {
-              const weekData = entry.grade;
-              if (!weekData || !weekData.total) return;
-
-              const t = parseFloat(weekData.total);
-              if (isNaN(t) || t <= 0) return;
+              const weekData = normalizeStudentGrade(entry.grade);
+              const t =
+                  toNumberOrNull(weekData.total)
+                  ?? toNumberOrNull(calculateTotal(weekData.chi, weekData.eng, weekData.math));
+              const hasAnyScore =
+                  t !== null
+                  || SCORE_KEYS.some((key) => toNumberOrNull(weekData[key]) !== null);
+              if (!hasAnyScore) return;
 
               const weekClass = weekData.class || 'A班';
               const avgData = (effectiveClassAverages[weekendID] && effectiveClassAverages[weekendID][weekClass])
@@ -5123,18 +5140,15 @@ export default function App() {
                   return toNumberOrNull(fallbackValue);
               };
 
-              let displayDate = weekendID;
-              if (!isSingleDayCohort(foundCohortId) && (weekClass === '日A班' || weekClass === '日B班')) {
-                  displayDate = getSundayDate(weekendID);
-              }
+              const displayDate = normalizeDateToken(entry.sourceDate) || weekendID;
 
               allChartData.push({
                   date: displayDate,
                   weekendID,
-                  total: t,
-                  chi: parseFloat(weekData.chi) || 0,
-                  eng: parseFloat(weekData.eng) || 0,
-                  math: parseFloat(weekData.math) || 0,
+                  total: t ?? 0,
+                  chi: toNumberOrNull(weekData.chi) ?? 0,
+                  eng: toNumberOrNull(weekData.eng) ?? 0,
+                  math: toNumberOrNull(weekData.math) ?? 0,
                   avgTotal: resolveAverageValue(avgData.total, avgAllData.total),
                   avgChi: resolveAverageValue(avgData.chi, avgAllData.chi),
                   avgEng: resolveAverageValue(avgData.eng, avgAllData.eng),

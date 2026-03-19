@@ -4921,7 +4921,6 @@ export default function App() {
     }
     const searchStartTs = performance.now();
     setSearchError('');
-    setViewData(null);
     setParentViewContext({
         cohortId: '',
         dates: [],
@@ -4935,6 +4934,7 @@ export default function App() {
       const normalizedSearchId = rawSearchKeyword.toUpperCase();
       const likelyStudentId = /^[A-Z0-9_-]{3,24}$/.test(normalizedSearchId);
       if (!likelyStudentId) {
+          setViewData(null);
           setSearchError('請輸入正確學號');
           setParentSearchShell(null);
           updateParentQueryPerf(performance.now() - searchStartTs, false);
@@ -5008,6 +5008,7 @@ export default function App() {
       }
 
       if (!resolvedSearch) {
+          setViewData(null);
           setSearchError('查無此學號');
           setParentSearchShell(null);
           updateParentQueryPerf(performance.now() - searchStartTs, false);
@@ -5020,6 +5021,17 @@ export default function App() {
           fullClassData
       } = resolvedSearch;
 
+      setViewData({
+          ...matchedStudent,
+          chartData: [],
+          average: '-',
+          prob: '-',
+          cohortId: foundCohortId,
+          isPending: true
+      });
+      setParentSearchShell(null);
+
+      const teacherMessagePromise = loadTeacherMessage({ cohortId: foundCohortId, hydrateState: false });
       const loadedDates = datesCohortId === foundCohortId && sortedAvailableDatesAsc.length > 0
           ? sortedAvailableDatesAsc
           : await loadDates({ cohortId: foundCohortId });
@@ -5028,7 +5040,7 @@ export default function App() {
           fullClassData.length > 0
               ? Promise.resolve(fullClassData)
               : loadParentSearchStudents(foundCohortId, { datePool: loadedDates }),
-          loadTeacherMessage({ cohortId: foundCohortId, hydrateState: false })
+          teacherMessagePromise
       ]);
       const derivedSearchDates = deriveDatePoolFromStudents(contextData);
       const sortedDates = mergeDatePools(loadedDates, derivedSearchDates);
@@ -5217,6 +5229,7 @@ export default function App() {
       updateParentQueryPerf(performance.now() - searchStartTs, false);
     } catch (e) {
       console.error('Parent search error:', e);
+      setViewData(null);
       setSearchError('系統忙碌');
       setParentSearchShell(null);
       updateParentQueryPerf(performance.now() - searchStartTs, false);
@@ -6231,6 +6244,8 @@ export default function App() {
       () => getProbabilityVisual(viewData?.prob, darkMode),
       [viewData, darkMode]
   );
+  const shouldShowParentWideShell = Boolean(viewData || parentSearchShell);
+  const isParentViewPending = Boolean(viewData?.isPending && loading);
 
   const teacherMessageForParent = useMemo(
       () => {
@@ -7388,7 +7403,7 @@ export default function App() {
 
         {/* ... Parent View ... */}
         {mode === 'parent' && (
-          <div className="max-w-5xl pt-1 sm:pt-2 mx-auto space-y-6 transition-all duration-300"> 
+          <div className={`${shouldShowParentWideShell ? 'max-w-5xl pt-1 sm:pt-2' : 'max-w-md pt-6'} mx-auto space-y-6 transition-all duration-300`}> 
             {!viewData && !parentSearchShell && (
             <div className="max-w-md mx-auto pt-6">
               <div className={`panel-fade-in backdrop-blur-[26px] p-8 rounded-[2.5rem] shadow-2xl border text-center relative overflow-hidden ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/15 shadow-black/30' : 'bg-white/78 border-white/85 ring-1 ring-white/55 shadow-[0_24px_55px_rgba(15,23,42,0.12)]'}`}>
@@ -7455,7 +7470,7 @@ export default function App() {
                        <div className="absolute top-0 right-0 z-20 flex flex-col items-end gap-3.5 sm:gap-4">
                            <button onClick={() => setViewData(null)} className={`${BUTTON_SYSTEM.icon} p-2 rounded-full backdrop-blur-md transition-colors ${darkMode ? 'text-slate-400 hover:text-white bg-white/5' : 'text-slate-500 hover:text-slate-700 bg-white border border-slate-200'}`}><LogOut className="w-4 h-4"/></button>
 
-                           {viewData.prob && viewData.prob !== '-' && (
+                           {!isParentViewPending && viewData.prob && viewData.prob !== '-' && (
                                <div className="w-[9rem] sm:w-[11rem] text-right">
                                    <div className={`text-[9px] font-bold uppercase tracking-[0.28em] ${darkMode ? 'text-emerald-300/85' : 'text-emerald-700/85'}`}>錄取機率</div>
                                    <div className="mt-1 flex items-end justify-end gap-1 leading-none">
@@ -7512,7 +7527,12 @@ export default function App() {
                   </div>
 
                   <div key={`parent-tab-${activePhase}-${activeTab}`} className={prefersReducedMotion ? '' : 'tab-panel-enter'}>
-                    {deferredParentPhaseData.length > 0 ? (
+                    {isParentViewPending ? (
+                      <div className="space-y-4 animate-pulse">
+                        <div className={`h-72 rounded-3xl border ${darkMode ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200'}`} />
+                        <div className={`h-48 rounded-3xl border ${darkMode ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200'}`} />
+                      </div>
+                    ) : deferredParentPhaseData.length > 0 ? (
                       <Suspense fallback={<ChartFallback heightClass="h-72" />}>
                         {activeTab === 'total' && <SingleSubjectChart data={deferredParentPhaseData} subjectKey="total" avgKey="avgTotal" lineColor={COLORS.total.hex} title="總分" domain={[0, 300]} isDarkMode={darkMode} />}
                         {activeTab === 'chi' && <SingleSubjectChart data={deferredParentPhaseData} subjectKey="chi" avgKey="avgChi" lineColor={COLORS.chi.hex} title="國文" domain={[0, 100]} isDarkMode={darkMode} />}
@@ -7530,6 +7550,21 @@ export default function App() {
                   
                 <div className={`p-6 border-t backdrop-blur-md ${darkMode ? 'bg-[#101a15] border-emerald-200/10' : 'bg-white/74 border-white/75 ring-1 ring-white/45'}`}>
                     <h4 className={`font-bold mb-6 text-xs flex items-center justify-center gap-2 tracking-widest uppercase ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>詳細紀錄</h4>
+                    {isParentViewPending ? (
+                        <div className="space-y-4 animate-pulse">
+                            {Array.from({ length: 2 }).map((_, idx) => (
+                                <div key={`parent-detail-shell-${idx}`} className={`rounded-3xl border p-5 ${darkMode ? 'bg-white/5 border-white/10' : 'bg-white/84 border-white/85 ring-1 ring-white/45'}`}>
+                                    <div className={`h-4 w-24 rounded-full ${darkMode ? 'bg-white/10' : 'bg-slate-200/85'}`} />
+                                    <div className={`mt-4 h-10 w-full rounded-2xl ${darkMode ? 'bg-white/10' : 'bg-slate-100/90'}`} />
+                                    <div className="mt-4 grid grid-cols-3 gap-2">
+                                        {Array.from({ length: 3 }).map((__, cellIdx) => (
+                                            <div key={`parent-detail-shell-${idx}-${cellIdx}`} className={`h-16 rounded-2xl ${darkMode ? 'bg-white/10' : 'bg-slate-100/90'}`} />
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
                     <div className="space-y-4">
                         {parentPhaseDataDesc.map((d, rowIndex) => {
                              // 使用 weekendID（如果存在）或 date，確保日A班/日B班的週日日期也能正確計算排名
@@ -7582,6 +7617,7 @@ export default function App() {
                             </div>
                         )}
                     </div>
+                    )}
                 </div>
               </div>
             )}

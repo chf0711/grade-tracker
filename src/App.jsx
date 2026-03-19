@@ -72,15 +72,15 @@ const SCORE_KEYS = ['chi', 'eng', 'math'];
 const LOCAL_CACHE_KEYS = Object.freeze({
     dates: 'grade_tracker_cache_dates_v2',
     classAverages: 'grade_tracker_cache_class_averages_v18',
-    students: 'grade_tracker_cache_students_v2',
+    students: 'grade_tracker_cache_students_v3',
     studentsVersion: 'grade_tracker_cache_students_version_v1',
     teacherMessage: 'grade_tracker_cache_teacher_message_v1',
     queryStats: 'grade_tracker_cache_query_stats_v1',
-    parentQueryResults: 'grade_tracker_cache_parent_query_results_v5',
+    parentQueryResults: 'grade_tracker_cache_parent_query_results_v6',
     operationLog: 'grade_tracker_cache_operation_log_v1',
     snapshots: 'grade_tracker_cache_snapshots_v1'
 });
-const STUDENTS_SESSION_SYNC_KEY = 'grade_tracker_students_session_synced_v2';
+const STUDENTS_SESSION_SYNC_KEY = 'grade_tracker_students_session_synced_v3';
 const COHORT_STORAGE_MODE = Object.freeze({
     LEGACY: 'legacy',
     SCOPED: 'scoped'
@@ -469,9 +469,17 @@ const calculateTotal = (chi, eng, math) => {
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 const toNumberOrNull = (value) => {
+    if (value === '' || value === null || value === undefined) return null;
     const num = Number(value);
     return Number.isFinite(num) ? num : null;
 };
+
+const hasDisplayableGradeHistory = (grades) =>
+    Object.values(grades || {}).some((grade) => {
+        if (!grade || typeof grade !== 'object') return false;
+        if (toNumberOrNull(grade.total) !== null) return true;
+        return SCORE_KEYS.some((key) => toNumberOrNull(grade[key]) !== null);
+    });
 
 const countFilledSubjects = (gradeObj) =>
     ['chi', 'eng', 'math'].reduce((count, key) => {
@@ -4936,10 +4944,27 @@ export default function App() {
           if (quickClassData.length > 0) {
               const matchedStudent = findStudentById(quickClassData, normalizedSearchId);
               if (matchedStudent) {
+                  const cachedDatePool = sanitizeDateList(
+                      readLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, cohortId)) || getDefaultDatesForCohort(cohortId, cohortOptions)
+                  );
+                  const getCachedDateID = (dateStr) => resolveScopedDateId(dateStr, cohortId, cachedDatePool);
+                  const normalizedQuickStudent = {
+                      ...matchedStudent,
+                      grades: normalizeGrades(matchedStudent.grades, {
+                          cohortId,
+                          datePool: cachedDatePool,
+                          getDateID: getCachedDateID
+                      })
+                  };
+
+                  if (!hasDisplayableGradeHistory(normalizedQuickStudent.grades)) {
+                      continue;
+                  }
+
                   resolvedSearch = {
                       cohortId,
-                      data: matchedStudent,
-                      fullClassData: quickClassData
+                      data: normalizedQuickStudent,
+                      fullClassData: []
                   };
                   break;
               }
@@ -4970,9 +4995,7 @@ export default function App() {
                   resolvedSearch = {
                       cohortId,
                       data: normalizedStudent,
-                      fullClassData: quickClassData.some((student) => String(student?.id || '').toUpperCase() === normalizedSearchId)
-                          ? quickClassData
-                          : []
+                      fullClassData: []
                   };
                   break;
               }

@@ -8,14 +8,10 @@ import {
     normalizeDateToken,
     sanitizeDateList,
     getWeekendID,
+    getSundayDate,
     getWeekendDisplayLabel,
     resolvePhaseByDate
 } from './lib/academicDate';
-import {
-    buildCohortSummary,
-    encodeSummaryWeekendDocId,
-    normalizeCohortSummary
-} from './lib/cohortSummary';
 
 // --- Global Constants ---
 const DEFAULT_EXAM_STARTS = [
@@ -26,24 +22,13 @@ const DEFAULT_EXAM_STARTS = [
   "12/27", "01/03", "01/10", "01/17", "01/24", "01/31", "02/02", "02/07", "02/13", "02/28"
 ];
 
-const LEGACY_CLASS_DEFS = Object.freeze([
+const CLASS_DEFS = [
     { id: 'A班', label: 'A' },
     { id: 'B班', label: 'B' },
     { id: 'C班', label: 'C' },
     { id: '日A班', label: '日A' },
     { id: '日B班', label: '日B' }
-]);
-
-const NEXT_CLASS_DEFS = Object.freeze([
-    { id: 'A班', label: 'A' },
-    { id: 'B班', label: 'B' },
-    { id: 'C班', label: 'C' },
-    { id: '東興', label: '東興' }
-]);
-
-const getClassDefsForCohort = (cohortId) => (
-    String(cohortId || '').trim() === NEXT_COHORT_ID ? NEXT_CLASS_DEFS : LEGACY_CLASS_DEFS
-);
+];
 
 const RAW_STUDENT_RECORDS = [];
 const FULL_ACCESS_PASSWORD_ENCODED = 'QmVuMTEwNzA1';
@@ -56,11 +41,8 @@ const SECURITY_CODE = String.fromCharCode(49, 49, 48, 55);
 const QUERY_COUNT_RESET_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000;
 const MAX_QUERY_EVENTS = 3000;
 const TEACHER_MESSAGE_DOC_ID = 'teacher_parent_message_v1';
-const STUDENT_DATA_VERSION_DOC_ID = 'students_data_version_v1';
-const COHORT_SUMMARY_MANIFEST_DOC_ID = 'cohort_summary_manifest_v1';
-const COHORT_SUMMARY_COLLECTION_ID = 'cohort_summary_weekends_v1';
 const SETTINGS_CACHE_TTL_MS = 10 * 60 * 1000;
-const STUDENT_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const STUDENT_CACHE_TTL_MS = 20 * 60 * 1000;
 const TEACHER_MESSAGE_CACHE_TTL_MS = 10 * 60 * 1000;
 const PARENT_QUERY_CACHE_TTL_MS = 20 * 60 * 1000;
 const MAX_PARENT_QUERY_CACHE_ENTRIES = 40;
@@ -76,95 +58,16 @@ const INITIAL_BATCH_RENDER_ROWS = 42;
 const BATCH_RENDER_CHUNK_ROWS = 56;
 const SCORE_KEYS = ['chi', 'eng', 'math'];
 const LOCAL_CACHE_KEYS = Object.freeze({
-    dates: 'grade_tracker_cache_dates_v2',
+    dates: 'grade_tracker_cache_dates_v1',
     classAverages: 'grade_tracker_cache_class_averages_v18',
-    students: 'grade_tracker_cache_students_v3',
-    studentsVersion: 'grade_tracker_cache_students_version_v1',
-    summary: 'grade_tracker_cache_cohort_summary_v1',
+    students: 'grade_tracker_cache_students_v1',
     teacherMessage: 'grade_tracker_cache_teacher_message_v1',
     queryStats: 'grade_tracker_cache_query_stats_v1',
-    parentQueryResults: 'grade_tracker_cache_parent_query_results_v6',
+    parentQueryResults: 'grade_tracker_cache_parent_query_results_v2',
     operationLog: 'grade_tracker_cache_operation_log_v1',
     snapshots: 'grade_tracker_cache_snapshots_v1'
 });
-const STUDENTS_SESSION_SYNC_KEY = 'grade_tracker_students_session_synced_v3';
-const COHORT_STORAGE_MODE = Object.freeze({
-    LEGACY: 'legacy',
-    SCOPED: 'scoped'
-});
-const COHORT_DATE_MODE = Object.freeze({
-    LINKED: 'linked',
-    SINGLE: 'single'
-});
-const LEGACY_COHORT_ID = '2025-2026';
-const NEXT_COHORT_ID = '2026-2027';
-const COHORT_REGISTRY_DOC_ID = 'cohorts_v1';
-const TEACHER_ACTIVE_COHORT_STORAGE_KEY = 'grade_tracker_teacher_active_cohort_v1';
-const DEFAULT_COHORT_OPTIONS = Object.freeze([
-    { id: LEGACY_COHORT_ID, label: '2025-2026', storageMode: COHORT_STORAGE_MODE.LEGACY, dateMode: COHORT_DATE_MODE.LINKED },
-    { id: NEXT_COHORT_ID, label: '2026-2027', storageMode: COHORT_STORAGE_MODE.SCOPED, dateMode: COHORT_DATE_MODE.SINGLE }
-]);
-const BUTTON_SYSTEM = Object.freeze({
-    primary: 'btn-premium btn-premium--primary btn-sheen',
-    secondary: 'btn-premium btn-premium--secondary btn-sheen',
-    danger: 'btn-premium btn-premium--danger btn-sheen',
-    segment: 'btn-premium btn-premium--segment btn-sheen',
-    segmentActive: 'btn-premium btn-premium--segment btn-premium--segment-active btn-sheen',
-    icon: 'btn-premium btn-premium--secondary btn-premium--icon btn-sheen',
-    iconDanger: 'btn-premium btn-premium--danger btn-premium--icon btn-sheen'
-});
-const CLASS_PILL_THEME = Object.freeze({
-    'A班': {
-        dot: 'bg-indigo-500',
-        activeLight: 'text-indigo-700 border-indigo-200/95 ring-2 ring-indigo-200/70 shadow-[0_16px_30px_rgba(79,70,229,0.16)] bg-[linear-gradient(135deg,rgba(224,231,255,0.95)_0%,rgba(255,255,255,0.98)_56%,rgba(199,210,254,0.88)_100%)]',
-        inactiveLight: 'text-slate-500 hover:text-indigo-700 hover:border-indigo-100/90',
-        activeDark: 'text-indigo-100 border-indigo-300/25 ring-2 ring-indigo-300/20 shadow-[0_18px_36px_rgba(49,46,129,0.28)] bg-[linear-gradient(135deg,rgba(55,48,163,0.52)_0%,rgba(15,23,42,0.92)_68%,rgba(67,56,202,0.42)_100%)]',
-        inactiveDark: 'text-slate-400 hover:text-indigo-100 hover:border-indigo-300/15'
-    },
-    'B班': {
-        dot: 'bg-sky-500',
-        activeLight: 'text-sky-700 border-sky-200/95 ring-2 ring-sky-200/70 shadow-[0_16px_30px_rgba(2,132,199,0.16)] bg-[linear-gradient(135deg,rgba(224,242,254,0.95)_0%,rgba(255,255,255,0.98)_56%,rgba(186,230,253,0.88)_100%)]',
-        inactiveLight: 'text-slate-500 hover:text-sky-700 hover:border-sky-100/90',
-        activeDark: 'text-sky-100 border-sky-300/25 ring-2 ring-sky-300/20 shadow-[0_18px_36px_rgba(12,74,110,0.28)] bg-[linear-gradient(135deg,rgba(3,105,161,0.52)_0%,rgba(15,23,42,0.92)_68%,rgba(14,116,144,0.42)_100%)]',
-        inactiveDark: 'text-slate-400 hover:text-sky-100 hover:border-sky-300/15'
-    },
-    'C班': {
-        dot: 'bg-emerald-500',
-        activeLight: 'text-emerald-700 border-emerald-200/95 ring-2 ring-emerald-200/70 shadow-[0_16px_30px_rgba(5,150,105,0.16)] bg-[linear-gradient(135deg,rgba(220,252,231,0.95)_0%,rgba(255,255,255,0.98)_56%,rgba(167,243,208,0.88)_100%)]',
-        inactiveLight: 'text-slate-500 hover:text-emerald-700 hover:border-emerald-100/90',
-        activeDark: 'text-emerald-100 border-emerald-300/25 ring-2 ring-emerald-300/20 shadow-[0_18px_36px_rgba(6,78,59,0.28)] bg-[linear-gradient(135deg,rgba(5,150,105,0.5)_0%,rgba(15,23,42,0.92)_68%,rgba(4,120,87,0.42)_100%)]',
-        inactiveDark: 'text-slate-400 hover:text-emerald-100 hover:border-emerald-300/15'
-    },
-    '東興': {
-        dot: 'bg-amber-500',
-        activeLight: 'text-amber-700 border-amber-200/95 ring-2 ring-amber-200/70 shadow-[0_16px_30px_rgba(217,119,6,0.16)] bg-[linear-gradient(135deg,rgba(254,243,199,0.95)_0%,rgba(255,255,255,0.98)_56%,rgba(253,230,138,0.86)_100%)]',
-        inactiveLight: 'text-slate-500 hover:text-amber-700 hover:border-amber-100/90',
-        activeDark: 'text-amber-100 border-amber-300/25 ring-2 ring-amber-300/20 shadow-[0_18px_36px_rgba(120,53,15,0.28)] bg-[linear-gradient(135deg,rgba(180,83,9,0.5)_0%,rgba(15,23,42,0.92)_68%,rgba(217,119,6,0.38)_100%)]',
-        inactiveDark: 'text-slate-400 hover:text-amber-100 hover:border-amber-300/15'
-    },
-    '日A班': {
-        dot: 'bg-violet-500',
-        activeLight: 'text-violet-700 border-violet-200/95 ring-2 ring-violet-200/70 shadow-[0_16px_30px_rgba(124,58,237,0.16)] bg-[linear-gradient(135deg,rgba(237,233,254,0.95)_0%,rgba(255,255,255,0.98)_56%,rgba(221,214,254,0.88)_100%)]',
-        inactiveLight: 'text-slate-500 hover:text-violet-700 hover:border-violet-100/90',
-        activeDark: 'text-violet-100 border-violet-300/25 ring-2 ring-violet-300/20 shadow-[0_18px_36px_rgba(76,29,149,0.28)] bg-[linear-gradient(135deg,rgba(109,40,217,0.5)_0%,rgba(15,23,42,0.92)_68%,rgba(124,58,237,0.4)_100%)]',
-        inactiveDark: 'text-slate-400 hover:text-violet-100 hover:border-violet-300/15'
-    },
-    '日B班': {
-        dot: 'bg-rose-500',
-        activeLight: 'text-rose-700 border-rose-200/95 ring-2 ring-rose-200/70 shadow-[0_16px_30px_rgba(225,29,72,0.16)] bg-[linear-gradient(135deg,rgba(255,228,230,0.95)_0%,rgba(255,255,255,0.98)_56%,rgba(254,205,211,0.88)_100%)]',
-        inactiveLight: 'text-slate-500 hover:text-rose-700 hover:border-rose-100/90',
-        activeDark: 'text-rose-100 border-rose-300/25 ring-2 ring-rose-300/20 shadow-[0_18px_36px_rgba(136,19,55,0.28)] bg-[linear-gradient(135deg,rgba(190,24,93,0.5)_0%,rgba(15,23,42,0.92)_68%,rgba(225,29,72,0.4)_100%)]',
-        inactiveDark: 'text-slate-400 hover:text-rose-100 hover:border-rose-300/15'
-    }
-});
-const getClassPillTheme = (classId, isDarkMode) => {
-    const theme = CLASS_PILL_THEME[classId] || CLASS_PILL_THEME['A班'];
-    return {
-        dot: theme.dot,
-        active: isDarkMode ? theme.activeDark : theme.activeLight,
-        inactive: isDarkMode ? theme.inactiveDark : theme.inactiveLight
-    };
-};
+const STUDENTS_SESSION_SYNC_KEY = 'grade_tracker_students_session_synced_v1';
 
 const runtimeFirebaseConfig =
   typeof window !== 'undefined' ? window.__firebase_config : undefined;
@@ -220,91 +123,6 @@ const writeLocalCache = (key, data) => {
     }
 };
 
-const getScopedCacheKey = (baseKey, scope = 'global') => `${baseKey}::${scope || 'global'}`;
-
-const normalizeCohortOptions = (rawCohorts) => {
-    const normalized = [];
-    const seen = new Set();
-    const candidates = [...DEFAULT_COHORT_OPTIONS, ...(Array.isArray(rawCohorts) ? rawCohorts : [])];
-
-    candidates.forEach((rawCohort) => {
-        const id = String(rawCohort?.id || '').trim();
-        if (!id || seen.has(id)) return;
-        seen.add(id);
-        normalized.push({
-            id,
-            label: String(rawCohort?.label || id).trim() || id,
-            storageMode: rawCohort?.storageMode === COHORT_STORAGE_MODE.SCOPED
-                ? COHORT_STORAGE_MODE.SCOPED
-                : COHORT_STORAGE_MODE.LEGACY,
-            dateMode: rawCohort?.dateMode === COHORT_DATE_MODE.LINKED
-                ? COHORT_DATE_MODE.LINKED
-                : (
-                    rawCohort?.dateMode === COHORT_DATE_MODE.SINGLE
-                    || rawCohort?.storageMode === COHORT_STORAGE_MODE.SCOPED
-                    || id === NEXT_COHORT_ID
-                )
-                    ? COHORT_DATE_MODE.SINGLE
-                    : COHORT_DATE_MODE.LINKED
-        });
-    });
-
-    return normalized.length ? normalized : [...DEFAULT_COHORT_OPTIONS];
-};
-
-const resolveCohortDateMode = (cohortId, rawCohorts = DEFAULT_COHORT_OPTIONS) => {
-    const normalizedId = String(cohortId || '').trim();
-    const cohorts = normalizeCohortOptions(rawCohorts);
-    const matched = cohorts.find((cohort) => cohort.id === normalizedId);
-    if (matched?.dateMode === COHORT_DATE_MODE.SINGLE) return COHORT_DATE_MODE.SINGLE;
-    if (matched?.dateMode === COHORT_DATE_MODE.LINKED) return COHORT_DATE_MODE.LINKED;
-    return normalizedId === NEXT_COHORT_ID ? COHORT_DATE_MODE.SINGLE : COHORT_DATE_MODE.LINKED;
-};
-
-const getDefaultDatesForCohort = (cohortId, rawCohorts = DEFAULT_COHORT_OPTIONS) => (
-    resolveCohortDateMode(cohortId, rawCohorts) === COHORT_DATE_MODE.SINGLE
-        ? []
-        : sanitizeDateList(DEFAULT_EXAM_STARTS)
-);
-
-const resolveDateIdForCohort = (dateStr, cohortId, rawDatePool = [], rawCohorts = DEFAULT_COHORT_OPTIONS) => {
-    const normalized = normalizeDateToken(dateStr);
-    if (!normalized) return '';
-    if (resolveCohortDateMode(cohortId, rawCohorts) === COHORT_DATE_MODE.SINGLE) {
-        return normalized;
-    }
-    const datePool = sanitizeDateList(rawDatePool);
-    return getWeekendID(normalized, datePool);
-};
-
-const getDateDisplayLabelForCohort = (dateStr, cohortId, rawDatePool = [], rawCohorts = DEFAULT_COHORT_OPTIONS) => {
-    const normalized = normalizeDateToken(dateStr) || String(dateStr || '');
-    const dateId = resolveDateIdForCohort(dateStr, cohortId, rawDatePool, rawCohorts);
-    if (!dateId) return normalized;
-    if (resolveCohortDateMode(cohortId, rawCohorts) === COHORT_DATE_MODE.SINGLE) {
-        return dateId;
-    }
-
-    const datePool = sanitizeDateList(rawDatePool);
-    if (!datePool.length) {
-        return getWeekendDisplayLabel(dateId);
-    }
-
-    const linkedCount = datePool.filter((candidate) => resolveDateIdForCohort(candidate, cohortId, datePool, rawCohorts) === dateId).length;
-    return linkedCount > 1 ? getWeekendDisplayLabel(dateId) : normalized;
-};
-
-const resolvePreferredPublicCohortId = (cohorts, requestedId = '') => {
-    const normalizedCohorts = normalizeCohortOptions(cohorts);
-    if (normalizedCohorts.some((cohort) => cohort.id === requestedId)) {
-        return requestedId;
-    }
-    if (normalizedCohorts.some((cohort) => cohort.id === NEXT_COHORT_ID)) {
-        return NEXT_COHORT_ID;
-    }
-    return normalizedCohorts[normalizedCohorts.length - 1]?.id || LEGACY_COHORT_ID;
-};
-
 const hashFingerprint = (value) => {
     const text = String(value || '');
     let hash = 2166136261;
@@ -348,10 +166,8 @@ const buildClassAveragesSignature = (dates, classAveragesMap, getDateID) => {
         .map((weekendID) => {
             const avgData = classAveragesMap?.[weekendID] || {};
             const all = avgData.all || {};
-            const classTokens = Object.keys(avgData)
-                .filter((id) => id !== 'all')
-                .sort((a, b) => a.localeCompare(b, 'zh-Hant'))
-                .map((id) => {
+            const classTokens = CLASS_DEFS
+                .map(({ id }) => {
                     const classAvg = avgData[id] || {};
                     return `${id}:${classAvg.total || ''},${classAvg.chi || ''},${classAvg.eng || ''},${classAvg.math || ''}`;
                 })
@@ -402,11 +218,48 @@ const writeParentQueryCache = (studentId, dataVersion, result) => {
     writeLocalCache(LOCAL_CACHE_KEYS.parentQueryResults, Object.fromEntries(sortedEntries));
 };
 
-const findStudentById = (students, keyword) => {
-    if (!Array.isArray(students) || students.length === 0) return null;
-    const normalizedId = String(keyword || '').trim().toUpperCase();
-    if (!normalizedId) return null;
-    return students.find((student) => String(student?.id || '').toUpperCase() === normalizedId) || null;
+const normalizeSearchText = (value) =>
+    String(value || '')
+        .trim()
+        .replace(/\s+/g, '')
+        .toUpperCase();
+
+const findStudentByIdOrName = (students, keyword) => {
+    if (!Array.isArray(students) || students.length === 0) {
+        return { student: null, duplicateName: false };
+    }
+
+    const rawKeyword = String(keyword || '').trim();
+    if (!rawKeyword) return { student: null, duplicateName: false };
+
+    const normalizedId = rawKeyword.toUpperCase();
+    const byId = students.find((student) => String(student?.id || '').toUpperCase() === normalizedId) || null;
+    if (byId) return { student: byId, duplicateName: false };
+
+    const normalizedName = normalizeSearchText(rawKeyword);
+    if (!normalizedName) return { student: null, duplicateName: false };
+
+    const exactNameMatches = students.filter(
+        (student) => normalizeSearchText(student?.name) === normalizedName
+    );
+    if (exactNameMatches.length === 1) {
+        return { student: exactNameMatches[0], duplicateName: false };
+    }
+    if (exactNameMatches.length > 1) {
+        return { student: null, duplicateName: true };
+    }
+
+    const fuzzyNameMatches = students.filter((student) =>
+        normalizeSearchText(student?.name).includes(normalizedName)
+    );
+    if (fuzzyNameMatches.length === 1) {
+        return { student: fuzzyNameMatches[0], duplicateName: false };
+    }
+    if (fuzzyNameMatches.length > 1) {
+        return { student: null, duplicateName: true };
+    }
+
+    return { student: null, duplicateName: false };
 };
 
 const PHASES = [
@@ -435,8 +288,6 @@ const TAB_DOT_BG_CLASS = {
     eng: 'bg-amber-500',
     math: 'bg-cyan-500'
 };
-const EMPTY_OBJECT = Object.freeze({});
-const EMPTY_ARRAY = Object.freeze([]);
 const EMPTY_GRADE = { chi: '', eng: '', math: '', total: '', class: 'A班' };
 
 const hasAnySubjectScore = (gradeObj) => {
@@ -476,17 +327,9 @@ const calculateTotal = (chi, eng, math) => {
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 const toNumberOrNull = (value) => {
-    if (value === '' || value === null || value === undefined) return null;
     const num = Number(value);
     return Number.isFinite(num) ? num : null;
 };
-
-const hasDisplayableGradeHistory = (grades) =>
-    Object.values(grades || {}).some((grade) => {
-        if (!grade || typeof grade !== 'object') return false;
-        if (toNumberOrNull(grade.total) !== null) return true;
-        return SCORE_KEYS.some((key) => toNumberOrNull(grade[key]) !== null);
-    });
 
 const countFilledSubjects = (gradeObj) =>
     ['chi', 'eng', 'math'].reduce((count, key) => {
@@ -521,162 +364,19 @@ const buildWeekendGradeEntryMap = (grades, getDateID) => {
     return weekendEntryMap;
 };
 
-const buildParentChartData = ({ grades, datePool, classAveragesMap, getDateID }) => {
-    const weekendOrder = new Map();
-    sanitizeDateList(datePool).forEach((date, index) => {
-        const weekendID = getDateID(date);
-        if (weekendID && !weekendOrder.has(weekendID)) {
-            weekendOrder.set(weekendID, index);
+const buildTargetWeekendGradeEntryMap = (grades, targetWeekendIds, getDateID) => {
+    if (!targetWeekendIds?.size) return {};
+    const weekendEntryMap = {};
+    Object.entries(grades || {}).forEach(([sourceDate, grade]) => {
+        const weekendID = getDateID(sourceDate);
+        if (!weekendID || !targetWeekendIds.has(weekendID)) return;
+        const nextEntry = { sourceDate, grade };
+        if (shouldReplaceGradeEntry(weekendEntryMap[weekendID], nextEntry)) {
+            weekendEntryMap[weekendID] = nextEntry;
         }
     });
-
-    const weekendGradeEntries = buildWeekendGradeEntryMap(grades, getDateID);
-    if (Object.keys(weekendGradeEntries).length === 0) {
-        Object.entries(grades || {}).forEach(([sourceDate, grade]) => {
-            const normalizedSourceDate = normalizeDateToken(sourceDate);
-            if (!normalizedSourceDate) return;
-            const weekendID = getDateID(normalizedSourceDate) || normalizedSourceDate;
-            if (!weekendID || weekendGradeEntries[weekendID]) return;
-            weekendGradeEntries[weekendID] = {
-                sourceDate: normalizedSourceDate,
-                grade: normalizeStudentGrade(grade)
-            };
-        });
-    }
-
-    Object.keys(weekendGradeEntries)
-        .sort(customDateSort)
-        .forEach((weekendID) => {
-            if (!weekendOrder.has(weekendID)) {
-                weekendOrder.set(weekendID, weekendOrder.size);
-            }
-        });
-
-    const resolveAverageValue = (primaryValue, fallbackValue) => {
-        const primaryNumber = toNumberOrNull(primaryValue);
-        if (primaryNumber !== null) return primaryNumber;
-        return toNumberOrNull(fallbackValue);
-    };
-
-    const chartData = Object.entries(weekendGradeEntries)
-        .map(([weekendID, entry]) => {
-            const weekData = normalizeStudentGrade(entry.grade);
-            const totalValue =
-                toNumberOrNull(weekData.total)
-                ?? toNumberOrNull(calculateTotal(weekData.chi, weekData.eng, weekData.math));
-            const hasAnyScore =
-                totalValue !== null
-                || SCORE_KEYS.some((key) => toNumberOrNull(weekData[key]) !== null);
-            if (!hasAnyScore) return null;
-
-            const weekClass = weekData.class || 'A班';
-            const avgData = classAveragesMap?.[weekendID]?.[weekClass] || {};
-            const avgAllData = classAveragesMap?.[weekendID]?.all || {};
-
-            return {
-                date: normalizeDateToken(entry.sourceDate) || weekendID,
-                weekendID,
-                total: totalValue ?? 0,
-                chi: toNumberOrNull(weekData.chi) ?? 0,
-                eng: toNumberOrNull(weekData.eng) ?? 0,
-                math: toNumberOrNull(weekData.math) ?? 0,
-                avgTotal: resolveAverageValue(avgData.total, avgAllData.total),
-                avgChi: resolveAverageValue(avgData.chi, avgAllData.chi),
-                avgEng: resolveAverageValue(avgData.eng, avgAllData.eng),
-                avgMath: resolveAverageValue(avgData.math, avgAllData.math),
-                avgAllTotal: toNumberOrNull(avgAllData.total),
-                avgAllChi: toNumberOrNull(avgAllData.chi),
-                avgAllEng: toNumberOrNull(avgAllData.eng),
-                avgAllMath: toNumberOrNull(avgAllData.math),
-                class: weekClass
-            };
-        })
-        .filter(Boolean)
-        .sort((a, b) => {
-            const indexA = weekendOrder.has(a.weekendID) ? weekendOrder.get(a.weekendID) : Number.POSITIVE_INFINITY;
-            const indexB = weekendOrder.has(b.weekendID) ? weekendOrder.get(b.weekendID) : Number.POSITIVE_INFINITY;
-            if (indexA === indexB) return 0;
-            return indexA - indexB;
-        });
-
-    const average = chartData.length > 0
-        ? (chartData.reduce((sum, item) => sum + item.total, 0) / chartData.length).toFixed(1)
-        : 0;
-
-    return { chartData, average };
+    return weekendEntryMap;
 };
-
-const buildParentResolvedViewData = ({
-    student,
-    cohortId,
-    classData,
-    datePool,
-    classAveragesMap,
-    getDateID,
-    scoreContext
-}) => {
-    const { chartData, average } = buildParentChartData({
-        grades: student?.grades,
-        datePool,
-        classAveragesMap,
-        getDateID
-    });
-
-    let prob = '-';
-    if (Array.isArray(classData) && classData.length > 0 && student?.id) {
-        const resolvedScoreContext = scoreContext || buildProbabilityContext(classData, datePool, getDateID);
-        const studentGradeMap = { [student.id]: {} };
-        const weekendEntries = buildWeekendGradeEntryMap(student.grades, getDateID);
-        Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
-            studentGradeMap[student.id][weekendID] = entry.grade;
-        });
-
-        prob = calculateProbLogic(
-            student,
-            resolvedScoreContext.scoresByDate,
-            resolvedScoreContext.mathScoresByDate,
-            studentGradeMap,
-            resolvedScoreContext.normalizedDates,
-            resolvedScoreContext.probabilityProfiles,
-            resolvedScoreContext.totalPRLookupByDate,
-            resolvedScoreContext.mathPRLookupByDate
-        );
-    }
-
-    const latestDateKey = chartData.length > 0
-        ? chartData[chartData.length - 1].weekendID || chartData[chartData.length - 1].date
-        : '';
-
-    return {
-        latestDateKey,
-        viewData: {
-            ...student,
-            chartData,
-            average,
-            prob,
-            cohortId,
-            isPending: false
-        }
-    };
-};
-
-const deriveDatePoolFromStudents = (students = []) => sanitizeDateList(
-    students.flatMap((student) => (
-        Object.entries(student?.grades || {})
-            .filter(([, grade]) => {
-                if (!grade) return false;
-                return (
-                    (grade.chi !== '' && grade.chi !== undefined && grade.chi !== null) ||
-                    (grade.eng !== '' && grade.eng !== undefined && grade.eng !== null) ||
-                    (grade.math !== '' && grade.math !== undefined && grade.math !== null) ||
-                    (grade.total !== '' && grade.total !== undefined && grade.total !== null)
-                );
-            })
-            .map(([date]) => date)
-    ))
-);
-
-const mergeDatePools = (...dateLists) => sanitizeDateList(dateLists.flatMap((list) => Array.isArray(list) ? list : []));
 
 const normalizeAverageGrade = (gradeObj) => {
     const normalized = {
@@ -688,36 +388,6 @@ const normalizeAverageGrade = (gradeObj) => {
     if (
         normalized.total === ''
         && (normalized.chi !== '' || normalized.eng !== '' || normalized.math !== '')
-    ) {
-        normalized.total = calculateTotal(normalized.chi, normalized.eng, normalized.math);
-    }
-    return normalized;
-};
-
-const normalizeStudentGrade = (gradeObj) => {
-    const pickFirstFilled = (keys, fallback = '') => {
-        for (const key of keys) {
-            const value = gradeObj?.[key];
-            if (value === undefined || value === null) continue;
-            if (typeof value === 'string' && value.trim() === '') continue;
-            return value;
-        }
-        return fallback;
-    };
-    const normalized = {
-        chi: pickFirstFilled(['chi', '國文', '國', 'chinese', 'Chinese']),
-        eng: pickFirstFilled(['eng', '英文', '英', 'english', 'English']),
-        math: pickFirstFilled(['math', '數學', '數', 'mathematics', 'Mathematics']),
-        total: pickFirstFilled(['total', '總分', 'sum', 'Sum', 'scoreTotal', 'totalScore']),
-        class: String(pickFirstFilled(['class', '班級', 'className', '類別'], 'A班') || 'A班').trim() || 'A班'
-    };
-    if (
-        normalized.total === ''
-        && (
-            normalized.chi !== ''
-            || normalized.eng !== ''
-            || normalized.math !== ''
-        )
     ) {
         normalized.total = calculateTotal(normalized.chi, normalized.eng, normalized.math);
     }
@@ -1043,18 +713,7 @@ const calculateProbLogic = (
     const myGrades = studentGradeMaps[targetStudent.id] || {};
 
     availableDates.forEach((date) => {
-         const normalizedDate = normalizeDateToken(date);
-         const weekendID = (
-             normalizedDate
-             && (
-                 myGrades[normalizedDate]
-                 || scoresByDate[normalizedDate]
-                 || mathScoresByDate[normalizedDate]
-                 || probabilityProfiles?.[normalizedDate]
-             )
-         )
-             ? normalizedDate
-             : getWeekendID(date, availableDates);
+         const weekendID = normalizeDateToken(date) || getWeekendID(date, availableDates);
          if (!weekendID) return;
          const grade = myGrades[weekendID];
          let myTotal = null;
@@ -1216,97 +875,10 @@ const buildProbabilityContext = (students, availableDates, getDateID) => {
     };
 };
 
-const buildProbabilityContextFromScoreIndex = (scoreIndexByWeekend, availableDates, getDateID) => {
-    const normalizedDates = Array.from(
-        new Set((Array.isArray(availableDates) ? availableDates : []).map((date) => getDateID(date)).filter(Boolean))
-    ).sort(customDateSort);
-    const scoresByDate = {};
-    const mathScoresByDate = {};
-    const probabilityProfiles = {};
-    const totalPRLookupByDate = {};
-    const mathPRLookupByDate = {};
-
-    normalizedDates.forEach((weekendID) => {
-        const allBucket = scoreIndexByWeekend?.[weekendID]?.all || {};
-        const totalScores = Array.isArray(allBucket.total) ? [...allBucket.total] : [];
-        const mathScores = Array.isArray(allBucket.math) ? [...allBucket.math] : [];
-        scoresByDate[weekendID] = totalScores;
-        mathScoresByDate[weekendID] = mathScores;
-        probabilityProfiles[weekendID] = getProbabilityProfileByWeekend(weekendID, normalizedDates);
-        totalPRLookupByDate[weekendID] = buildPRLookupByScore(totalScores);
-        mathPRLookupByDate[weekendID] = buildPRLookupByScore(mathScores);
-    });
-
-    return {
-        normalizedDates,
-        scoresByDate,
-        mathScoresByDate,
-        probabilityProfiles,
-        totalPRLookupByDate,
-        mathPRLookupByDate
-    };
-};
-
 // --- Components ---
-const CHART_CHUNK_RELOAD_GUARD_KEY = 'grade_tracker_chart_chunk_reload_once';
-
-const isChunkImportError = (error) => {
-    const message = String(error?.message || error || '').toLowerCase();
-    return (
-        message.includes('failed to fetch dynamically imported module')
-        || message.includes('chunkloaderror')
-        || message.includes('loading chunk')
-        || message.includes('importing a module script failed')
-    );
-};
-
-const safePreloadImport = async (loader) => {
-    try {
-        const mod = await loader();
-        if (typeof window !== 'undefined') {
-            sessionStorage.removeItem(CHART_CHUNK_RELOAD_GUARD_KEY);
-        }
-        return mod;
-    } catch (error) {
-        if (isChunkImportError(error)) {
-            console.warn('Chart chunk preload skipped:', error);
-            return null;
-        }
-        console.error('Chart preload error:', error);
-        return null;
-    }
-};
-
-const ChartModuleErrorFallback = () => (
-    <div className="h-60 rounded-2xl border border-white/85 bg-white/80 px-4 py-3 text-xs font-bold text-slate-500 shadow-[0_14px_32px_rgba(15,23,42,0.08)] flex items-center justify-center">
-        圖表載入中，請稍後再試
-    </div>
-);
-
-const lazyWithChunkRecovery = (loader, label) => React.lazy(async () => {
-    try {
-        const mod = await loader();
-        if (typeof window !== 'undefined') {
-            sessionStorage.removeItem(CHART_CHUNK_RELOAD_GUARD_KEY);
-        }
-        return mod;
-    } catch (error) {
-        if (typeof window !== 'undefined' && isChunkImportError(error)) {
-            const alreadyRetried = sessionStorage.getItem(CHART_CHUNK_RELOAD_GUARD_KEY) === '1';
-            if (!alreadyRetried) {
-                sessionStorage.setItem(CHART_CHUNK_RELOAD_GUARD_KEY, '1');
-                window.location.reload();
-                return new Promise(() => {});
-            }
-        }
-        console.error(`${label} lazy load error:`, error);
-        return { default: ChartModuleErrorFallback };
-    }
-});
-
-const SingleSubjectChart = lazyWithChunkRecovery(() => import('./components/charts/SingleSubjectChart'), 'SingleSubjectChart');
-const DistributionChart = lazyWithChunkRecovery(() => import('./components/charts/DistributionChart'), 'DistributionChart');
-const ParentAbilityRadar = lazyWithChunkRecovery(() => import('./components/charts/ParentAbilityRadar'), 'ParentAbilityRadar');
+const SingleSubjectChart = React.lazy(() => import('./components/charts/SingleSubjectChart'));
+const DistributionChart = React.lazy(() => import('./components/charts/DistributionChart'));
+const ParentAbilityRadar = React.lazy(() => import('./components/charts/ParentAbilityRadar'));
 
 const ChartFallback = ({ heightClass = 'h-60' }) => (
     <div className={`${heightClass} rounded-2xl border border-white/85 brand-skeleton flex flex-col justify-end px-4 py-3 text-xs font-bold text-slate-500`}>
@@ -1320,7 +892,7 @@ const ChartFallback = ({ heightClass = 'h-60' }) => (
     </div>
 );
 
-const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, darkMode, canEdit, classDefs, handleBatchGradeChange, handleKeyDown, handlePaste }) => {
+const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, darkMode, canEdit, handleBatchGradeChange, handleKeyDown, handlePaste }) => {
     const probVisual = getProbabilityVisual(probValue, darkMode);
 
     return (
@@ -1337,7 +909,7 @@ const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, 
                     onChange={(e) => handleBatchGradeChange(student.id, 'class', e.target.value)}
                     className={`w-full text-center text-xs font-bold py-1.5 rounded-lg opacity-70 border-none outline-none appearance-none transition-opacity ${canEdit ? 'cursor-pointer hover:opacity-100' : 'cursor-not-allowed opacity-55'} ${darkMode ? 'bg-slate-900/50 text-slate-400 focus:text-slate-200' : 'bg-slate-100 text-slate-600 focus:text-slate-900'}`}
                 >
-                    {classDefs.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                    {CLASS_DEFS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
                 </select>
             </td>
             {['chi', 'eng', 'math'].map((sub) => (
@@ -1373,7 +945,6 @@ const BatchRow = React.memo(({ student, sIndex, dateGrades, prValue, probValue, 
     if (prevProps.handleBatchGradeChange !== nextProps.handleBatchGradeChange) return false;
     if (prevProps.handleKeyDown !== nextProps.handleKeyDown) return false;
     if (prevProps.handlePaste !== nextProps.handlePaste) return false;
-    if (prevProps.classDefs !== nextProps.classDefs) return false;
     if (prevProps.student.id !== nextProps.student.id || prevProps.student.name !== nextProps.student.name) return false;
 
     const prevGrade = prevProps.dateGrades || EMPTY_GRADE;
@@ -1458,27 +1029,12 @@ export default function App() {
   const [teacherAuthRole, setTeacherAuthRole] = useState(TEACHER_ROLE.FULL);
   const [passwordInput, setPasswordInput] = useState('');
   const [loginError, setLoginError] = useState(false);
-  const [cohortOptions, setCohortOptions] = useState(DEFAULT_COHORT_OPTIONS);
-  const [activeTeacherCohortId, setActiveTeacherCohortId] = useState(() => {
-      if (typeof window === 'undefined') return NEXT_COHORT_ID;
-      const stored = String(localStorage.getItem(TEACHER_ACTIVE_COHORT_STORAGE_KEY) || '').trim();
-      return stored || NEXT_COHORT_ID;
-  });
-  const [activePublicCohortId, setActivePublicCohortId] = useState(NEXT_COHORT_ID);
-  const [datesCohortId, setDatesCohortId] = useState('');
-  const [classAveragesCohortId, setClassAveragesCohortId] = useState('');
-  const [teacherStudentsCohortId, setTeacherStudentsCohortId] = useState('');
-  const [publicStudentsCohortId, setPublicStudentsCohortId] = useState('');
-  const [, setQueryStatsCohortId] = useState('');
-  const [teacherMessageCohortId, setTeacherMessageCohortId] = useState('');
-  const [cohortRegistryLoading, setCohortRegistryLoading] = useState(false);
-  const [publicCohortSaving, setPublicCohortSaving] = useState(false);
     
   const [studentName, setStudentName] = useState('');
   const [currentStudentId, setCurrentStudentId] = useState(null);
   const [grades, setGrades] = useState({});
   const [classAverages, setClassAverages] = useState({}); 
-  const [availableDates, setAvailableDates] = useState(() => getDefaultDatesForCohort(activeTeacherCohortId));
+  const [availableDates, setAvailableDates] = useState(DEFAULT_EXAM_STARTS);
   const [newDateInput, setNewDateInput] = useState('');
     
   const [statusMsg, setStatusMsg] = useState('');
@@ -1501,13 +1057,13 @@ export default function App() {
   const [batchDate, setBatchDate] = useState(''); 
   const [batchInsightTab, setBatchInsightTab] = useState('grades');
   const [isBatchDirty, setIsBatchDirty] = useState(false);
-  const [batchDraftGradesByStudentId, setBatchDraftGradesByStudentId] = useState({});
   const [visibleBatchRowCount, setVisibleBatchRowCount] = useState(INITIAL_BATCH_RENDER_ROWS);
   const [allStudentsData, setAllStudentsData] = useState([]); 
   const [cachedClassData, setCachedClassData] = useState([]); 
   const [sortByPR, setSortByPR] = useState(false);
   const [sortByProb, setSortByProb] = useState(false);
   const [isOperationLogExpanded, setIsOperationLogExpanded] = useState(false);
+  const [activeQualityIssueType, setActiveQualityIssueType] = useState('');
   const [queryStatsById, setQueryStatsById] = useState({});
   const [queryEvents, setQueryEvents] = useState([]);
   const [queryStatsLastResetAt, setQueryStatsLastResetAt] = useState('');
@@ -1515,11 +1071,11 @@ export default function App() {
   const [queryPanelStage, setQueryPanelStage] = useState('idle');
   const [queryMonitorKeyword, setQueryMonitorKeyword] = useState('');
   const [queryMonitorDateFilter, setQueryMonitorDateFilter] = useState('all');
+  const [queryMonitorScope, setQueryMonitorScope] = useState('all');
   const [queryMonitorSort, setQueryMonitorSort] = useState('count_desc');
   const [operationLogs, setOperationLogs] = useState([]);
   const [localSnapshots, setLocalSnapshots] = useState([]);
   const [importPreview, setImportPreview] = useState(null);
-  const [showImportFormatGuide, setShowImportFormatGuide] = useState(false);
   const [isApplyingImport, setIsApplyingImport] = useState(false);
   const [parentQueryPerf, setParentQueryPerf] = useState({
       cacheHit: 0,
@@ -1535,28 +1091,16 @@ export default function App() {
   const [teacherMessageLoading, setTeacherMessageLoading] = useState(false);
   const [teacherMessageSaving, setTeacherMessageSaving] = useState(false);
   const [teacherStudentMessageSavingId, setTeacherStudentMessageSavingId] = useState('');
-  const [teacherCohortSummary, setTeacherCohortSummary] = useState(() => normalizeCohortSummary(null));
-  const [teacherCohortSummaryId, setTeacherCohortSummaryId] = useState('');
   const batchDirtyStudentIdsRef = useRef(new Set());
   const queryPendingCountsRef = useRef({});
   const queryPendingEventsRef = useRef([]);
-  const queryPendingCohortIdRef = useRef(LEGACY_COHORT_ID);
   const queryFlushTimerRef = useRef(null);
   const queryFlushInFlightRef = useRef(false);
   const shouldSnapTeacherEntryRef = useRef(false);
   const datesLoadPromiseRef = useRef(null);
   const classAveragesLoadPromiseRef = useRef(null);
   const studentsLoadPromiseRef = useRef(null);
-  const cohortSummaryLoadPromiseRef = useRef(null);
-  const cohortRegistryLoadPromiseRef = useRef(null);
   const pendingImportPayloadRef = useRef(null);
-  const importFileInputRef = useRef(null);
-  const legacyImportUnlockUntilRef = useRef(0);
-  const teacherCohortPreseedRef = useRef('');
-  const autoPruneNoticeKeyRef = useRef('');
-  const currentBatchGradeInfoRef = useRef({});
-  const batchRowsForDisplayRef = useRef([]);
-  const batchAutoClassScopeRef = useRef('');
   const parentQueryPerfRef = useRef({
       cacheHit: 0,
       cacheMiss: 0,
@@ -1565,6 +1109,7 @@ export default function App() {
   const deferredBatchInsightTab = useDeferredValue(batchInsightTab);
   const deferredQueryMonitorKeyword = useDeferredValue(queryMonitorKeyword);
   const deferredQueryMonitorDateFilter = useDeferredValue(queryMonitorDateFilter);
+  const deferredQueryMonitorScope = useDeferredValue(queryMonitorScope);
   const deferredQueryMonitorSort = useDeferredValue(queryMonitorSort);
   const deferredQueryStatsById = useDeferredValue(queryStatsById);
   const deferredQueryEvents = useDeferredValue(queryEvents);
@@ -1572,16 +1117,6 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [searchId, setSearchId] = useState('');
   const [viewData, setViewData] = useState(null);
-  const [parentSearchShell, setParentSearchShell] = useState(null);
-  const [parentAnalyticsPending, setParentAnalyticsPending] = useState(false);
-  const [parentViewContext, setParentViewContext] = useState({
-      cohortId: '',
-      dates: [],
-      classData: [],
-      summary: normalizeCohortSummary(null),
-      classAverages: {},
-      teacherMessage: { globalMessage: '', byStudent: {} }
-  });
   const [searchError, setSearchError] = useState('');
   const [activeTab, setActiveTab] = useState('total');
   
@@ -1602,342 +1137,6 @@ export default function App() {
   const canEditStudentGrades = !isLimitedTeacherRole;
   const canImportExcel = canEditStudentGrades || isLimitedTeacherRole;
   const canDeleteDates = !isLimitedTeacherRole;
-  const cohortOptionsById = useMemo(
-      () => Object.fromEntries(cohortOptions.map((cohort) => [cohort.id, cohort])),
-      [cohortOptions]
-  );
-  const activePublicCohort = cohortOptionsById[activePublicCohortId] || DEFAULT_COHORT_OPTIONS[0];
-  const activeDataCohortId = mode === 'parent' ? activePublicCohortId : activeTeacherCohortId;
-  const activeDateContextCohortId = datesCohortId || activeDataCohortId || activeTeacherCohortId || NEXT_COHORT_ID;
-  const activeParentViewCohortId = viewData?.cohortId || parentViewContext.cohortId || activePublicCohortId;
-  const getCohortLabel = useCallback(
-      (cohortId) => cohortOptionsById[cohortId]?.label || String(cohortId || ''),
-      [cohortOptionsById]
-  );
-  const isLegacyCohort = useCallback(
-      (cohortId) => (cohortOptionsById[cohortId]?.storageMode || COHORT_STORAGE_MODE.LEGACY) === COHORT_STORAGE_MODE.LEGACY,
-      [cohortOptionsById]
-  );
-  const activeTeacherClassDefs = useMemo(
-      () => getClassDefsForCohort(activeTeacherCohortId),
-      [activeTeacherCohortId]
-  );
-  const activeTeacherClassIdSet = useMemo(
-      () => new Set(activeTeacherClassDefs.map(({ id }) => id)),
-      [activeTeacherClassDefs]
-  );
-  const defaultTeacherClassId = activeTeacherClassDefs[0]?.id || 'A班';
-  const importFormatGuide = useMemo(() => {
-      const classExamples = activeTeacherClassDefs.map((item) => item.id).join(' / ');
-      const classAliasHint = activeTeacherCohortId === NEXT_COHORT_ID
-          ? '可填 A、B、C、東興；也接受 東、DONG、EAST'
-          : '可填 A班、B班、C班、日A班、日B班；也接受 日、SUN';
-      return {
-          sampleHeaders: ['學號', '姓名', '日期', '班級', '國文', '英文', '數學'],
-          sampleRows: [
-              ['261001', '王小明', '09/14', activeTeacherClassDefs[0]?.id || 'A班', '82', '76', '91']
-          ],
-          headerHints: [
-              '系統會在前 10 列找標題列，能辨識：學號 / ID / StudentID、姓名 / Name、日期 / 測驗日、班級 / 類別、國 / 英 / 數',
-              '如果完全找不到標題，會改用固定欄序 A-F：學號、姓名、日期、國文、英文、數學'
-          ],
-          rules: [
-              `目前這屆班級可用：${classExamples}`,
-              classAliasHint,
-              '日期可寫 2/28、02/28、2026/2/28、0228',
-              '不合理日期例如 2/51 會直接略過',
-              '同一個檔案最多只能有 5 個不同測驗日期，超過會取消匯入',
-              '若沒有班級欄，系統會優先沿用該學生同考次既有班級，否則用目前班級'
-          ]
-      };
-  }, [activeTeacherClassDefs, activeTeacherCohortId]);
-  const resolveScopedDateId = useCallback((dateStr, cohortId, datePool = []) => (
-      resolveDateIdForCohort(dateStr, cohortId, datePool, cohortOptions)
-  ), [cohortOptions]);
-  const getScopedDateLabel = useCallback((dateStr, cohortId, datePool = []) => (
-      getDateDisplayLabelForCohort(dateStr, cohortId, datePool, cohortOptions)
-  ), [cohortOptions]);
-  const parentSearchCohortOrder = useMemo(() => {
-      const ordered = [];
-      if (cohortOptionsById[NEXT_COHORT_ID]) ordered.push(NEXT_COHORT_ID);
-      cohortOptions.forEach((cohort) => {
-          if (!ordered.includes(cohort.id)) ordered.push(cohort.id);
-      });
-      return ordered.length ? ordered : [NEXT_COHORT_ID, LEGACY_COHORT_ID];
-  }, [cohortOptions, cohortOptionsById]);
-  const getCohortCacheKey = useCallback(
-      (baseKey, cohortId) => getScopedCacheKey(baseKey, cohortId || 'global'),
-      []
-  );
-  const getStudentSessionKey = useCallback(
-      (cohortId) => getScopedCacheKey(STUDENTS_SESSION_SYNC_KEY, cohortId || 'global'),
-      []
-  );
-  const getCohortRegistryDocRef = useCallback(
-      () => (db ? doc(db, 'artifacts', appId, 'public', 'data', 'settings', COHORT_REGISTRY_DOC_ID) : null),
-      []
-  );
-  const getCohortSettingsDocRef = useCallback((cohortId, docId) => {
-      if (!db || !docId) return null;
-      if (isLegacyCohort(cohortId)) {
-          return doc(db, 'artifacts', appId, 'public', 'data', 'settings', docId);
-      }
-      return doc(db, 'artifacts', appId, 'public', 'data', 'cohorts', cohortId, 'settings', docId);
-  }, [isLegacyCohort]);
-  const getCohortStudentsCollectionRef = useCallback((cohortId) => {
-      if (!db) return null;
-      if (isLegacyCohort(cohortId)) {
-          return collection(db, 'artifacts', appId, 'public', 'data', 'students');
-      }
-      return collection(db, 'artifacts', appId, 'public', 'data', 'cohorts', cohortId, 'students');
-  }, [isLegacyCohort]);
-  const getCohortStudentDocRef = useCallback((cohortId, studentId) => {
-      if (!db || !studentId) return null;
-      if (isLegacyCohort(cohortId)) {
-          return doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${studentId}`);
-      }
-      return doc(db, 'artifacts', appId, 'public', 'data', 'cohorts', cohortId, 'students', `student_${studentId}`);
-  }, [isLegacyCohort]);
-  const getCohortSummaryManifestDocRef = useCallback(
-      (cohortId) => getCohortSettingsDocRef(cohortId, COHORT_SUMMARY_MANIFEST_DOC_ID),
-      [getCohortSettingsDocRef]
-  );
-  const getCohortSummaryCollectionRef = useCallback((cohortId) => {
-      if (!db) return null;
-      if (isLegacyCohort(cohortId)) {
-          return collection(db, 'artifacts', appId, 'public', 'data', COHORT_SUMMARY_COLLECTION_ID);
-      }
-      return collection(db, 'artifacts', appId, 'public', 'data', 'cohorts', cohortId, COHORT_SUMMARY_COLLECTION_ID);
-  }, [isLegacyCohort]);
-  const getCohortSummaryDocRef = useCallback((cohortId, weekendID) => {
-      const collectionRef = getCohortSummaryCollectionRef(cohortId);
-      if (!collectionRef || !weekendID) return null;
-      return doc(collectionRef, encodeSummaryWeekendDocId(weekendID));
-  }, [getCohortSummaryCollectionRef]);
-  const getCachedCohortSummary = useCallback((cohortId) => {
-      const cacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.summary, cohortId);
-      return normalizeCohortSummary(readLocalCache(cacheKey, STUDENT_CACHE_TTL_MS));
-  }, [getCohortCacheKey]);
-  const buildCohortSummaryPayload = useCallback((students, cohortId, datePool = [], options = {}) => {
-      const mergedDatePool = mergeDatePools(datePool, deriveDatePoolFromStudents(students));
-      const getDateIDForCohort = (dateStr) => resolveScopedDateId(dateStr, cohortId, mergedDatePool);
-      return normalizeCohortSummary({
-          ...buildCohortSummary({
-              students,
-              getDateID: getDateIDForCohort,
-              validClassIds: getClassDefsForCohort(cohortId).map((item) => item.id)
-          }),
-          version: String(options?.version || '').trim(),
-          updatedAt: String(options?.updatedAt || '').trim()
-      });
-  }, [resolveScopedDateId]);
-  const applyTeacherSummaryState = useCallback((cohortId, summary) => {
-      const normalizedId = String(cohortId || '').trim();
-      const normalizedSummary = normalizeCohortSummary(summary);
-      setTeacherCohortSummary(normalizedSummary);
-      setTeacherCohortSummaryId(normalizedId);
-      writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.summary, normalizedId), normalizedSummary);
-      return normalizedSummary;
-  }, [getCohortCacheKey]);
-  const loadStudentsVersion = useCallback(async (cohortId, options = {}) => {
-      const force = Boolean(options?.force);
-      const normalizedId = String(cohortId || LEGACY_COHORT_ID);
-      const cacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.studentsVersion, normalizedId);
-      if (!force) {
-          const cachedVersion = readLocalCache(cacheKey, SETTINGS_CACHE_TTL_MS);
-          if (typeof cachedVersion === 'string' && cachedVersion.trim()) {
-              return cachedVersion;
-          }
-      }
-      if (!db) return '';
-      try {
-          const docSnap = await getDoc(getCohortSettingsDocRef(normalizedId, STUDENT_DATA_VERSION_DOC_ID));
-          const version = String(docSnap.data()?.version || '').trim();
-          if (version) {
-              writeLocalCache(cacheKey, version);
-          }
-          return version;
-      } catch (error) {
-          console.error('Load students version error:', error);
-          return '';
-      }
-  }, [getCohortCacheKey, getCohortSettingsDocRef]);
-  const bumpStudentsVersion = useCallback(async (cohortId) => {
-      const normalizedId = String(cohortId || LEGACY_COHORT_ID);
-      const nextVersion = new Date().toISOString();
-      writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.studentsVersion, normalizedId), nextVersion);
-      if (!db) return nextVersion;
-      try {
-          await setDoc(
-              getCohortSettingsDocRef(normalizedId, STUDENT_DATA_VERSION_DOC_ID),
-              { version: nextVersion, updatedAt: nextVersion },
-              { merge: true }
-          );
-      } catch (error) {
-          console.error('Bump students version error:', error);
-      }
-      return nextVersion;
-  }, [getCohortCacheKey, getCohortSettingsDocRef]);
-  const persistCohortSummary = useCallback(async (options = {}) => {
-      const cohortId = String(options?.cohortId || activeTeacherCohortId || LEGACY_COHORT_ID);
-      const students = Array.isArray(options?.students) ? options.students : [];
-      const summaryVersion = String(
-          options?.version
-          || readLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.studentsVersion, cohortId), SETTINGS_CACHE_TTL_MS)
-          || ''
-      ).trim();
-      const nowIso = String(options?.updatedAt || new Date().toISOString());
-      const summaryPayload = buildCohortSummaryPayload(students, cohortId, options?.datePool || [], {
-          version: summaryVersion,
-          updatedAt: nowIso
-      });
-
-      writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.summary, cohortId), summaryPayload);
-      if (options?.hydrateTeacher && cohortId === activeTeacherCohortId) {
-          applyTeacherSummaryState(cohortId, summaryPayload);
-      }
-
-      if (!db) return summaryPayload;
-
-      const manifestRef = getCohortSummaryManifestDocRef(cohortId);
-      const summaryCollectionRef = getCohortSummaryCollectionRef(cohortId);
-      if (!manifestRef || !summaryCollectionRef) return summaryPayload;
-
-      const writes = [
-          setDoc(manifestRef, {
-              version: summaryVersion,
-              weekendIds: summaryPayload.weekendIds,
-              updatedAt: nowIso
-          })
-      ];
-
-      summaryPayload.weekendIds.forEach((weekendID) => {
-          writes.push(
-              setDoc(
-                  getCohortSummaryDocRef(cohortId, weekendID),
-                  {
-                      weekendID,
-                      version: summaryVersion,
-                      updatedAt: nowIso,
-                      classes: summaryPayload.byWeekend[weekendID] || {}
-                  }
-              )
-          );
-      });
-
-      await Promise.all(writes);
-      return summaryPayload;
-  }, [
-      activeTeacherCohortId,
-      applyTeacherSummaryState,
-      buildCohortSummaryPayload,
-      getCohortCacheKey,
-      getCohortSummaryCollectionRef,
-      getCohortSummaryDocRef,
-      getCohortSummaryManifestDocRef
-  ]);
-  const loadCohortSummary = useCallback(async (options = {}) => {
-      const force = Boolean(options?.force);
-      const cohortId = String(options?.cohortId || activeDataCohortId || LEGACY_COHORT_ID);
-      const expectedVersion = String(options?.expectedVersion || '').trim();
-
-      if (
-          !force
-          && cohortSummaryLoadPromiseRef.current?.cohortId === cohortId
-          && cohortSummaryLoadPromiseRef.current?.promise
-      ) {
-          return cohortSummaryLoadPromiseRef.current.promise;
-      }
-
-      const runner = async () => {
-          const cachedSummary = getCachedCohortSummary(cohortId);
-          if (
-              cachedSummary.weekendIds.length > 0
-              && (!expectedVersion || cachedSummary.version === expectedVersion)
-              && !force
-          ) {
-              if (options?.hydrateTeacher && cohortId === activeTeacherCohortId) {
-                  applyTeacherSummaryState(cohortId, cachedSummary);
-              }
-              return cachedSummary;
-          }
-
-          if (!db) {
-              if (Array.isArray(options?.students) && options.students.length > 0) {
-                  return persistCohortSummary({
-                      cohortId,
-                      students: options.students,
-                      datePool: options.datePool || [],
-                      version: expectedVersion,
-                      hydrateTeacher: options?.hydrateTeacher
-                  });
-              }
-              return cachedSummary;
-          }
-
-          try {
-              const manifestSnap = await getDoc(getCohortSummaryManifestDocRef(cohortId));
-              if (manifestSnap.exists()) {
-                  const manifestData = manifestSnap.data() || {};
-                  const hasManifestWeekendIds = Array.isArray(manifestData.weekendIds);
-                  const allowedWeekendIds = new Set(hasManifestWeekendIds ? manifestData.weekendIds : []);
-                  const querySnapshot = await getDocs(getCohortSummaryCollectionRef(cohortId));
-                  const byWeekend = {};
-                  querySnapshot.forEach((summaryDoc) => {
-                      const data = summaryDoc.data() || {};
-                      const weekendID = String(data.weekendID || '').trim();
-                      if (!weekendID) return;
-                      if (hasManifestWeekendIds && !allowedWeekendIds.has(weekendID)) return;
-                      byWeekend[weekendID] = data.classes || {};
-                  });
-                  const loadedSummary = normalizeCohortSummary({
-                      version: String(manifestData.version || '').trim(),
-                      updatedAt: manifestData.updatedAt,
-                      byWeekend
-                  });
-                  writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.summary, cohortId), loadedSummary);
-                  if (options?.hydrateTeacher && cohortId === activeTeacherCohortId) {
-                      applyTeacherSummaryState(cohortId, loadedSummary);
-                  }
-                  return loadedSummary;
-              }
-          } catch (error) {
-              console.error('Load cohort summary error:', error);
-          }
-
-          if (Array.isArray(options?.students) && options.students.length > 0) {
-              return persistCohortSummary({
-                  cohortId,
-                  students: options.students,
-                  datePool: options.datePool || [],
-                  version: expectedVersion,
-                  hydrateTeacher: options?.hydrateTeacher
-              });
-          }
-
-          return cachedSummary;
-      };
-
-      const promise = runner().finally(() => {
-          if (
-              cohortSummaryLoadPromiseRef.current?.cohortId === cohortId
-              && cohortSummaryLoadPromiseRef.current?.promise === promise
-          ) {
-              cohortSummaryLoadPromiseRef.current = null;
-          }
-      });
-      cohortSummaryLoadPromiseRef.current = { cohortId, promise };
-      return promise;
-  }, [
-      activeDataCohortId,
-      activeTeacherCohortId,
-      getCachedCohortSummary,
-      getCohortCacheKey,
-      getCohortSummaryCollectionRef,
-      getCohortSummaryManifestDocRef,
-      applyTeacherSummaryState,
-      persistCohortSummary
-  ]);
 
   const appendOperationLog = useCallback((entry) => {
       const title = String(entry?.title || '').trim();
@@ -1984,68 +1183,6 @@ export default function App() {
       });
   }, []);
 
-  const loadCohortRegistry = useCallback(async (options = {}) => {
-      const force = Boolean(options && options.force);
-      if (!force && cohortRegistryLoadPromiseRef.current) return cohortRegistryLoadPromiseRef.current;
-
-      const runner = async () => {
-          const fallbackCohorts = normalizeCohortOptions(DEFAULT_COHORT_OPTIONS);
-          const fallbackPublicCohortId = resolvePreferredPublicCohortId(fallbackCohorts);
-          if (!db) {
-              setCohortOptions(fallbackCohorts);
-              setActivePublicCohortId(fallbackPublicCohortId);
-              return { cohorts: fallbackCohorts, publicCohortId: fallbackPublicCohortId };
-          }
-
-          setCohortRegistryLoading(true);
-          try {
-              const registryRef = getCohortRegistryDocRef();
-              const docSnap = await getDoc(registryRef);
-              const raw = docSnap.exists() ? docSnap.data() : {};
-              const cohorts = normalizeCohortOptions(raw?.cohorts);
-              const publicCohortId = resolvePreferredPublicCohortId(cohorts, raw?.publicCohortId);
-              const fingerprint = JSON.stringify({ cohorts, publicCohortId });
-              const persistedFingerprint = JSON.stringify({
-                  cohorts: normalizeCohortOptions(raw?.cohorts),
-                  publicCohortId: raw?.publicCohortId || ''
-              });
-
-              setCohortOptions(cohorts);
-              setActivePublicCohortId(publicCohortId);
-              setActiveTeacherCohortId((prev) => (
-                  cohorts.some((cohort) => cohort.id === prev)
-                      ? prev
-                      : (cohorts.find((cohort) => cohort.id === NEXT_COHORT_ID)?.id || cohorts[cohorts.length - 1]?.id || LEGACY_COHORT_ID)
-              ));
-
-              if (!docSnap.exists() || fingerprint !== persistedFingerprint) {
-                  await setDoc(registryRef, {
-                      cohorts,
-                      publicCohortId,
-                      updatedAt: new Date().toISOString()
-                  }, { merge: true });
-              }
-
-              return { cohorts, publicCohortId };
-          } catch (error) {
-              console.error('Load cohort registry error:', error);
-              setCohortOptions(fallbackCohorts);
-              setActivePublicCohortId(fallbackPublicCohortId);
-              return { cohorts: fallbackCohorts, publicCohortId: fallbackPublicCohortId };
-          } finally {
-              setCohortRegistryLoading(false);
-          }
-      };
-
-      const promise = runner().finally(() => {
-          if (cohortRegistryLoadPromiseRef.current === promise) {
-              cohortRegistryLoadPromiseRef.current = null;
-          }
-      });
-      cohortRegistryLoadPromiseRef.current = promise;
-      return promise;
-  }, [getCohortRegistryDocRef]);
-
   const ensureXlsxReady = useCallback(async () => {
       if (typeof window === 'undefined') return false;
       if (window.XLSX) {
@@ -2081,36 +1218,6 @@ export default function App() {
       () => [...availableDates].sort(customDateSort),
       [availableDates]
   );
-  const parentAvailableDates = useMemo(
-      () => (viewData ? sanitizeDateList(parentViewContext.dates) : []),
-      [parentViewContext.dates, viewData]
-  );
-  const parentSortedAvailableDatesAsc = useMemo(
-      () => [...parentAvailableDates].sort(customDateSort),
-      [parentAvailableDates]
-  );
-  const parentClassData = useMemo(
-      () => (viewData ? (Array.isArray(parentViewContext.classData) ? parentViewContext.classData : []) : []),
-      [parentViewContext.classData, viewData]
-  );
-  const parentSummary = useMemo(
-      () => (viewData ? normalizeCohortSummary(parentViewContext.summary) : normalizeCohortSummary(null)),
-      [parentViewContext.summary, viewData]
-  );
-  const parentSummaryByWeekend = useMemo(
-      () => (viewData ? (parentSummary.byWeekend || EMPTY_OBJECT) : EMPTY_OBJECT),
-      [parentSummary.byWeekend, viewData]
-  );
-  const hasParentSummary = useMemo(
-      () => Boolean(viewData && Object.keys(parentSummaryByWeekend).length > 0),
-      [parentSummaryByWeekend, viewData]
-  );
-  const parentTeacherMessageContext = useMemo(
-      () => (viewData && parentViewContext.teacherMessage && typeof parentViewContext.teacherMessage === 'object'
-          ? parentViewContext.teacherMessage
-          : { globalMessage: '', byStudent: {} }),
-      [parentViewContext.teacherMessage, viewData]
-  );
   const sortedAvailableDatesDesc = useMemo(
       () => [...sortedAvailableDatesAsc].slice().reverse(),
       [sortedAvailableDatesAsc]
@@ -2119,31 +1226,28 @@ export default function App() {
   const testDateIdLookup = useMemo(() => {
       const lookup = new Map();
       sanitizeDateList(availableDates).forEach((date) => {
-          lookup.set(date, resolveScopedDateId(date, activeDateContextCohortId, availableDates));
+          lookup.set(date, getWeekendID(date, availableDates));
       });
       return lookup;
-  }, [activeDateContextCohortId, availableDates, resolveScopedDateId]);
+  }, [availableDates]);
 
-  // 依屆別決定是沿用連續兩天同考次，還是單日成績。
+  // 包裝 getWeekendID，自動傳入 availableDates，讓連續兩天的日期可以歸類為同一次測驗
   const getTestDateID = useCallback((dateStr) => {
       const normalized = normalizeDateToken(dateStr);
       if (normalized && testDateIdLookup.has(normalized)) {
           return testDateIdLookup.get(normalized) || normalized;
       }
-      return resolveScopedDateId(dateStr, activeDateContextCohortId, availableDates);
-  }, [activeDateContextCohortId, availableDates, resolveScopedDateId, testDateIdLookup]);
-  const parentGetTestDateID = useCallback((dateStr) => {
-      if (!viewData) return '';
-      return resolveScopedDateId(dateStr, activeParentViewCohortId, parentAvailableDates);
-  }, [activeParentViewCohortId, parentAvailableDates, resolveScopedDateId, viewData]);
+      return getWeekendID(dateStr, availableDates);
+  }, [availableDates, testDateIdLookup]);
 
   const weekendLabelByDate = useMemo(() => {
       const labels = {};
       sortedAvailableDatesDesc.forEach((date) => {
-          labels[date] = getScopedDateLabel(date, activeDateContextCohortId, availableDates);
+          const weekendID = getTestDateID(date) || date;
+          labels[date] = getWeekendDisplayLabel(weekendID);
       });
       return labels;
-  }, [activeDateContextCohortId, availableDates, getScopedDateLabel, sortedAvailableDatesDesc]);
+  }, [sortedAvailableDatesDesc, getTestDateID]);
 
   // 單人檢視改為以「考次(weekendID)」去重，避免同一週末出現兩列（例如 03/08 與 03/09）
   const singleViewDateEntries = useMemo(() => {
@@ -2160,11 +1264,11 @@ export default function App() {
               date,
               weekendID,
               gradeKey,
-              label: weekendLabelByDate[date] || getScopedDateLabel(date, activeDateContextCohortId, availableDates)
+              label: weekendLabelByDate[date] || getWeekendDisplayLabel(date)
           });
       });
       return entries;
-  }, [activeDateContextCohortId, availableDates, grades, getScopedDateLabel, getTestDateID, sortedAvailableDatesDesc, weekendLabelByDate]);
+  }, [sortedAvailableDatesDesc, grades, getTestDateID, weekendLabelByDate]);
 
   const singleViewDateKeys = useMemo(
       () => singleViewDateEntries.map((entry) => entry.gradeKey),
@@ -2174,19 +1278,6 @@ export default function App() {
   const selectedBatchWeekendID = useMemo(
       () => (batchDate ? getTestDateID(batchDate) : ''),
       [batchDate, getTestDateID]
-  );
-  const shouldBuildBatchAnalytics =
-      mode === 'teacher' && teacherViewMode === 'batch' && Boolean(batchDate);
-  const shouldBuildTeacherDerivedMaps = mode === 'teacher';
-  const shouldBuildTeacherLocalAverages =
-      mode === 'teacher' && teacherStudentsCohortId === activeTeacherCohortId;
-  const teacherSummaryByWeekend = useMemo(
-      () => (teacherCohortSummaryId === activeTeacherCohortId ? (teacherCohortSummary.byWeekend || EMPTY_OBJECT) : EMPTY_OBJECT),
-      [activeTeacherCohortId, teacherCohortSummary.byWeekend, teacherCohortSummaryId]
-  );
-  const hasTeacherSummary = useMemo(
-      () => Object.keys(teacherSummaryByWeekend).length > 0,
-      [teacherSummaryByWeekend]
   );
 
   const teacherDateCards = useMemo(() => {
@@ -2201,7 +1292,7 @@ export default function App() {
           cards.push({
               date,
               weekendID,
-              label: weekendLabelByDate[date] || getScopedDateLabel(date, activeDateContextCohortId, availableDates),
+              label: weekendLabelByDate[date] || getWeekendDisplayLabel(date),
               phaseId,
               phaseLabel,
               isLatest: cards.length === 0,
@@ -2209,7 +1300,7 @@ export default function App() {
           });
       });
       return cards;
-  }, [activeDateContextCohortId, availableDates, getScopedDateLabel, getTestDateID, selectedBatchWeekendID, sortedAvailableDatesAsc, sortedAvailableDatesDesc, teacherViewMode, weekendLabelByDate]);
+  }, [sortedAvailableDatesDesc, sortedAvailableDatesAsc, weekendLabelByDate, teacherViewMode, selectedBatchWeekendID, getTestDateID]);
 
   const latestAvailableDate = useMemo(() => {
       if (!sortedAvailableDatesAsc.length) return '';
@@ -2232,11 +1323,9 @@ export default function App() {
   // Defer heavy derived calculations to keep typing/edit interactions smooth.
   const deferredStudentsForDerived = useDeferredValue(allStudentsData);
   const deferredDatesForDerived = useDeferredValue(availableDates);
-  const deferredParentClassData = useDeferredValue(parentClassData);
 
   // 將每位學生的日期成績先依週末 ID 正規化，避免在多個流程中重複掃描 grades 物件
   const deferredStudentGradeMapsByStudentId = useMemo(() => {
-      if (!shouldBuildTeacherDerivedMaps) return EMPTY_OBJECT;
       const gradeMaps = {};
       deferredStudentsForDerived.forEach((student) => {
           const weekendGrades = {};
@@ -2247,147 +1336,15 @@ export default function App() {
           gradeMaps[student.id] = weekendGrades;
       });
       return gradeMaps;
-  }, [deferredStudentsForDerived, getTestDateID, shouldBuildTeacherDerivedMaps]);
-
-  const allStudentWeekendEntriesByStudentId = useMemo(() => {
-      if (!shouldBuildTeacherDerivedMaps) return EMPTY_OBJECT;
-      const entryMaps = {};
-      allStudentsData.forEach((student) => {
-          entryMaps[student.id] = buildWeekendGradeEntryMap(student.grades, getTestDateID);
-      });
-      return entryMaps;
-  }, [allStudentsData, getTestDateID, shouldBuildTeacherDerivedMaps]);
-
-  const allStudentWeekendGradesByStudentId = useMemo(() => {
-      if (!shouldBuildTeacherDerivedMaps) return EMPTY_OBJECT;
-      const gradeMaps = {};
-      Object.entries(allStudentWeekendEntriesByStudentId).forEach(([studentId, entryMap]) => {
-          const weekendGrades = {};
-          Object.entries(entryMap || {}).forEach(([weekendID, entry]) => {
-              weekendGrades[weekendID] = entry.grade;
-          });
-          gradeMaps[studentId] = weekendGrades;
-      });
-      return gradeMaps;
-  }, [allStudentWeekendEntriesByStudentId, shouldBuildTeacherDerivedMaps]);
-
-  const batchStudentsById = useMemo(() => {
-      if (!shouldBuildBatchAnalytics) return EMPTY_OBJECT;
-      return Object.fromEntries(allStudentsData.map((student) => [student.id, student]));
-  }, [allStudentsData, shouldBuildBatchAnalytics]);
-
-  const probabilityContextStudents = useMemo(() => (
-      deferredStudentsForDerived.length === allStudentsData.length
-          ? deferredStudentsForDerived
-          : allStudentsData
-  ), [allStudentsData, deferredStudentsForDerived]);
+  }, [deferredStudentsForDerived, getTestDateID]);
 
   const avgSettingsDateKeysDesc = useMemo(
       () => [...orderedWeekendIds].slice().reverse(),
       [orderedWeekendIds]
   );
 
-  const currentBatchGradeInfoByStudentId = useMemo(() => {
-      if (!shouldBuildBatchAnalytics) return {};
-      const batchDateID = getTestDateID(batchDate);
-      if (!batchDateID) return {};
-
-      const nextInfo = {};
-      allStudentsData.forEach((student) => {
-          const currentGrades = student.grades || {};
-          const weekendEntries = allStudentWeekendEntriesByStudentId[student.id] || {};
-          const currentEntry = weekendEntries[batchDateID];
-          const sourceDate = currentEntry?.sourceDate || batchDateID || batchDate;
-          const persistedGrade = currentEntry?.grade || currentGrades[sourceDate] || {
-              chi: '',
-              eng: '',
-              math: '',
-              total: '',
-              class: teacherClassFilter || defaultTeacherClassId
-          };
-          const draftEntry = batchDraftGradesByStudentId[student.id];
-          const mergedGrade =
-              draftEntry?.sourceDate === sourceDate
-                  ? { ...persistedGrade, ...draftEntry.grade }
-                  : persistedGrade;
-
-          nextInfo[student.id] = {
-              sourceDate,
-              grade: mergedGrade
-          };
-      });
-
-      return nextInfo;
-  }, [allStudentWeekendEntriesByStudentId, allStudentsData, batchDate, batchDraftGradesByStudentId, defaultTeacherClassId, getTestDateID, shouldBuildBatchAnalytics, teacherClassFilter]);
-  currentBatchGradeInfoRef.current = currentBatchGradeInfoByStudentId;
-
-  const batchProbCandidateIds = useMemo(() => {
-      if (!shouldBuildBatchAnalytics) return [];
-      const weekendID = getTestDateID(batchDate);
-      if (!weekendID) return [];
-      return allStudentsData
-          .filter((student) => {
-              const dateGrades = currentBatchGradeInfoByStudentId[student.id]?.grade;
-              if (!dateGrades) return false;
-              if ((dateGrades.class || 'A班') !== teacherClassFilter) return false;
-              return hasAnySubjectScore(dateGrades);
-          })
-          .map((student) => student.id);
-  }, [allStudentsData, batchDate, currentBatchGradeInfoByStudentId, getTestDateID, shouldBuildBatchAnalytics, teacherClassFilter]);
-
-  const batchProbStudentGradeMapsByStudentId = useMemo(() => {
-      if (!shouldBuildBatchAnalytics || batchProbCandidateIds.length === 0) return {};
-      const targetIds = new Set(batchProbCandidateIds);
-      const gradeMaps = {};
-
-      allStudentsData.forEach((student) => {
-          if (!targetIds.has(student.id)) return;
-          const weekendGrades = { ...(allStudentWeekendGradesByStudentId[student.id] || {}) };
-          const currentBatchInfo = currentBatchGradeInfoByStudentId[student.id];
-          if (currentBatchInfo && selectedBatchWeekendID) {
-              weekendGrades[selectedBatchWeekendID] = currentBatchInfo.grade;
-          }
-          gradeMaps[student.id] = weekendGrades;
-      });
-
-      return gradeMaps;
-  }, [allStudentWeekendGradesByStudentId, allStudentsData, batchProbCandidateIds, currentBatchGradeInfoByStudentId, selectedBatchWeekendID, shouldBuildBatchAnalytics]);
-
-  const teacherProbabilityContext = useMemo(() => {
-      if (!shouldBuildBatchAnalytics || orderedWeekendIds.length === 0 || probabilityContextStudents.length === 0) {
-          return null;
-      }
-      if (!isBatchDirty && hasTeacherSummary) {
-          return buildProbabilityContextFromScoreIndex(teacherSummaryByWeekend, orderedWeekendIds, (dateId) => dateId);
-      }
-      return buildProbabilityContext(probabilityContextStudents, orderedWeekendIds, (dateId) => dateId);
-  }, [hasTeacherSummary, isBatchDirty, orderedWeekendIds, probabilityContextStudents, shouldBuildBatchAnalytics, teacherSummaryByWeekend]);
-
-  const weekendScoreCountById = useMemo(() => {
-      if (!shouldBuildTeacherDerivedMaps) return EMPTY_OBJECT;
-      const counts = {};
-      Object.values(allStudentWeekendEntriesByStudentId).forEach((weekendEntries) => {
-          Object.entries(weekendEntries || {}).forEach(([weekendID, entry]) => {
-              if (!hasAnySubjectScore(entry.grade)) return;
-              counts[weekendID] = (counts[weekendID] || 0) + 1;
-          });
-      });
-      return counts;
-  }, [allStudentWeekendEntriesByStudentId, shouldBuildTeacherDerivedMaps]);
-
-  const latestPopulatedWeekendID = useMemo(() => {
-      for (let idx = orderedWeekendIds.length - 1; idx >= 0; idx -= 1) {
-          const weekendID = orderedWeekendIds[idx];
-          if ((weekendScoreCountById[weekendID] || 0) > 0) return weekendID;
-      }
-      return latestAvailableDate;
-  }, [latestAvailableDate, orderedWeekendIds, weekendScoreCountById]);
-
-  const selectedTeacherDateMeta = useMemo(() => {
-      const targetId = selectedBatchWeekendID || latestPopulatedWeekendID || latestAvailableDate;
-      if (!targetId) return null;
-      return teacherDateCards.find((item) => item.weekendID === targetId) || teacherDateCards[0] || null;
-  }, [latestAvailableDate, latestPopulatedWeekendID, selectedBatchWeekendID, teacherDateCards]);
+  const shouldBuildBatchAnalytics =
+      mode === 'teacher' && teacherViewMode === 'batch' && Boolean(batchDate);
 
   useEffect(() => {
       const storedAuth = localStorage.getItem('teacher_auth');
@@ -2397,20 +1354,6 @@ export default function App() {
           setTeacherAuthRole(storedRole === TEACHER_ROLE.LIMITED ? TEACHER_ROLE.LIMITED : TEACHER_ROLE.FULL);
       }
   }, []);
-
-  useEffect(() => {
-      if (typeof window === 'undefined') return;
-      localStorage.setItem(TEACHER_ACTIVE_COHORT_STORAGE_KEY, activeTeacherCohortId);
-  }, [activeTeacherCohortId, cohortOptions]);
-
-  useEffect(() => {
-      if (!activeTeacherClassIdSet.has(teacherClassFilter)) {
-          setTeacherClassFilter(defaultTeacherClassId);
-      }
-      if (!activeTeacherClassIdSet.has(avgSettingsClassFilter)) {
-          setAvgSettingsClassFilter(defaultTeacherClassId);
-      }
-  }, [activeTeacherClassIdSet, avgSettingsClassFilter, defaultTeacherClassId, teacherClassFilter]);
 
   useEffect(() => {
       const cachedOperationLogs = sanitizeOperationLogs(
@@ -2426,19 +1369,15 @@ export default function App() {
   // --- OPTIMIZATION: Debounced + chunked probability calculation to keep UI responsive ---
   useEffect(() => {
       const shouldCompute = mode === 'teacher' && teacherViewMode === 'batch';
-      if (!shouldCompute) return;
-      if (!orderedWeekendIds.length || batchProbCandidateIds.length === 0) {
-          setAdmissionProbabilities({});
-          return;
-      }
-      if (!teacherProbabilityContext) return;
+      if (!shouldCompute || deferredStudentsForDerived.length === 0) return;
 
       let rafId = null;
       let cancelled = false;
-      const debounceMs = batchProbCandidateIds.length > 120 ? 90 : batchProbCandidateIds.length > 60 ? 40 : 0;
+      const debounceMs = deferredStudentsForDerived.length > 260 ? 680 : deferredStudentsForDerived.length > 150 ? 480 : 300;
       const timer = setTimeout(() => {
           if (cancelled) return;
 
+          const context = buildProbabilityContext(deferredStudentsForDerived, deferredDatesForDerived, getTestDateID);
           const {
               scoresByDate,
               mathScoresByDate,
@@ -2446,15 +1385,13 @@ export default function App() {
               totalPRLookupByDate,
               mathPRLookupByDate,
               normalizedDates
-          } = teacherProbabilityContext;
+          } = context;
 
-          const studentGradeMaps = batchProbStudentGradeMapsByStudentId;
-          const students = batchProbCandidateIds
-              .map((studentId) => batchStudentsById[studentId])
-              .filter(Boolean);
+          const studentGradeMaps = deferredStudentGradeMapsByStudentId;
+          const students = deferredStudentsForDerived;
           const probs = {};
           let index = 0;
-          const chunkSize = students.length > 120 ? 26 : students.length > 60 ? 38 : 56;
+          const chunkSize = students.length > 320 ? 28 : students.length > 200 ? 44 : 72;
 
           const processChunk = () => {
               if (cancelled) return;
@@ -2495,26 +1432,18 @@ export default function App() {
           clearTimeout(timer);
           if (rafId) cancelAnimationFrame(rafId);
       };
-  }, [batchProbCandidateIds, batchProbStudentGradeMapsByStudentId, batchStudentsById, mode, orderedWeekendIds, teacherProbabilityContext, teacherViewMode]);
+  }, [deferredStudentsForDerived, deferredDatesForDerived, getTestDateID, mode, teacherViewMode, deferredStudentGradeMapsByStudentId]);
 
   useEffect(() => {
       if (mode !== 'parent' || !viewData?.chartData?.length) return;
       const latest = viewData.chartData[viewData.chartData.length - 1];
-      const nextPhase = resolvePhaseByDate(latest.weekendID || latest.date, parentSortedAvailableDatesAsc);
+      const nextPhase = resolvePhaseByDate(latest.weekendID || latest.date, sortedAvailableDatesAsc);
       setActivePhase(nextPhase);
-  }, [viewData, mode, parentSortedAvailableDatesAsc]);
+  }, [viewData, mode, sortedAvailableDatesAsc]);
 
   useEffect(() => {
       if (mode === 'parent') {
           setViewData(null);
-          setParentViewContext({
-              cohortId: '',
-              dates: [],
-              classData: [],
-              summary: normalizeCohortSummary(null),
-              classAverages: {},
-              teacherMessage: { globalMessage: '', byStudent: {} }
-          });
           setSearchError('');
       }
   }, [mode]);
@@ -2524,6 +1453,11 @@ export default function App() {
           setBatchInsightTab('grades');
       }
   }, [teacherViewMode, batchInsightTab]);
+
+  useEffect(() => {
+      if (mode !== 'teacher') return;
+      ensureXlsxReady().catch(() => {});
+  }, [mode, ensureXlsxReady]);
 
   useEffect(() => {
       if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined;
@@ -2559,11 +1493,9 @@ export default function App() {
       if (typeof window === 'undefined') return undefined;
 
       const preloadCharts = () => {
-          void Promise.allSettled([
-              safePreloadImport(() => import('./components/charts/SingleSubjectChart')),
-              safePreloadImport(() => import('./components/charts/DistributionChart')),
-              safePreloadImport(() => import('./components/charts/ParentAbilityRadar'))
-          ]);
+          void import('./components/charts/SingleSubjectChart');
+          void import('./components/charts/DistributionChart');
+          void import('./components/charts/ParentAbilityRadar');
       };
 
       if ('requestIdleCallback' in window) {
@@ -2597,22 +1529,22 @@ export default function App() {
         const unsubscribe = onAuthStateChanged(auth, (u) => {
           setAuthReady(true);
           setUser(u);
-          if (u) { loadCohortRegistry(); }
+          if (u) { loadDates(); loadClassAverages(); }
         });
         return () => unsubscribe();
     } else {
         setAuthReady(true);
     }
-  }, [loadCohortRegistry]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
       if (!orderedWeekendIds.length) return;
-      const latestWeekendID = latestPopulatedWeekendID || orderedWeekendIds[orderedWeekendIds.length - 1];
+      const latestWeekendID = orderedWeekendIds[orderedWeekendIds.length - 1];
       const currentWeekendID = batchDate ? getTestDateID(batchDate) : '';
       if (!currentWeekendID || !orderedWeekendIds.includes(currentWeekendID)) {
           setBatchDate(latestWeekendID);
       }
-  }, [orderedWeekendIds, batchDate, getTestDateID, latestPopulatedWeekendID]);
+  }, [orderedWeekendIds, batchDate, getTestDateID]);
 
   useEffect(() => {
       if (mode !== 'teacher') return;
@@ -2621,15 +1553,14 @@ export default function App() {
 
   useEffect(() => {
       if (mode !== 'teacher' || !shouldSnapTeacherEntryRef.current || !orderedWeekendIds.length) return;
-      const latestWeekendID = latestPopulatedWeekendID || orderedWeekendIds[orderedWeekendIds.length - 1];
+      const latestWeekendID = orderedWeekendIds[orderedWeekendIds.length - 1];
       setTeacherViewMode('batch');
       setBatchDate(latestWeekendID);
       shouldSnapTeacherEntryRef.current = false;
-  }, [latestPopulatedWeekendID, mode, orderedWeekendIds]);
+  }, [mode, orderedWeekendIds]);
 
   useEffect(() => {
       if (mode !== 'teacher' || loading || isBatchDirty) return;
-      if (datesCohortId !== activeTeacherCohortId || teacherStudentsCohortId !== activeTeacherCohortId) return;
       if (!availableDates.length || !allStudentsData.length) return;
 
       const hasScoreValue = (value) => {
@@ -2653,37 +1584,18 @@ export default function App() {
       if (!nextDates.length || nextDates.length === availableDates.length) return;
 
       setAvailableDates(nextDates);
-      setDatesCohortId(activeTeacherCohortId);
-      writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, activeTeacherCohortId), nextDates);
+      writeLocalCache(LOCAL_CACHE_KEYS.dates, nextDates);
       if (db && user) {
-          setDoc(getCohortSettingsDocRef(activeTeacherCohortId, 'dates'), { list: nextDates }, { merge: true })
+          setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: nextDates }, { merge: true })
               .catch((err) => console.error('Auto prune empty dates error:', err));
       }
       const removedCount = availableDates.length - nextDates.length;
-      const pruneNoticeKey = `${activeTeacherCohortId}::${availableDates.join('|')}=>${nextDates.join('|')}`;
-      if (autoPruneNoticeKeyRef.current === pruneNoticeKey) return;
-      autoPruneNoticeKeyRef.current = pruneNoticeKey;
       setStatusMsg(`已自動刪除 ${removedCount} 個無學生資料日期`);
       const timer = setTimeout(() => setStatusMsg(''), 2200);
       return () => clearTimeout(timer);
-  }, [activeTeacherCohortId, allStudentsData.length, availableDates, datesCohortId, deferredStudentGradeMapsByStudentId, getCohortCacheKey, getCohortSettingsDocRef, getTestDateID, isBatchDirty, loading, mode, teacherStudentsCohortId, user]);
+  }, [mode, loading, isBatchDirty, availableDates, allStudentsData.length, deferredStudentGradeMapsByStudentId, getTestDateID, user]);
 
   const hasPendingBatchChanges = mode === 'teacher' && teacherViewMode === 'batch' && isBatchDirty;
-
-  const resetBatchDraftState = useCallback(() => {
-      batchDirtyStudentIdsRef.current = new Set();
-      setBatchDraftGradesByStudentId({});
-      setIsBatchDirty(false);
-  }, []);
-
-  const applyBatchDateChange = useCallback((nextBatchDate) => {
-      if (!nextBatchDate) return;
-      if (hasPendingBatchChanges && !window.confirm('批量成績尚未儲存，確定要切換考次嗎？')) return;
-      if (hasPendingBatchChanges) resetBatchDraftState();
-      startTransition(() => {
-          setBatchDate(nextBatchDate);
-      });
-  }, [hasPendingBatchChanges, resetBatchDraftState]);
 
   const confirmDiscardBatchChanges = useCallback(() => {
       if (!hasPendingBatchChanges) return true;
@@ -2692,9 +1604,8 @@ export default function App() {
 
   const runWithBatchDiscardGuard = useCallback((action) => {
       if (!confirmDiscardBatchChanges()) return;
-      if (hasPendingBatchChanges) resetBatchDraftState();
       action();
-  }, [confirmDiscardBatchChanges, hasPendingBatchChanges, resetBatchDraftState]);
+  }, [confirmDiscardBatchChanges]);
 
   const notifyPermissionDenied = useCallback((message) => {
       setStatusMsg(message);
@@ -2715,80 +1626,62 @@ export default function App() {
 
   const loadDates = useCallback(async (options = {}) => {
       const force = Boolean(options && options.force);
-      const cohortId = String(options?.cohortId || activeDataCohortId || LEGACY_COHORT_ID);
-      if (
-          !force
-          && datesLoadPromiseRef.current?.cohortId === cohortId
-          && datesLoadPromiseRef.current?.promise
-      ) {
-          return datesLoadPromiseRef.current.promise;
-      }
+      if (!force && datesLoadPromiseRef.current) return datesLoadPromiseRef.current;
 
       const runner = async () => {
-          const fallbackDates = getDefaultDatesForCohort(cohortId, cohortOptions);
-          const cacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.dates, cohortId);
-          const cachedDates = sanitizeDateList(readLocalCache(cacheKey) || []);
+          const fallbackDates = sanitizeDateList(DEFAULT_EXAM_STARTS);
+          const cachedDates = sanitizeDateList(readLocalCache(LOCAL_CACHE_KEYS.dates) || []);
           if (cachedDates.length && !force) {
-              if (cohortId === activeDataCohortId && cachedDates.join('|') !== availableDates.join('|')) {
+              if (cachedDates.join('|') !== availableDates.join('|')) {
                   setAvailableDates(cachedDates);
-                  setDatesCohortId(cohortId);
               }
               return cachedDates;
           }
           if (!db) {
-              const cleanedLocalDates = cohortId === datesCohortId ? sanitizeDateList(availableDates) : [];
+              const cleanedLocalDates = sanitizeDateList(availableDates);
               const nextDates = cleanedLocalDates.length ? cleanedLocalDates : fallbackDates;
-              if (cohortId === activeDataCohortId && nextDates.join('|') !== availableDates.join('|')) {
+              if (nextDates.join('|') !== availableDates.join('|')) {
                   setAvailableDates(nextDates);
-                  setDatesCohortId(cohortId);
               }
-              writeLocalCache(cacheKey, nextDates);
+              writeLocalCache(LOCAL_CACHE_KEYS.dates, nextDates);
               return nextDates;
           }
           try {
-              const docRef = getCohortSettingsDocRef(cohortId, 'dates');
+              const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates');
               const docSnap = await getDoc(docRef);
-              const hasStoredList = docSnap.exists() && Array.isArray(docSnap.data().list);
-              const rawList = hasStoredList ? docSnap.data().list : [];
+              const rawList = docSnap.exists() && Array.isArray(docSnap.data().list)
+                  ? docSnap.data().list
+                  : DEFAULT_EXAM_STARTS;
               const cleanedDates = sanitizeDateList(rawList);
               const nextDates = cleanedDates.length ? cleanedDates : fallbackDates;
 
-              if (cohortId === activeDataCohortId && nextDates.join('|') !== availableDates.join('|')) {
-                  setAvailableDates(nextDates);
-                  setDatesCohortId(cohortId);
-              }
-              writeLocalCache(cacheKey, nextDates);
+              setAvailableDates(nextDates);
+              writeLocalCache(LOCAL_CACHE_KEYS.dates, nextDates);
 
               const rawFingerprint = (Array.isArray(rawList) ? rawList : []).map((date) => String(date || '')).join('|');
               const cleanedFingerprint = nextDates.join('|');
-              if (hasStoredList && cleanedFingerprint !== rawFingerprint) {
+              if (cleanedFingerprint !== rawFingerprint) {
                   await setDoc(docRef, { list: nextDates }, { merge: true });
               }
               return nextDates;
           } catch (e) {
               console.error('Error loading dates:', e);
-              const cleanedFallback = cohortId === datesCohortId ? sanitizeDateList(availableDates) : [];
+              const cleanedFallback = sanitizeDateList(availableDates);
               const nextDates = cleanedFallback.length ? cleanedFallback : fallbackDates;
-              if (cohortId === activeDataCohortId && nextDates.join('|') !== availableDates.join('|')) {
-                  setAvailableDates(nextDates);
-                  setDatesCohortId(cohortId);
-              }
-              writeLocalCache(cacheKey, nextDates);
+              setAvailableDates(nextDates);
+              writeLocalCache(LOCAL_CACHE_KEYS.dates, nextDates);
               return nextDates;
           }
       };
 
       const promise = runner().finally(() => {
-          if (
-              datesLoadPromiseRef.current?.cohortId === cohortId
-              && datesLoadPromiseRef.current?.promise === promise
-          ) {
+          if (datesLoadPromiseRef.current === promise) {
               datesLoadPromiseRef.current = null;
           }
       });
-      datesLoadPromiseRef.current = { cohortId, promise };
+      datesLoadPromiseRef.current = promise;
       return promise;
-  }, [activeDataCohortId, availableDates, cohortOptions, datesCohortId, getCohortCacheKey, getCohortSettingsDocRef]);
+  }, [availableDates]);
 
   const shouldResetQueryStats = useCallback((lastResetAt) => {
       if (!lastResetAt) return true;
@@ -2816,7 +1709,6 @@ export default function App() {
 
   const flushPendingQueryStats = useCallback(async (options = {}) => {
       const force = Boolean(options && options.force);
-      const cohortId = String(options?.cohortId || queryPendingCohortIdRef.current || activeTeacherCohortId || LEGACY_COHORT_ID);
       if (!db) return;
       if (queryFlushInFlightRef.current && !force) return;
 
@@ -2833,7 +1725,7 @@ export default function App() {
 
       try {
           const nowIso = new Date().toISOString();
-          const queryStatsDocRef = getCohortSettingsDocRef(cohortId, 'query_stats_v1');
+          const queryStatsDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'query_stats_v1');
           const docSnap = await getDoc(queryStatsDocRef);
           const raw = docSnap.exists() ? docSnap.data() : {};
           let counts = (raw.counts && typeof raw.counts === 'object') ? raw.counts : {};
@@ -2856,13 +1748,10 @@ export default function App() {
           await setDoc(queryStatsDocRef, { counts, events, lastResetAt, updatedAt: nowIso }, { merge: true });
 
           const merged = applyPendingQueryStats(counts, events, lastResetAt);
-          if (cohortId === activeTeacherCohortId) {
-              setQueryStatsById(merged.counts);
-              setQueryEvents(merged.events);
-              setQueryStatsLastResetAt(lastResetAt);
-              setQueryStatsCohortId(cohortId);
-          }
-          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.queryStats, cohortId), { counts: merged.counts, events: merged.events, lastResetAt });
+          setQueryStatsById(merged.counts);
+          setQueryEvents(merged.events);
+          setQueryStatsLastResetAt(lastResetAt);
+          writeLocalCache(LOCAL_CACHE_KEYS.queryStats, { counts: merged.counts, events: merged.events, lastResetAt });
       } catch (e) {
           Object.entries(pendingCounts).forEach(([id, delta]) => {
               const nextDelta = Number(delta) || 0;
@@ -2879,44 +1768,39 @@ export default function App() {
           if (hasPendingAfterFlush && !queryFlushTimerRef.current) {
               queryFlushTimerRef.current = setTimeout(() => {
                   queryFlushTimerRef.current = null;
-                  void flushPendingQueryStats({ cohortId });
+                  void flushPendingQueryStats();
               }, QUERY_STATS_FLUSH_DELAY_MS);
           }
       }
-  }, [activeTeacherCohortId, applyPendingQueryStats, getCohortCacheKey, getCohortSettingsDocRef, shouldResetQueryStats]);
+  }, [shouldResetQueryStats, applyPendingQueryStats]);
 
   const scheduleQueryStatsFlush = useCallback(() => {
       if (!db || queryFlushTimerRef.current) return;
       queryFlushTimerRef.current = setTimeout(() => {
           queryFlushTimerRef.current = null;
-          void flushPendingQueryStats({ cohortId: queryPendingCohortIdRef.current || activeTeacherCohortId });
+          void flushPendingQueryStats();
       }, QUERY_STATS_FLUSH_DELAY_MS);
-  }, [activeTeacherCohortId, flushPendingQueryStats]);
+  }, [flushPendingQueryStats]);
 
   const loadQueryStats = useCallback(async (options = {}) => {
       const force = Boolean(options && options.force);
-      const cohortId = String(options?.cohortId || activeTeacherCohortId || LEGACY_COHORT_ID);
       if (!db) {
           setQueryStatsById({});
           setQueryEvents([]);
           setQueryStatsLastResetAt('');
-          setQueryStatsCohortId(cohortId);
           return;
       }
 
       if (!force) {
-          const cachedStats = readLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.queryStats, cohortId), QUERY_STATS_CACHE_TTL_MS);
+          const cachedStats = readLocalCache(LOCAL_CACHE_KEYS.queryStats, QUERY_STATS_CACHE_TTL_MS);
           const cachedLastResetAt = String(cachedStats?.lastResetAt || '');
           if (cachedStats && cachedLastResetAt && !shouldResetQueryStats(cachedLastResetAt)) {
               const cachedCounts = (cachedStats.counts && typeof cachedStats.counts === 'object') ? cachedStats.counts : {};
               const cachedEvents = sanitizeQueryEvents(cachedStats.events, cachedLastResetAt);
               const merged = applyPendingQueryStats(cachedCounts, cachedEvents, cachedLastResetAt);
-              if (cohortId === activeTeacherCohortId) {
-                  setQueryStatsById(merged.counts);
-                  setQueryEvents(merged.events);
-                  setQueryStatsLastResetAt(cachedLastResetAt);
-                  setQueryStatsCohortId(cohortId);
-              }
+              setQueryStatsById(merged.counts);
+              setQueryEvents(merged.events);
+              setQueryStatsLastResetAt(cachedLastResetAt);
               return;
           }
       }
@@ -2924,7 +1808,7 @@ export default function App() {
       setQueryStatsLoading(true);
       try {
           const nowIso = new Date().toISOString();
-          const queryStatsDocRef = getCohortSettingsDocRef(cohortId, 'query_stats_v1');
+          const queryStatsDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'query_stats_v1');
           const docSnap = await getDoc(queryStatsDocRef);
           const raw = docSnap.exists() ? docSnap.data() : {};
           let counts = (raw.counts && typeof raw.counts === 'object') ? raw.counts : {};
@@ -2939,60 +1823,47 @@ export default function App() {
           }
 
           const merged = applyPendingQueryStats(counts, events, lastResetAt);
-          if (cohortId === activeTeacherCohortId) {
-              setQueryStatsById(merged.counts);
-              setQueryEvents(merged.events);
-              setQueryStatsLastResetAt(lastResetAt);
-              setQueryStatsCohortId(cohortId);
-          }
-          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.queryStats, cohortId), { counts: merged.counts, events: merged.events, lastResetAt });
+          setQueryStatsById(merged.counts);
+          setQueryEvents(merged.events);
+          setQueryStatsLastResetAt(lastResetAt);
+          writeLocalCache(LOCAL_CACHE_KEYS.queryStats, { counts: merged.counts, events: merged.events, lastResetAt });
       } catch (e) {
           console.error('Load query stats error:', e);
       } finally {
           setQueryStatsLoading(false);
       }
-  }, [activeTeacherCohortId, shouldResetQueryStats, applyPendingQueryStats, getCohortCacheKey, getCohortSettingsDocRef]);
+  }, [shouldResetQueryStats, applyPendingQueryStats]);
 
   const loadTeacherMessage = useCallback(async (options = {}) => {
       const force = Boolean(options && options.force);
-      const hydrateState = options?.hydrateState !== false;
-      const cohortId = String(options?.cohortId || activeDataCohortId || LEGACY_COHORT_ID);
       const hydrateMessageState = (raw) => {
-          if (!hydrateState) return;
           const nextGlobalMessage = String(raw?.globalMessage ?? raw?.message ?? '').trim();
           const nextByStudentMessages = normalizeTeacherStudentMessages(raw?.byStudent);
           setTeacherGlobalMessage(nextGlobalMessage);
           setTeacherGlobalMessageDraft(nextGlobalMessage);
           setTeacherStudentMessages(nextByStudentMessages);
           setTeacherStudentMessageDrafts(nextByStudentMessages);
-          setTeacherMessageCohortId(cohortId);
       };
 
       if (!force) {
-          const cachedMessage = readLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.teacherMessage, cohortId), TEACHER_MESSAGE_CACHE_TTL_MS);
+          const cachedMessage = readLocalCache(LOCAL_CACHE_KEYS.teacherMessage, TEACHER_MESSAGE_CACHE_TTL_MS);
           if (cachedMessage && typeof cachedMessage === 'object') {
               hydrateMessageState(cachedMessage);
-              return {
-                  globalMessage: String(cachedMessage?.globalMessage ?? cachedMessage?.message ?? '').trim(),
-                  byStudent: normalizeTeacherStudentMessages(cachedMessage?.byStudent)
-              };
+              return;
           }
       }
 
       if (!db) {
-          if (hydrateState) {
-              setTeacherGlobalMessage('');
-              setTeacherGlobalMessageDraft('');
-              setTeacherStudentMessages({});
-              setTeacherStudentMessageDrafts({});
-              setTeacherMessageCohortId(cohortId);
-          }
-          return { globalMessage: '', byStudent: {} };
+          setTeacherGlobalMessage('');
+          setTeacherGlobalMessageDraft('');
+          setTeacherStudentMessages({});
+          setTeacherStudentMessageDrafts({});
+          return;
       }
 
-      if (hydrateState) setTeacherMessageLoading(true);
+      setTeacherMessageLoading(true);
       try {
-          const messageDocRef = getCohortSettingsDocRef(cohortId, TEACHER_MESSAGE_DOC_ID);
+          const messageDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', TEACHER_MESSAGE_DOC_ID);
           const docSnap = await getDoc(messageDocRef);
           const raw = docSnap.exists() ? docSnap.data() : {};
           const payload = {
@@ -3000,30 +1871,17 @@ export default function App() {
               byStudent: normalizeTeacherStudentMessages(raw?.byStudent)
           };
           hydrateMessageState(payload);
-          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.teacherMessage, cohortId), payload);
-          return payload;
+          writeLocalCache(LOCAL_CACHE_KEYS.teacherMessage, payload);
       } catch (e) {
           console.error('Load teacher message error:', e);
-          return { globalMessage: '', byStudent: {} };
       } finally {
-          if (hydrateState) setTeacherMessageLoading(false);
+          setTeacherMessageLoading(false);
       }
-  }, [activeDataCohortId, getCohortCacheKey, getCohortSettingsDocRef]);
+  }, []);
 
-  const incrementQueryCount = useCallback((studentId, cohortIdOverride = '') => {
+  const incrementQueryCount = useCallback((studentId) => {
       const normalizedId = String(studentId || '').toUpperCase().trim();
       if (!normalizedId) return;
-      const targetCohortId = String(cohortIdOverride || activePublicCohortId || LEGACY_COHORT_ID);
-      if (
-          queryPendingCohortIdRef.current
-          && queryPendingCohortIdRef.current !== targetCohortId
-          && (Object.keys(queryPendingCountsRef.current).length > 0 || queryPendingEventsRef.current.length > 0)
-      ) {
-          void flushPendingQueryStats({ force: true, cohortId: queryPendingCohortIdRef.current });
-          queryPendingCountsRef.current = {};
-          queryPendingEventsRef.current = [];
-      }
-      queryPendingCohortIdRef.current = targetCohortId;
       const nowTs = Date.now();
       const nowIso = new Date(nowTs).toISOString();
 
@@ -3037,7 +1895,7 @@ export default function App() {
       queryPendingCountsRef.current[normalizedId] = (Number(queryPendingCountsRef.current[normalizedId]) || 0) + 1;
       queryPendingEventsRef.current = [...(queryPendingEventsRef.current || []), { id: normalizedId, at: nowIso, ts: nowTs }].slice(-MAX_QUERY_EVENTS);
       scheduleQueryStatsFlush();
-  }, [activePublicCohortId, flushPendingQueryStats, queryStatsLastResetAt, scheduleQueryStatsFlush]);
+  }, [queryStatsLastResetAt, scheduleQueryStatsFlush]);
 
   const handleResetQueryStats = useCallback(async () => {
       const nowIso = new Date().toISOString();
@@ -3045,21 +1903,19 @@ export default function App() {
       try {
           queryPendingCountsRef.current = {};
           queryPendingEventsRef.current = [];
-          queryPendingCohortIdRef.current = activeTeacherCohortId;
           if (queryFlushTimerRef.current) {
               clearTimeout(queryFlushTimerRef.current);
               queryFlushTimerRef.current = null;
           }
           if (db) {
-              const queryStatsDocRef = getCohortSettingsDocRef(activeTeacherCohortId, 'query_stats_v1');
+              const queryStatsDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'query_stats_v1');
               await setDoc(queryStatsDocRef, { counts: {}, events: [], lastResetAt: nowIso, updatedAt: nowIso }, { merge: true });
           }
 
           setQueryStatsById({});
           setQueryEvents([]);
           setQueryStatsLastResetAt(nowIso);
-          setQueryStatsCohortId(activeTeacherCohortId);
-          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.queryStats, activeTeacherCohortId), { counts: {}, events: [], lastResetAt: nowIso });
+          writeLocalCache(LOCAL_CACHE_KEYS.queryStats, { counts: {}, events: [], lastResetAt: nowIso });
           setStatusMsg('查詢次數已重置');
           appendOperationLog({
               kind: 'query',
@@ -3075,457 +1931,13 @@ export default function App() {
       } finally {
           setQueryStatsLoading(false);
       }
-  }, [activeTeacherCohortId, appendOperationLog, getCohortCacheKey, getCohortSettingsDocRef]);
+  }, [appendOperationLog]);
 
-  const normalizeGrades = useCallback((grades, options = {}) => {
-      const scopedDatePool = sanitizeDateList(options.datePool || availableDates);
-      const targetCohortId = String(options?.cohortId || datesCohortId || activeDataCohortId || activeTeacherCohortId || LEGACY_COHORT_ID);
-      const resolveDateId = typeof options.getDateID === 'function'
-          ? options.getDateID
-          : (dateStr) => resolveScopedDateId(dateStr, targetCohortId, scopedDatePool);
-      const withMeta = Boolean(options.withMeta);
-      if (!grades || typeof grades !== 'object') {
-          return withMeta ? { normalized: {}, removedInvalidDates: 0, changed: false } : {};
+  useEffect(() => {
+      if (mode === 'teacher' && isAuthenticated) {
+          loadQueryStats();
       }
-
-      const normalized = {};
-      let removedInvalidDates = 0;
-      let changed = false;
-
-      Object.keys(grades).forEach(date => {
-          const normalizedDate = normalizeDateToken(date);
-          if (!normalizedDate) {
-              removedInvalidDates += 1;
-              changed = true;
-              return;
-          }
-
-          const g = grades[date];
-          let normalizedG;
-          if (Array.isArray(g)) {
-              normalizedG = normalizeStudentGrade({ math: g[0] || 0, eng: g[1] || 0, chi: g[2] || 0, total: (g[0] || 0) + (g[1] || 0) + (g[2] || 0), class: 'A班' });
-              changed = true;
-          } else if (g && typeof g === 'object') {
-              normalizedG = normalizeStudentGrade(g);
-              if (
-                  normalizedG.total !== (g?.total ?? '')
-                  || normalizedG.class !== (g?.class ?? 'A班')
-              ) {
-                  changed = true;
-              }
-          } else {
-              normalizedG = normalizeStudentGrade({});
-              changed = true;
-          }
-          if (date !== normalizedDate) changed = true;
-          if (normalized[normalizedDate]) changed = true;
-          normalized[normalizedDate] = normalizedG;
-      });
-
-      const weekendEntries = buildWeekendGradeEntryMap(normalized, resolveDateId);
-      const deduped = {};
-      Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
-          deduped[weekendID] = { ...entry.grade };
-          if (entry.sourceDate !== weekendID) changed = true;
-      });
-      if (Object.keys(deduped).length !== Object.keys(normalized).length) changed = true;
-
-      if (withMeta) {
-          return { normalized: deduped, removedInvalidDates, changed };
-      }
-      return deduped;
-  }, [activeDataCohortId, activeTeacherCohortId, availableDates, datesCohortId, resolveScopedDateId]);
-
-  const loadAllStudents = useCallback(async (options = {}) => {
-      const { forceRemote = false, silent = false } = options;
-      const cohortId = String(options?.cohortId || activeTeacherCohortId || LEGACY_COHORT_ID);
-      const fallbackDates = getDefaultDatesForCohort(cohortId, cohortOptions);
-      const datePool = sanitizeDateList(options?.datePool || (cohortId === datesCohortId ? availableDates : fallbackDates));
-      const getDateIDForCohort = (dateStr) => resolveScopedDateId(dateStr, cohortId, datePool);
-      if (
-          !forceRemote
-          && studentsLoadPromiseRef.current?.cohortId === cohortId
-          && studentsLoadPromiseRef.current?.promise
-      ) {
-          return studentsLoadPromiseRef.current.promise;
-      }
-
-      const runner = async () => {
-      if (!silent) setLoading(true);
-      let loadingReleased = false;
-      const releaseLoading = () => {
-          if (loadingReleased) return;
-          loadingReleased = true;
-          if (!silent) setLoading(false);
-      };
-      const syncDatesFromStudents = (students) => {
-          const derivedDates = deriveDatePoolFromStudents(students);
-          if (!derivedDates.length) return;
-          const nextDates = mergeDatePools(datePool, derivedDates);
-          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, cohortId), nextDates);
-          if (cohortId !== activeDataCohortId) return;
-          if (nextDates.join('|') === sanitizeDateList(availableDates).join('|')) return;
-          startTransition(() => {
-              setAvailableDates(nextDates);
-              setDatesCohortId(cohortId);
-          });
-      };
-      try {
-          const cacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.students, cohortId);
-          const versionCacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.studentsVersion, cohortId);
-          const sessionKey = getStudentSessionKey(cohortId);
-          const cachedStudents = readLocalCache(cacheKey, STUDENT_CACHE_TTL_MS);
-          const hasCachedStudents = Array.isArray(cachedStudents) && cachedStudents.length > 0;
-          let remoteVersion = '';
-          const hasSessionSynced =
-              typeof window !== 'undefined'
-              && sessionStorage.getItem(sessionKey) === '1';
-          if (!forceRemote && hasCachedStudents) {
-              syncDatesFromStudents(cachedStudents);
-              startTransition(() => {
-                  setAllStudentsData(cachedStudents);
-                  setTeacherStudentsCohortId(cohortId);
-                  if (cohortId === activePublicCohortId) {
-                      setCachedClassData(cachedStudents);
-                      setPublicStudentsCohortId(cohortId);
-                  }
-              });
-              resetBatchDraftState();
-              releaseLoading();
-              if (!db) {
-                  return cachedStudents;
-              }
-              if (hasSessionSynced) {
-                  return cachedStudents;
-              }
-              remoteVersion = await loadStudentsVersion(cohortId);
-              const cachedVersion = String(readLocalCache(versionCacheKey, SETTINGS_CACHE_TTL_MS) || '').trim();
-              if (remoteVersion && cachedVersion && remoteVersion === cachedVersion) {
-                  if (typeof window !== 'undefined') {
-                      sessionStorage.setItem(sessionKey, '1');
-                  }
-                  return cachedStudents;
-              }
-          }
-
-          let studentsMap = {};
-          RAW_STUDENT_RECORDS.forEach(s => {
-              studentsMap[s.id] = {
-                  ...s,
-                  grades: normalizeGrades(s.grades, { datePool, getDateID: getDateIDForCohort })
-              };
-          });
-          let cleanedInvalidDateCount = 0;
-          const cleanupPayloads = [];
-          if (db) {
-              const studentsCollectionRef = getCohortStudentsCollectionRef(cohortId);
-              const querySnapshot = await getDocs(studentsCollectionRef);
-              querySnapshot.forEach((studentDoc) => {
-                  const data = studentDoc.data();
-                  const normalizedResult = normalizeGrades(data.grades, { withMeta: true, datePool, getDateID: getDateIDForCohort });
-                  const sanitizedData = { ...data, grades: normalizedResult.normalized };
-
-                  if (normalizedResult.changed && data.id) {
-                      cleanedInvalidDateCount += normalizedResult.removedInvalidDates;
-                      cleanupPayloads.push({
-                          id: data.id,
-                          payload: { ...sanitizedData, lastUpdated: new Date().toISOString() }
-                      });
-                  }
-
-                  if (studentsMap[data.id]) {
-                      studentsMap[data.id] = {
-                          ...studentsMap[data.id],
-                          ...sanitizedData,
-                          grades: { ...studentsMap[data.id].grades, ...sanitizedData.grades }
-                      };
-                  } else {
-                      studentsMap[data.id] = sanitizedData;
-                  }
-              });
-          }
-          const sortedStudents = Object.values(studentsMap).sort((a,b) => a.id.localeCompare(b.id));
-          syncDatesFromStudents(sortedStudents);
-          startTransition(() => {
-              setAllStudentsData(sortedStudents);
-              setTeacherStudentsCohortId(cohortId);
-              if (cohortId === activePublicCohortId) {
-                  setCachedClassData(sortedStudents);
-                  setPublicStudentsCohortId(cohortId);
-              }
-          });
-          writeLocalCache(cacheKey, sortedStudents);
-          if (!remoteVersion) {
-              remoteVersion = await bumpStudentsVersion(cohortId);
-          }
-          if (remoteVersion) {
-              writeLocalCache(versionCacheKey, remoteVersion);
-          }
-          if (typeof window !== 'undefined') {
-              sessionStorage.setItem(sessionKey, '1');
-          }
-          resetBatchDraftState();
-          releaseLoading();
-
-          if (db && cleanupPayloads.length > 0) {
-              void Promise.all(
-                  cleanupPayloads.map((item) =>
-                      setDoc(getCohortStudentDocRef(cohortId, item.id), item.payload)
-                  )
-              ).then(() => {
-                  setStatusMsg(
-                      cleanedInvalidDateCount > 0
-                          ? `已自動刪除 ${cleanedInvalidDateCount} 筆不合理日期資料`
-                          : `已自動整理 ${cleanupPayloads.length} 筆重複考次資料`
-                  );
-                  setTimeout(() => setStatusMsg(''), 2400);
-              }).catch((err) => {
-                  console.error('Cleanup invalid student dates error:', err);
-              });
-          }
-          return sortedStudents;
-      } catch (e) { console.error("Load error:", e); }
-      finally {
-          releaseLoading();
-      }
-      return [];
-      };
-
-      const promise = runner().finally(() => {
-          if (
-              studentsLoadPromiseRef.current?.cohortId === cohortId
-              && studentsLoadPromiseRef.current?.promise === promise
-          ) {
-              studentsLoadPromiseRef.current = null;
-          }
-      });
-      studentsLoadPromiseRef.current = { cohortId, promise };
-      return promise;
-  }, [
-      activeDataCohortId,
-      activePublicCohortId,
-      activeTeacherCohortId,
-      availableDates,
-      cohortOptions,
-      datesCohortId,
-      getCohortCacheKey,
-      getCohortStudentDocRef,
-      getCohortStudentsCollectionRef,
-      getStudentSessionKey,
-      bumpStudentsVersion,
-      loadStudentsVersion,
-      normalizeGrades,
-      resetBatchDraftState,
-      resolveScopedDateId
-  ]);
-
-  const loadParentSearchStudents = useCallback(async (cohortId, options = {}) => {
-      const normalizedId = String(cohortId || LEGACY_COHORT_ID);
-      const fallbackDates = getDefaultDatesForCohort(normalizedId, cohortOptions);
-      const datePool = sanitizeDateList(options?.datePool || fallbackDates);
-      const getDateIDForCohort = (dateStr) => resolveScopedDateId(dateStr, normalizedId, datePool);
-      const cacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.students, normalizedId);
-      const versionCacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.studentsVersion, normalizedId);
-      const cachedStudents = readLocalCache(cacheKey, STUDENT_CACHE_TTL_MS);
-      const hasCachedStudents = Array.isArray(cachedStudents) && cachedStudents.length > 0;
-
-      if (hasCachedStudents) {
-          const remoteVersion = await loadStudentsVersion(normalizedId);
-          const cachedVersion = String(readLocalCache(versionCacheKey, SETTINGS_CACHE_TTL_MS) || '').trim();
-          if (remoteVersion && cachedVersion && remoteVersion === cachedVersion) {
-              return cachedStudents;
-          }
-      }
-
-      if (!db) {
-          return hasCachedStudents ? cachedStudents : [];
-      }
-
-      const studentsMap = {};
-      let cleanedInvalidDateCount = 0;
-      const cleanupPayloads = [];
-      const querySnapshot = await getDocs(getCohortStudentsCollectionRef(normalizedId));
-
-      querySnapshot.forEach((studentDoc) => {
-          const data = studentDoc.data();
-          const normalizedResult = normalizeGrades(data.grades, { withMeta: true, datePool, getDateID: getDateIDForCohort });
-          const sanitizedData = { ...data, grades: normalizedResult.normalized };
-
-          if (normalizedResult.changed && data.id) {
-              cleanedInvalidDateCount += normalizedResult.removedInvalidDates;
-              cleanupPayloads.push({
-                  id: data.id,
-                  payload: { ...sanitizedData, lastUpdated: new Date().toISOString() }
-              });
-          }
-
-          studentsMap[data.id] = sanitizedData;
-      });
-
-      const sortedStudents = Object.values(studentsMap).sort((a, b) => a.id.localeCompare(b.id));
-      writeLocalCache(cacheKey, sortedStudents);
-      const derivedDates = deriveDatePoolFromStudents(sortedStudents);
-      if (derivedDates.length > 0) {
-          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, normalizedId), mergeDatePools(datePool, derivedDates));
-      }
-      let remoteVersion = await loadStudentsVersion(normalizedId, { force: true });
-      if (!remoteVersion) {
-          remoteVersion = await bumpStudentsVersion(normalizedId);
-      }
-      if (remoteVersion) {
-          writeLocalCache(versionCacheKey, remoteVersion);
-      }
-
-      if (cleanupPayloads.length > 0) {
-          void Promise.all(
-              cleanupPayloads.map((item) =>
-                  setDoc(getCohortStudentDocRef(normalizedId, item.id), item.payload)
-              )
-          ).then(() => {
-              setStatusMsg(
-                  cleanedInvalidDateCount > 0
-                      ? `已自動刪除 ${cleanedInvalidDateCount} 筆不合理日期資料`
-                      : `已自動整理 ${cleanupPayloads.length} 筆重複考次資料`
-              );
-              setTimeout(() => setStatusMsg(''), 2400);
-          }).catch((err) => {
-              console.error('Parent search cleanup invalid student dates error:', err);
-          });
-      }
-
-      return sortedStudents;
-  }, [
-      bumpStudentsVersion,
-      cohortOptions,
-      getCohortCacheKey,
-      getCohortStudentDocRef,
-      getCohortStudentsCollectionRef,
-      loadStudentsVersion,
-      normalizeGrades,
-      resolveScopedDateId
-  ]);
-
-  const getTeacherCohortCachedBundle = useCallback((cohortId) => {
-      const normalizedId = String(cohortId || LEGACY_COHORT_ID);
-      const cachedDates = sanitizeDateList(
-          readLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, normalizedId)) || []
-      );
-      const cachedStudents = readLocalCache(
-          getCohortCacheKey(LOCAL_CACHE_KEYS.students, normalizedId),
-          STUDENT_CACHE_TTL_MS
-      );
-      const cachedClassAverages = readLocalCache(
-          getCohortCacheKey(LOCAL_CACHE_KEYS.classAverages, normalizedId)
-      );
-      const cachedSummary = getCachedCohortSummary(normalizedId);
-      const cachedMessage = readLocalCache(
-          getCohortCacheKey(LOCAL_CACHE_KEYS.teacherMessage, normalizedId),
-          TEACHER_MESSAGE_CACHE_TTL_MS
-      );
-      const cachedStats = readLocalCache(
-          getCohortCacheKey(LOCAL_CACHE_KEYS.queryStats, normalizedId),
-          QUERY_STATS_CACHE_TTL_MS
-      );
-      const cachedLastResetAt = String(cachedStats?.lastResetAt || '');
-      const cachedStatsAreFresh = cachedLastResetAt && !shouldResetQueryStats(cachedLastResetAt);
-      const derivedDates = Array.isArray(cachedStudents) && cachedStudents.length > 0
-          ? deriveDatePoolFromStudents(cachedStudents)
-          : [];
-      const nextDates = mergeDatePools(cachedDates, derivedDates, cachedSummary.weekendIds);
-      const hasDisplayData = Boolean(
-          nextDates.length
-          || (Array.isArray(cachedStudents) && cachedStudents.length > 0)
-          || (cachedClassAverages && typeof cachedClassAverages === 'object' && Object.keys(cachedClassAverages).length)
-          || cachedSummary.weekendIds.length
-      );
-
-      return {
-          normalizedId,
-          nextDates,
-          cachedStudents,
-          cachedClassAverages,
-          cachedSummary,
-          cachedMessage,
-          cachedStats,
-          cachedLastResetAt,
-          cachedStatsAreFresh,
-          hasDisplayData
-      };
-  }, [getCachedCohortSummary, getCohortCacheKey, shouldResetQueryStats]);
-
-  const applyTeacherCohortCachedState = useCallback((cohortInput) => {
-      const bundle = typeof cohortInput === 'string' ? getTeacherCohortCachedBundle(cohortInput) : cohortInput;
-      if (!bundle?.hasDisplayData) return false;
-      const {
-          normalizedId,
-          nextDates,
-          cachedStudents,
-          cachedClassAverages,
-          cachedSummary,
-          cachedMessage,
-          cachedStats,
-          cachedLastResetAt,
-          cachedStatsAreFresh
-      } = bundle;
-
-      if (Array.isArray(cachedStudents) && cachedStudents.length > 0) {
-          setAllStudentsData(cachedStudents);
-          setTeacherStudentsCohortId(normalizedId);
-      }
-
-      if (cachedStatsAreFresh) {
-          setQueryStatsById((cachedStats.counts && typeof cachedStats.counts === 'object') ? cachedStats.counts : {});
-          setQueryEvents(sanitizeQueryEvents(cachedStats.events, cachedLastResetAt));
-          setQueryStatsLastResetAt(cachedLastResetAt);
-          setQueryStatsCohortId(normalizedId);
-      } else {
-          setQueryStatsById({});
-          setQueryEvents([]);
-          setQueryStatsLastResetAt('');
-          setQueryStatsCohortId('');
-      }
-
-      if (cachedMessage && typeof cachedMessage === 'object') {
-          const nextGlobalMessage = String(cachedMessage?.globalMessage ?? cachedMessage?.message ?? '').trim();
-          const nextByStudentMessages = normalizeTeacherStudentMessages(cachedMessage?.byStudent);
-          setTeacherGlobalMessage(nextGlobalMessage);
-          setTeacherGlobalMessageDraft(nextGlobalMessage);
-          setTeacherStudentMessages(nextByStudentMessages);
-          setTeacherStudentMessageDrafts(nextByStudentMessages);
-          setTeacherMessageCohortId(normalizedId);
-      } else {
-          setTeacherGlobalMessage('');
-          setTeacherGlobalMessageDraft('');
-          setTeacherStudentMessages({});
-          setTeacherStudentMessageDrafts({});
-          setTeacherMessageCohortId('');
-      }
-
-      setCurrentStudentId(null);
-      setStudentName('');
-      setGrades({});
-      setBatchDate((prev) => nextDates[nextDates.length - 1] || prev || '');
-      setAvailableDates(nextDates.length ? nextDates : getDefaultDatesForCohort(normalizedId, cohortOptions));
-      setDatesCohortId(nextDates.length ? normalizedId : '');
-
-      if (cachedClassAverages && typeof cachedClassAverages === 'object') {
-          setClassAverages(cachedClassAverages);
-          setClassAveragesCohortId(normalizedId);
-      } else {
-          setClassAverages({});
-          setClassAveragesCohortId('');
-      }
-
-      if (cachedSummary.weekendIds.length > 0) {
-          applyTeacherSummaryState(normalizedId, cachedSummary);
-      } else {
-          setTeacherCohortSummary(normalizeCohortSummary(null));
-          setTeacherCohortSummaryId('');
-      }
-
-      resetBatchDraftState();
-      return true;
-  }, [applyTeacherSummaryState, cohortOptions, getTeacherCohortCachedBundle, resetBatchDraftState]);
+  }, [mode, isAuthenticated, loadQueryStats]);
 
   useEffect(() => {
       if (typeof document === 'undefined') return;
@@ -3535,11 +1947,11 @@ export default function App() {
               clearTimeout(queryFlushTimerRef.current);
               queryFlushTimerRef.current = null;
           }
-          void flushPendingQueryStats({ force: true, cohortId: activeTeacherCohortId });
+          void flushPendingQueryStats({ force: true });
       };
       document.addEventListener('visibilitychange', handleVisibilityChange);
       return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [activeTeacherCohortId, flushPendingQueryStats]);
+  }, [flushPendingQueryStats]);
 
   useEffect(() => {
       return () => {
@@ -3556,96 +1968,28 @@ export default function App() {
   }, [mode]);
 
   useEffect(() => {
-      queryPendingCountsRef.current = {};
-      queryPendingEventsRef.current = [];
-      queryPendingCohortIdRef.current = activeTeacherCohortId || LEGACY_COHORT_ID;
-      queryFlushInFlightRef.current = false;
-      if (queryFlushTimerRef.current) {
-          clearTimeout(queryFlushTimerRef.current);
-          queryFlushTimerRef.current = null;
-      }
-      if (teacherCohortPreseedRef.current === activeTeacherCohortId) {
-          teacherCohortPreseedRef.current = '';
-          return;
-      }
-      applyTeacherCohortCachedState(activeTeacherCohortId);
-  }, [activeTeacherCohortId, applyTeacherCohortCachedState]);
-
-  useEffect(() => {
-      const cachedStudents = readLocalCache(
-          getCohortCacheKey(LOCAL_CACHE_KEYS.students, activePublicCohortId),
-          STUDENT_CACHE_TTL_MS
-      );
-      const cachedDates = sanitizeDateList(
-          readLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, activePublicCohortId)) || []
-      );
-      const cachedClassAverages = readLocalCache(
-          getCohortCacheKey(LOCAL_CACHE_KEYS.classAverages, activePublicCohortId)
-      );
-      const cachedMessage = readLocalCache(
-          getCohortCacheKey(LOCAL_CACHE_KEYS.teacherMessage, activePublicCohortId),
-          TEACHER_MESSAGE_CACHE_TTL_MS
-      );
-      const hasCachedStudents = Array.isArray(cachedStudents) && cachedStudents.length > 0;
-      const hasCachedDates = cachedDates.length > 0;
-      const hasCachedClassAverages = cachedClassAverages && typeof cachedClassAverages === 'object';
-      const hasCachedMessage = cachedMessage && typeof cachedMessage === 'object';
-
-      if (hasCachedStudents) {
-          setCachedClassData(cachedStudents);
-          setPublicStudentsCohortId(activePublicCohortId);
-      }
-      setSearchError('');
-      if (mode === 'parent') {
-          if (hasCachedDates) {
-              setAvailableDates(cachedDates);
-              setDatesCohortId(activePublicCohortId);
-          }
-          if (hasCachedClassAverages) {
-              setClassAverages(cachedClassAverages);
-              setClassAveragesCohortId(activePublicCohortId);
-          }
-          if (hasCachedMessage) {
-              const nextGlobalMessage = String(cachedMessage?.globalMessage ?? cachedMessage?.message ?? '').trim();
-              const nextByStudentMessages = normalizeTeacherStudentMessages(cachedMessage?.byStudent);
-              setTeacherGlobalMessage(nextGlobalMessage);
-              setTeacherGlobalMessageDraft(nextGlobalMessage);
-              setTeacherStudentMessages(nextByStudentMessages);
-              setTeacherStudentMessageDrafts(nextByStudentMessages);
-              setTeacherMessageCohortId(activePublicCohortId);
-          }
-      }
-  }, [activePublicCohortId, cohortOptions, getCohortCacheKey, mode]);
+      if (!user) return;
+      loadTeacherMessage();
+  }, [user, loadTeacherMessage]);
 
   useEffect(() => {
       if (typeof window === 'undefined') return;
-      const teacherStudentsCacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.students, activeTeacherCohortId);
-      const publicStudentsCacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.students, activePublicCohortId);
-      const activeQueryStatsCacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.queryStats, activeTeacherCohortId);
       const handleStorage = (event) => {
           if (!event.key) return;
 
-          if (event.key === teacherStudentsCacheKey && mode === 'teacher') {
-              const cachedStudents = readLocalCache(teacherStudentsCacheKey, STUDENT_CACHE_TTL_MS);
+          if (event.key === LOCAL_CACHE_KEYS.students) {
+              const cachedStudents = readLocalCache(LOCAL_CACHE_KEYS.students, STUDENT_CACHE_TTL_MS);
               if (!Array.isArray(cachedStudents) || cachedStudents.length === 0) return;
+              setCachedClassData(cachedStudents);
               if (mode === 'teacher' && teacherViewMode === 'batch' && !isBatchDirty) {
-                  setBatchDraftGradesByStudentId({});
+                  batchDirtyStudentIdsRef.current = new Set();
                   setAllStudentsData(cachedStudents);
-                  setTeacherStudentsCohortId(activeTeacherCohortId);
               }
               return;
           }
 
-          if (event.key === publicStudentsCacheKey && mode === 'parent') {
-              const cachedStudents = readLocalCache(publicStudentsCacheKey, STUDENT_CACHE_TTL_MS);
-              if (!Array.isArray(cachedStudents) || cachedStudents.length === 0) return;
-              setCachedClassData(cachedStudents);
-              setPublicStudentsCohortId(activePublicCohortId);
-              return;
-          }
-
-          if (event.key === activeQueryStatsCacheKey && mode === 'teacher' && !queryStatsLoading) {
-              const cachedStats = readLocalCache(activeQueryStatsCacheKey, QUERY_STATS_CACHE_TTL_MS);
+          if (event.key === LOCAL_CACHE_KEYS.queryStats && mode === 'teacher' && !queryStatsLoading) {
+              const cachedStats = readLocalCache(LOCAL_CACHE_KEYS.queryStats, QUERY_STATS_CACHE_TTL_MS);
               if (!cachedStats || typeof cachedStats !== 'object') return;
               const lastResetAt = String(cachedStats.lastResetAt || '');
               if (!lastResetAt) return;
@@ -3657,13 +2001,12 @@ export default function App() {
               setQueryStatsById(merged.counts);
               setQueryEvents(merged.events);
               setQueryStatsLastResetAt(lastResetAt);
-              setQueryStatsCohortId(activeTeacherCohortId);
           }
       };
 
       window.addEventListener('storage', handleStorage);
       return () => window.removeEventListener('storage', handleStorage);
-  }, [activePublicCohortId, activeTeacherCohortId, applyPendingQueryStats, getCohortCacheKey, isBatchDirty, mode, queryStatsLoading, teacherViewMode]);
+  }, [mode, teacherViewMode, isBatchDirty, queryStatsLoading, applyPendingQueryStats]);
 
   const closeSecurityModal = useCallback(() => {
       setShowSecurityModal(false);
@@ -3692,22 +2035,6 @@ export default function App() {
       }
   };
 
-  const requestExcelImport = useCallback(() => {
-      if (!canImportExcel) {
-          notifyPermissionDenied('目前權限無法匯入 Excel');
-          return;
-      }
-      const openPicker = () => {
-          legacyImportUnlockUntilRef.current = Date.now() + 30 * 1000;
-          importFileInputRef.current?.click();
-      };
-      if (isLegacyCohort(activeTeacherCohortId)) {
-          executeWithSecurity(openPicker, { title: '上一屆匯入需安全驗證' });
-          return;
-      }
-      openPicker();
-  }, [activeTeacherCohortId, canImportExcel, executeWithSecurity, isLegacyCohort, notifyPermissionDenied]);
-
   const addDate = async () => {
       const normalizedInput = normalizeDateToken(newDateInput);
       if (!normalizedInput) {
@@ -3718,10 +2045,9 @@ export default function App() {
       if (availableDates.includes(normalizedInput)) return;
       const newList = sanitizeDateList([...availableDates, normalizedInput]);
       setAvailableDates(newList);
-      setDatesCohortId(activeTeacherCohortId);
-      writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, activeTeacherCohortId), newList);
+      writeLocalCache(LOCAL_CACHE_KEYS.dates, newList);
       setNewDateInput('');
-      if (db) await setDoc(getCohortSettingsDocRef(activeTeacherCohortId, 'dates'), { list: newList }, { merge: true });
+      if (db) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: newList }, { merge: true });
       appendOperationLog({
           kind: 'date',
           title: '新增考次',
@@ -3731,13 +2057,12 @@ export default function App() {
   };
 
   const localComputedAverages = useMemo(() => {
-      if (!shouldBuildTeacherLocalAverages) return EMPTY_OBJECT;
       const avgs = {};
-      const validClassSet = activeTeacherClassIdSet;
+      const validClassSet = new Set(CLASS_DEFS.map(c => c.id));
 
       const createBuckets = () => {
           const buckets = { all: { t:0, c:0, e:0, m:0, count:0 } };
-          activeTeacherClassDefs.forEach(c => {
+          CLASS_DEFS.forEach(c => {
               buckets[c.id] = { t:0, c:0, e:0, m:0, count:0 };
           });
           return buckets;
@@ -3753,9 +2078,10 @@ export default function App() {
           }
       });
 
-      deferredStudentsForDerived.forEach((student) => {
-          const weekendGrades = deferredStudentGradeMapsByStudentId[student.id] || EMPTY_OBJECT;
-          Object.entries(weekendGrades).forEach(([weekendID, grade]) => {
+      deferredStudentsForDerived.forEach(student => {
+          const weekendEntries = buildWeekendGradeEntryMap(student.grades, getTestDateID);
+          Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
+              const grade = entry.grade;
               const groups = groupsByWeekendID[weekendID];
               if (!groups) return;
 
@@ -3802,214 +2128,64 @@ export default function App() {
           });
       });
       return avgs;
-  }, [activeTeacherClassDefs, activeTeacherClassIdSet, deferredDatesForDerived, deferredStudentGradeMapsByStudentId, deferredStudentsForDerived, getTestDateID, shouldBuildTeacherLocalAverages]);
+  }, [deferredDatesForDerived, deferredStudentsForDerived, getTestDateID]);
 
   const loadClassAverages = useCallback(async (options = {}) => {
       const force = Boolean(options && options.force);
-      const cohortId = String(options?.cohortId || activeDataCohortId || LEGACY_COHORT_ID);
-      const fallbackDates = getDefaultDatesForCohort(cohortId, cohortOptions);
-      const datePool = sanitizeDateList(options?.datePool || (cohortId === datesCohortId ? availableDates : fallbackDates));
-      const getDateIDForCohort = (dateStr) => resolveScopedDateId(dateStr, cohortId, datePool);
-      if (
-          !force
-          && classAveragesLoadPromiseRef.current?.cohortId === cohortId
-          && classAveragesLoadPromiseRef.current?.promise
-      ) {
-          return classAveragesLoadPromiseRef.current.promise;
-      }
+      if (!force && classAveragesLoadPromiseRef.current) return classAveragesLoadPromiseRef.current;
 
       const runner = async () => {
-          const cacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.classAverages, cohortId);
-          const computedAveragesForCohort =
-              cohortId === activeTeacherCohortId && teacherStudentsCohortId === cohortId
-                  ? localComputedAverages
-                  : {};
-          const cachedAverages = readLocalCache(cacheKey);
+          const cachedAverages = readLocalCache(LOCAL_CACHE_KEYS.classAverages);
           if (cachedAverages && typeof cachedAverages === 'object' && !force) {
-              const normalizedCache = normalizeClassAveragesByWeekend(cachedAverages, getDateIDForCohort);
-              const mergedAverages = { ...computedAveragesForCohort, ...normalizedCache };
-              if (cohortId === activeDataCohortId) {
-                  setClassAverages(mergedAverages);
-                  setClassAveragesCohortId(cohortId);
-              }
-              writeLocalCache(cacheKey, mergedAverages);
+              const normalizedCache = normalizeClassAveragesByWeekend(cachedAverages, getTestDateID);
+              const mergedAverages = { ...localComputedAverages, ...normalizedCache };
+              setClassAverages(mergedAverages);
+              writeLocalCache(LOCAL_CACHE_KEYS.classAverages, mergedAverages);
               return mergedAverages;
           }
           if (!db) {
-              if (cohortId === activeDataCohortId) {
-                  setClassAverages(computedAveragesForCohort);
-                  setClassAveragesCohortId(cohortId);
-              }
-              writeLocalCache(cacheKey, computedAveragesForCohort);
-              return computedAveragesForCohort;
+              setClassAverages(localComputedAverages);
+              writeLocalCache(LOCAL_CACHE_KEYS.classAverages, localComputedAverages);
+              return localComputedAverages;
           }
           try {
-              const docSnap = await getDoc(getCohortSettingsDocRef(cohortId, 'class_averages_v18'));
+              const docSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'class_averages_v18'));
               let dbAverages = {};
-              if (docSnap.exists()) dbAverages = normalizeClassAveragesByWeekend(docSnap.data().averages || {}, getDateIDForCohort);
-              const mergedAverages = { ...computedAveragesForCohort, ...dbAverages };
-              if (cohortId === activeDataCohortId) {
-                  setClassAverages(mergedAverages);
-                  setClassAveragesCohortId(cohortId);
-              }
-              writeLocalCache(cacheKey, mergedAverages);
+              if (docSnap.exists()) dbAverages = normalizeClassAveragesByWeekend(docSnap.data().averages || {}, getTestDateID);
+              const mergedAverages = { ...localComputedAverages, ...dbAverages };
+              setClassAverages(mergedAverages);
+              writeLocalCache(LOCAL_CACHE_KEYS.classAverages, mergedAverages);
               return mergedAverages;
           } catch (e) {
               console.error('Load class averages error:', e);
-              if (cohortId === activeDataCohortId) {
-                  setClassAverages(computedAveragesForCohort);
-                  setClassAveragesCohortId(cohortId);
-              }
-              writeLocalCache(cacheKey, computedAveragesForCohort);
-              return computedAveragesForCohort;
+              setClassAverages(localComputedAverages);
+              writeLocalCache(LOCAL_CACHE_KEYS.classAverages, localComputedAverages);
+              return localComputedAverages;
           }
       };
 
       const promise = runner().finally(() => {
-          if (
-              classAveragesLoadPromiseRef.current?.cohortId === cohortId
-              && classAveragesLoadPromiseRef.current?.promise === promise
-          ) {
+          if (classAveragesLoadPromiseRef.current === promise) {
               classAveragesLoadPromiseRef.current = null;
           }
       });
-      classAveragesLoadPromiseRef.current = { cohortId, promise };
+      classAveragesLoadPromiseRef.current = promise;
       return promise;
-  }, [activeDataCohortId, activeTeacherCohortId, availableDates, cohortOptions, datesCohortId, getCohortCacheKey, getCohortSettingsDocRef, localComputedAverages, resolveScopedDateId, teacherStudentsCohortId]);
-
-  const teacherHydrationFnsRef = useRef({
-      loadDates,
-      loadClassAverages,
-      loadAllStudents,
-      loadCohortSummary,
-      loadTeacherMessage,
-      loadQueryStats
-  });
-  const publicHydrationFnsRef = useRef({
-      loadDates,
-      loadClassAverages,
-      loadCohortSummary,
-      loadTeacherMessage
-  });
-
-  useEffect(() => {
-      teacherHydrationFnsRef.current = {
-          loadDates,
-          loadClassAverages,
-          loadAllStudents,
-          loadCohortSummary,
-          loadTeacherMessage,
-          loadQueryStats
-      };
-      publicHydrationFnsRef.current = {
-          loadDates,
-          loadClassAverages,
-          loadCohortSummary,
-          loadTeacherMessage
-      };
-  }, [loadAllStudents, loadClassAverages, loadCohortSummary, loadDates, loadQueryStats, loadTeacherMessage]);
-
-  useEffect(() => {
-      if (!user || mode !== 'teacher' || !isAuthenticated) return;
-      let cancelled = false;
-      let idleHandle = null;
-      const scheduleSecondaryHydration = (task) => {
-          if (typeof window === 'undefined') return null;
-          if (typeof window.requestIdleCallback === 'function') {
-              return window.requestIdleCallback(task, { timeout: 1200 });
-          }
-          return window.setTimeout(task, 180);
-      };
-      const cancelSecondaryHydration = () => {
-          if (idleHandle === null || typeof window === 'undefined') return;
-          if (typeof window.cancelIdleCallback === 'function') {
-              window.cancelIdleCallback(idleHandle);
-          } else {
-              window.clearTimeout(idleHandle);
-          }
-          idleHandle = null;
-      };
-      const hydrateTeacherCohort = async () => {
-          const {
-              loadDates: hydrateDates,
-              loadClassAverages: hydrateClassAverages,
-              loadAllStudents: hydrateStudents,
-              loadCohortSummary: hydrateSummary,
-              loadTeacherMessage: hydrateMessage,
-              loadQueryStats: hydrateStats
-          } = teacherHydrationFnsRef.current;
-          const cohortDates = await hydrateDates({ cohortId: activeTeacherCohortId });
-          if (cancelled) return;
-          const students = await hydrateStudents({ cohortId: activeTeacherCohortId, datePool: cohortDates, silent: true });
-          if (cancelled) return;
-          const expectedSummaryVersion = String(
-              readLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.studentsVersion, activeTeacherCohortId), SETTINGS_CACHE_TTL_MS) || ''
-          ).trim();
-          await Promise.all([
-              hydrateClassAverages({ cohortId: activeTeacherCohortId, datePool: cohortDates }),
-              hydrateSummary({
-                  cohortId: activeTeacherCohortId,
-                  datePool: cohortDates,
-                  students,
-                  expectedVersion: expectedSummaryVersion,
-                  hydrateTeacher: true
-              })
-          ]);
-          if (cancelled) return;
-          idleHandle = scheduleSecondaryHydration(() => {
-              if (cancelled) return;
-              void hydrateMessage({ cohortId: activeTeacherCohortId });
-              void hydrateStats({ cohortId: activeTeacherCohortId });
-          });
-      };
-      void hydrateTeacherCohort();
-      return () => {
-          cancelled = true;
-          cancelSecondaryHydration();
-      };
-  }, [activeTeacherCohortId, getCohortCacheKey, isAuthenticated, mode, user]);
-
-  useEffect(() => {
-      if (!user || mode !== 'parent') return;
-      let cancelled = false;
-      const hydratePublicCohort = async () => {
-          const {
-              loadDates: hydrateDates,
-              loadClassAverages: hydrateClassAverages,
-              loadCohortSummary: hydrateSummary,
-              loadTeacherMessage: hydrateMessage
-          } = publicHydrationFnsRef.current;
-          const cohortDates = await hydrateDates({ cohortId: activePublicCohortId });
-          if (cancelled) return;
-          const expectedSummaryVersion = String(
-              readLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.studentsVersion, activePublicCohortId), SETTINGS_CACHE_TTL_MS) || ''
-          ).trim();
-          await Promise.all([
-              hydrateClassAverages({ cohortId: activePublicCohortId, datePool: cohortDates }),
-              hydrateSummary({ cohortId: activePublicCohortId, datePool: cohortDates, expectedVersion: expectedSummaryVersion }),
-              hydrateMessage({ cohortId: activePublicCohortId })
-          ]);
-      };
-      void hydratePublicCohort();
-      return () => {
-          cancelled = true;
-      };
-  }, [activePublicCohortId, getCohortCacheKey, mode, user]);
+  }, [getTestDateID, localComputedAverages]);
 
   useEffect(() => {
       if (deferredStudentsForDerived.length === 0) return undefined;
-      if (classAveragesCohortId !== activeTeacherCohortId) return undefined;
       const timer = window.setTimeout(() => {
           startTransition(() => {
               setClassAverages(prev => {
                   const next = normalizeClassAveragesByWeekend({ ...prev, ...localComputedAverages }, getTestDateID);
-                  writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.classAverages, classAveragesCohortId), next);
+                  writeLocalCache(LOCAL_CACHE_KEYS.classAverages, next);
                   return next;
               });
           });
       }, 220);
       return () => window.clearTimeout(timer);
-  }, [activeTeacherCohortId, classAveragesCohortId, deferredStudentsForDerived.length, getCohortCacheKey, getTestDateID, localComputedAverages]);
+  }, [localComputedAverages, deferredStudentsForDerived.length, getTestDateID]);
 
   const handleManualAverageChange = (date, classId, subject, value) => {
       const weekendID = getTestDateID(date) || date;
@@ -4032,15 +2208,14 @@ export default function App() {
 
   const persistClassAverages = useCallback(async (nextAverages, options = {}) => {
       const { closeModal = false, showToast = false, toastMessage = '設定已儲存' } = options;
-      const cohortId = String(options?.cohortId || activeTeacherCohortId || LEGACY_COHORT_ID);
       const normalizedAverages = normalizeClassAveragesByWeekend(nextAverages, getTestDateID);
-      writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.classAverages, cohortId), normalizedAverages);
+      writeLocalCache(LOCAL_CACHE_KEYS.classAverages, normalizedAverages);
       if (!db) {
           if (closeModal) setShowAvgModal(false);
           return true;
       }
       try {
-          await setDoc(getCohortSettingsDocRef(cohortId, 'class_averages_v18'), { averages: normalizedAverages });
+          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'class_averages_v18'), { averages: normalizedAverages }, { merge: true });
           if (showToast) {
               setStatusMsg(toastMessage);
               setTimeout(() => setStatusMsg(''), 2000);
@@ -4055,7 +2230,7 @@ export default function App() {
           }
           return false;
       }
-  }, [activeTeacherCohortId, getCohortCacheKey, getCohortSettingsDocRef, getTestDateID]);
+  }, [getTestDateID]);
 
   useEffect(() => {
       if (!isClassAveragesDirty) return undefined;
@@ -4071,17 +2246,16 @@ export default function App() {
       if (ok) setIsClassAveragesDirty(false);
   };
 
-  const persistTeacherMessages = useCallback(async (nextGlobalMessage, nextByStudentMessages, options = {}) => {
-      const cohortId = String(options?.cohortId || activeTeacherCohortId || LEGACY_COHORT_ID);
+  const persistTeacherMessages = useCallback(async (nextGlobalMessage, nextByStudentMessages) => {
       const normalizedGlobal = String(nextGlobalMessage || '').trim();
       const normalizedByStudent = normalizeTeacherStudentMessages(nextByStudentMessages);
       const payload = {
           globalMessage: normalizedGlobal,
           byStudent: normalizedByStudent
       };
-      writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.teacherMessage, cohortId), payload);
+      writeLocalCache(LOCAL_CACHE_KEYS.teacherMessage, payload);
       if (db) {
-          const messageDocRef = getCohortSettingsDocRef(cohortId, TEACHER_MESSAGE_DOC_ID);
+          const messageDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', TEACHER_MESSAGE_DOC_ID);
           await setDoc(messageDocRef, {
               globalMessage: normalizedGlobal,
               message: normalizedGlobal,
@@ -4091,7 +2265,7 @@ export default function App() {
           });
       }
       return { normalizedGlobal, normalizedByStudent };
-  }, [activeTeacherCohortId, getCohortCacheKey, getCohortSettingsDocRef, user]);
+  }, [user]);
 
   const handleSaveGlobalTeacherMessage = useCallback(async () => {
       if (!user) return;
@@ -4156,12 +2330,6 @@ export default function App() {
           notifyPermissionDenied('2491212 權限無法刪除日期');
           return;
       }
-      if (hasPendingBatchChanges && !window.confirm('批量成績尚未儲存，刪除考次會直接移除目前未儲存內容，確定繼續嗎？')) {
-          return;
-      }
-      if (hasPendingBatchChanges) {
-          resetBatchDraftState();
-      }
       setDeleteTarget(dateToDelete);
   };
   const confirmDeleteDate = async () => {
@@ -4172,108 +2340,53 @@ export default function App() {
       }
       if (!deleteTarget) return;
       const targetWeekendID = getTestDateID(deleteTarget);
-      if (!targetWeekendID) {
-          setStatusMsg('刪除失敗：找不到目標考次');
-          setTimeout(() => setStatusMsg(''), 2200);
-          setDeleteTarget(null);
-          return;
-      }
       const newList = availableDates.filter((d) => getTestDateID(d) !== targetWeekendID);
-      const nextStudents = [];
-      const changedStudents = [];
-
-      allStudentsData.forEach((student) => {
-          let changed = false;
-          const nextGrades = {};
-          Object.entries(student?.grades || {}).forEach(([sourceDate, grade]) => {
-              if (getTestDateID(sourceDate) === targetWeekendID) {
-                  changed = true;
-                  return;
-              }
-              nextGrades[sourceDate] = grade;
-          });
-          const nextStudent = changed ? { ...student, grades: nextGrades } : student;
-          nextStudents.push(nextStudent);
-          if (changed) changedStudents.push(nextStudent);
+      const nextStudents = allStudentsData.map((student) => {
+          const nextGrades = Object.fromEntries(
+              Object.entries(student.grades || {}).filter(([dateKey]) => getTestDateID(dateKey) !== targetWeekendID)
+          );
+          return Object.keys(nextGrades).length === Object.keys(student.grades || {}).length
+              ? student
+              : { ...student, grades: nextGrades };
       });
-
-      const nextClassAverages = Object.fromEntries(
-          Object.entries(classAverages || {}).filter(([dateKey]) => String(dateKey) !== String(targetWeekendID))
+      const nextAverages = Object.fromEntries(
+          Object.entries(classAverages || {}).filter(([weekendID]) => weekendID !== targetWeekendID)
       );
-      const currentWeekendID = batchDate ? getTestDateID(batchDate) : '';
-      const nextBatchDate = currentWeekendID === targetWeekendID
-          ? (newList[newList.length - 1] || '')
-          : batchDate;
+      const touchedStudents = nextStudents.filter((student, index) => student !== allStudentsData[index]);
 
-      setStatusMsg('刪除考次中...');
-      try {
-          const nowIso = new Date().toISOString();
-          if (db) {
-              const writes = [
-                  setDoc(getCohortSettingsDocRef(activeTeacherCohortId, 'dates'), { list: newList }, { merge: true }),
-                  setDoc(getCohortSettingsDocRef(activeTeacherCohortId, 'class_averages_v18'), { averages: nextClassAverages, updatedAt: nowIso })
-              ];
-              changedStudents.forEach((student) => {
-                  writes.push(
-                      setDoc(
-                          getCohortStudentDocRef(activeTeacherCohortId, student.id),
-                          { id: student.id, name: student.name, grades: student.grades, lastUpdated: nowIso }
-                      )
-                  );
-              });
-              await Promise.all(writes);
-          }
+      setAvailableDates(newList);
+      setAllStudentsData(nextStudents);
+      setCachedClassData(nextStudents);
+      setClassAverages(nextAverages);
+      writeLocalCache(LOCAL_CACHE_KEYS.dates, newList);
+      writeLocalCache(LOCAL_CACHE_KEYS.students, nextStudents);
+      writeLocalCache(LOCAL_CACHE_KEYS.classAverages, nextAverages);
 
-          const summaryVersion = changedStudents.length > 0
-              ? await bumpStudentsVersion(activeTeacherCohortId)
-              : '';
-
-          setAvailableDates(newList);
-          setDatesCohortId(activeTeacherCohortId);
-          setAllStudentsData(nextStudents);
-          setTeacherStudentsCohortId(activeTeacherCohortId);
-          setClassAverages(nextClassAverages);
-          setClassAveragesCohortId(activeTeacherCohortId);
-          setBatchDate(nextBatchDate);
-          if (activeTeacherCohortId === activePublicCohortId) {
-              setCachedClassData(nextStudents);
-              setPublicStudentsCohortId(activeTeacherCohortId);
-          }
-          setGrades((prev) => {
-              const next = {};
-              Object.entries(prev || {}).forEach(([sourceDate, grade]) => {
-                  if (getTestDateID(sourceDate) === targetWeekendID) return;
-                  next[sourceDate] = grade;
-              });
-              return next;
-          });
-          resetBatchDraftState();
-
-          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, activeTeacherCohortId), newList);
-          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.students, activeTeacherCohortId), nextStudents);
-          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.classAverages, activeTeacherCohortId), nextClassAverages);
-          await persistCohortSummary({
-              cohortId: activeTeacherCohortId,
-              students: nextStudents,
-              datePool: newList,
-              version: summaryVersion,
-              hydrateTeacher: true
-          });
-
-          appendOperationLog({
-              kind: 'danger',
-              level: 'warn',
-              title: '刪除考次',
-              detail: `${targetWeekendID} / ${changedStudents.length} 位學生`
-          });
-          setStatusMsg(`已刪除考次: ${targetWeekendID}`);
-          setTimeout(() => setStatusMsg(''), 2200);
-          setDeleteTarget(null);
-      } catch (error) {
-          console.error('Delete date error:', error);
-          setStatusMsg('刪除考次失敗');
-          setTimeout(() => setStatusMsg(''), 2200);
+      if (batchDate && getTestDateID(batchDate) === targetWeekendID) {
+          const fallbackDate = newList[newList.length - 1] || '';
+          setBatchDate(fallbackDate ? (getTestDateID(fallbackDate) || fallbackDate) : '');
       }
+
+      if (db) {
+          const nowIso = new Date().toISOString();
+          await Promise.all([
+              setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: newList }, { merge: true }),
+              setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'class_averages_v18'), { averages: nextAverages }),
+              ...touchedStudents.map((student) =>
+                  setDoc(
+                      doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${student.id}`),
+                      { id: student.id, name: student.name || '', grades: student.grades || {}, lastUpdated: nowIso }
+                  )
+              )
+          ]);
+      }
+      appendOperationLog({
+          kind: 'danger',
+          level: 'warn',
+          title: '刪除考次',
+          detail: targetWeekendID || deleteTarget
+      });
+      setStatusMsg(`已刪除考次: ${targetWeekendID || deleteTarget}`); setTimeout(() => setStatusMsg(''), 2000); setDeleteTarget(null);
   };
 
   const handleLoginSubmit = () => {
@@ -4289,6 +2402,7 @@ export default function App() {
           localStorage.setItem('teacher_auth', 'true');
           localStorage.setItem('teacher_role', nextRole);
           setMode('teacher');
+          loadAllStudents();
       } else { setLoginError(true); }
   };
 
@@ -4299,61 +2413,178 @@ export default function App() {
           localStorage.removeItem('teacher_auth');
           localStorage.removeItem('teacher_role');
           if (typeof window !== 'undefined') {
-              sessionStorage.removeItem(getStudentSessionKey(activeTeacherCohortId));
+              sessionStorage.removeItem(STUDENTS_SESSION_SYNC_KEY);
           }
           setMode('landing');
       });
   };
 
-  const handleSwitchTeacherCohort = useCallback((nextCohortId) => {
-      const normalizedId = String(nextCohortId || '').trim();
-      if (!normalizedId || normalizedId === activeTeacherCohortId) return;
-      runWithBatchDiscardGuard(() => {
-          const cachedBundle = getTeacherCohortCachedBundle(normalizedId);
-          teacherCohortPreseedRef.current = cachedBundle.hasDisplayData ? normalizedId : '';
-          startTransition(() => {
-              setTeacherViewMode('batch');
-              setBatchInsightTab('grades');
-              if (cachedBundle.hasDisplayData) {
-                  applyTeacherCohortCachedState(cachedBundle);
-              }
-              setActiveTeacherCohortId(normalizedId);
-          });
-      });
-  }, [activeTeacherCohortId, applyTeacherCohortCachedState, getTeacherCohortCachedBundle, runWithBatchDiscardGuard]);
+  const loadAllStudents = async (options = {}) => {
+      const { forceRemote = false } = options;
+      if (!forceRemote && studentsLoadPromiseRef.current) return studentsLoadPromiseRef.current;
 
-  const handleSetPublicCohort = useCallback(async (nextCohortId) => {
-      const normalizedId = String(nextCohortId || '').trim();
-      if (!normalizedId || normalizedId === activePublicCohortId) return;
-      setPublicCohortSaving(true);
+      const runner = async () => {
+      setLoading(true);
+      let loadingReleased = false;
+      const releaseLoading = () => {
+          if (loadingReleased) return;
+          loadingReleased = true;
+          setLoading(false);
+      };
       try {
-          if (db) {
-              await setDoc(getCohortRegistryDocRef(), {
-                  publicCohortId: normalizedId,
-                  updatedAt: new Date().toISOString()
-              }, { merge: true });
+          const cachedStudents = readLocalCache(LOCAL_CACHE_KEYS.students, STUDENT_CACHE_TTL_MS);
+          const hasSessionSynced =
+              typeof window !== 'undefined'
+              && sessionStorage.getItem(STUDENTS_SESSION_SYNC_KEY) === '1';
+          if (!forceRemote && Array.isArray(cachedStudents)) {
+              startTransition(() => {
+                  setAllStudentsData(cachedStudents);
+                  setCachedClassData(cachedStudents);
+              });
+              batchDirtyStudentIdsRef.current = new Set();
+              setIsBatchDirty(false);
+              releaseLoading();
+              if (hasSessionSynced || !db) {
+                  return cachedStudents;
+              }
           }
-          setActivePublicCohortId(normalizedId);
-          setStatusMsg(`家長端已切換至 ${getCohortLabel(normalizedId)}`);
-          setTimeout(() => setStatusMsg(''), 2200);
-      } catch (error) {
-          console.error('Set public cohort error:', error);
-          setStatusMsg('切換家長端屆別失敗');
-          setTimeout(() => setStatusMsg(''), 2200);
-      } finally {
-          setPublicCohortSaving(false);
+
+          let studentsMap = {};
+          RAW_STUDENT_RECORDS.forEach(s => { studentsMap[s.id] = { ...s, grades: normalizeGrades(s.grades) }; });
+          let cleanedInvalidDateCount = 0;
+          const cleanupPayloads = [];
+          if (db) {
+              const querySnapshot = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'students'));
+              querySnapshot.forEach(doc => {
+                  const data = doc.data();
+                  const normalizedResult = normalizeGrades(data.grades, { withMeta: true });
+                  const sanitizedData = { ...data, grades: normalizedResult.normalized };
+
+                  if (normalizedResult.changed && data.id) {
+                      cleanedInvalidDateCount += normalizedResult.removedInvalidDates;
+                      cleanupPayloads.push({
+                          id: data.id,
+                          payload: { ...sanitizedData, lastUpdated: new Date().toISOString() }
+                      });
+                  }
+
+                  if (studentsMap[data.id]) {
+                      studentsMap[data.id] = {
+                          ...studentsMap[data.id],
+                          ...sanitizedData,
+                          grades: { ...studentsMap[data.id].grades, ...sanitizedData.grades }
+                      };
+                  } else {
+                      studentsMap[data.id] = sanitizedData;
+                  }
+              });
+          }
+          const sortedStudents = Object.values(studentsMap).sort((a,b) => a.id.localeCompare(b.id));
+          startTransition(() => {
+              setAllStudentsData(sortedStudents);
+              setCachedClassData(sortedStudents);
+          });
+          writeLocalCache(LOCAL_CACHE_KEYS.students, sortedStudents);
+          if (typeof window !== 'undefined') {
+              sessionStorage.setItem(STUDENTS_SESSION_SYNC_KEY, '1');
+          }
+          batchDirtyStudentIdsRef.current = new Set();
+          setIsBatchDirty(false);
+          releaseLoading();
+
+          if (db && cleanupPayloads.length > 0) {
+              void Promise.all(
+                  cleanupPayloads.map((item) =>
+                      setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${item.id}`), item.payload)
+                  )
+              ).then(() => {
+                  setStatusMsg(
+                      cleanedInvalidDateCount > 0
+                          ? `已自動刪除 ${cleanedInvalidDateCount} 筆不合理日期資料`
+                          : `已自動整理 ${cleanupPayloads.length} 筆重複考次資料`
+                  );
+                  setTimeout(() => setStatusMsg(''), 2400);
+              }).catch((err) => {
+                  console.error('Cleanup invalid student dates error:', err);
+              });
+          }
+          return sortedStudents;
+      } catch (e) { console.error("Load error:", e); }
+      finally {
+          releaseLoading();
       }
-  }, [activePublicCohortId, getCohortLabel, getCohortRegistryDocRef]);
+      return [];
+      };
+
+      const promise = runner().finally(() => {
+          if (studentsLoadPromiseRef.current === promise) {
+              studentsLoadPromiseRef.current = null;
+          }
+      });
+      studentsLoadPromiseRef.current = promise;
+      return promise;
+  };
 
   useEffect(() => {
-      if (mode !== 'parent' || !user) return;
-      if (publicStudentsCohortId === activePublicCohortId && cachedClassData.length > 0) return;
-      const cacheKey = getCohortCacheKey(LOCAL_CACHE_KEYS.students, activePublicCohortId);
-      const cachedStudents = readLocalCache(cacheKey, STUDENT_CACHE_TTL_MS);
-      if (!Array.isArray(cachedStudents) || cachedStudents.length === 0) return;
-      setCachedClassData(cachedStudents);
-      setPublicStudentsCohortId(activePublicCohortId);
-  }, [activePublicCohortId, cachedClassData.length, getCohortCacheKey, mode, publicStudentsCohortId, user]);
+      if (mode !== 'parent' || !user || cachedClassData.length > 0) return;
+      const cachedStudents = readLocalCache(LOCAL_CACHE_KEYS.students, STUDENT_CACHE_TTL_MS);
+      if (Array.isArray(cachedStudents) && cachedStudents.length > 0) {
+          setCachedClassData(cachedStudents);
+      }
+  }, [mode, user, cachedClassData.length]);
+
+  const normalizeGrades = useCallback((grades, options = {}) => {
+      const withMeta = Boolean(options.withMeta);
+      if (!grades || typeof grades !== 'object') {
+          return withMeta ? { normalized: {}, removedInvalidDates: 0, changed: false } : {};
+      }
+
+      const normalized = {};
+      let removedInvalidDates = 0;
+      let changed = false;
+
+      Object.keys(grades).forEach(date => {
+          const normalizedDate = normalizeDateToken(date);
+          if (!normalizedDate) {
+              removedInvalidDates += 1;
+              changed = true;
+              return;
+          }
+
+          const g = grades[date];
+          let normalizedG;
+          if (Array.isArray(g)) {
+              normalizedG = { math: g[0]||0, eng: g[1]||0, chi: g[2]||0, total: (g[0]||0)+(g[1]||0)+(g[2]||0), class: 'A班' };
+              changed = true;
+          } else if (g && typeof g === 'object') {
+              normalizedG = { ...g };
+          } else {
+              normalizedG = { chi: '', eng: '', math: '', total: '', class: 'A班' };
+              changed = true;
+          }
+
+          if (!normalizedG.class) {
+              normalizedG.class = 'A班';
+              changed = true;
+          }
+          if (date !== normalizedDate) changed = true;
+          if (normalized[normalizedDate]) changed = true;
+          normalized[normalizedDate] = normalizedG;
+      });
+
+      const weekendEntries = buildWeekendGradeEntryMap(normalized, getTestDateID);
+      const deduped = {};
+      Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
+          deduped[weekendID] = { ...entry.grade };
+          if (entry.sourceDate !== weekendID) changed = true;
+      });
+      if (Object.keys(deduped).length !== Object.keys(normalized).length) changed = true;
+
+      if (withMeta) {
+          return { normalized: deduped, removedInvalidDates, changed };
+      }
+      return deduped;
+  }, [getTestDateID]);
 
   const persistLocalSnapshots = useCallback((nextSnapshots) => {
       const sanitized = sanitizeSnapshotList(nextSnapshots);
@@ -4419,13 +2650,6 @@ export default function App() {
   }, [localSnapshots, persistLocalSnapshots, appendOperationLog]);
 
   const handleRestoreLocalSnapshot = useCallback(async (snapshotId) => {
-      if (!canEditStudentGrades) {
-          notifyPermissionDenied('2491212 權限無法還原快照');
-          return;
-      }
-      if (hasPendingBatchChanges && !window.confirm('目前有未儲存的批量修改，還原快照會覆蓋這些內容，確定繼續嗎？')) {
-          return;
-      }
       const target = localSnapshots.find((item) => item.id === snapshotId);
       if (!target) {
           setStatusMsg('找不到指定快照');
@@ -4447,88 +2671,59 @@ export default function App() {
       const restoredAverages = normalizeClassAveragesByWeekend(payload.classAverages || {}, getTestDateID);
       const restoredGlobalMessage = String(payload.teacherGlobalMessage || '').trim();
       const restoredStudentMessages = normalizeTeacherStudentMessages(payload.teacherStudentMessages);
-      const nextBatchDate = restoredDates.length
-          ? (restoredDates[restoredDates.length - 1] || '')
-          : '';
-      const restoredStudentIdSet = new Set(restoredStudents.map((student) => String(student.id)));
-      const deletedStudentIds = allStudentsData
-          .map((student) => String(student?.id || '').trim())
-          .filter((id) => id && !restoredStudentIdSet.has(id));
 
-      setAvailableDates(restoredDates);
-      setDatesCohortId(activeTeacherCohortId);
-      writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, activeTeacherCohortId), restoredDates);
-
-      setAllStudentsData(restoredStudents);
-      setTeacherStudentsCohortId(activeTeacherCohortId);
-      if (activeTeacherCohortId === activePublicCohortId) {
-          setCachedClassData(restoredStudents);
-          setPublicStudentsCohortId(activeTeacherCohortId);
+      if (restoredDates.length) {
+          setAvailableDates(restoredDates);
+          writeLocalCache(LOCAL_CACHE_KEYS.dates, restoredDates);
       }
-      writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.students, activeTeacherCohortId), restoredStudents);
-      resetBatchDraftState();
-
-      setClassAverages(restoredAverages);
-      setClassAveragesCohortId(activeTeacherCohortId);
-      writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.classAverages, activeTeacherCohortId), restoredAverages);
-
-      setBatchDate(nextBatchDate);
+      if (restoredStudents.length) {
+          setAllStudentsData(restoredStudents);
+          setCachedClassData(restoredStudents);
+          writeLocalCache(LOCAL_CACHE_KEYS.students, restoredStudents);
+          batchDirtyStudentIdsRef.current = new Set(restoredStudents.map((student) => String(student.id)));
+          setIsBatchDirty(true);
+      }
+      if (Object.keys(restoredAverages).length) {
+          setClassAverages(restoredAverages);
+          writeLocalCache(LOCAL_CACHE_KEYS.classAverages, restoredAverages);
+      }
       setTeacherGlobalMessage(restoredGlobalMessage);
       setTeacherGlobalMessageDraft(restoredGlobalMessage);
       setTeacherStudentMessages(restoredStudentMessages);
       setTeacherStudentMessageDrafts(restoredStudentMessages);
-      setTeacherMessageCohortId(activeTeacherCohortId);
-      await persistCohortSummary({
-          cohortId: activeTeacherCohortId,
-          students: restoredStudents,
-          datePool: restoredDates,
-          hydrateTeacher: true
-      });
 
       if (db && user) {
           try {
-              const nowIso = new Date().toISOString();
-              await Promise.all([
-                  ...restoredStudents.map((student) =>
+              await Promise.all(
+                  restoredStudents.map((student) =>
                       setDoc(
-                          getCohortStudentDocRef(activeTeacherCohortId, student.id),
-                          {
-                              id: student.id,
-                              name: student.name || '',
-                              grades: student.grades || {},
-                              lastUpdated: nowIso
-                          }
+                          doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${student.id}`),
+                          { id: student.id, name: student.name || '', grades: student.grades || {}, lastUpdated: new Date().toISOString() }
                       )
-                  ),
-                  ...deletedStudentIds.map((studentId) =>
-                      deleteDoc(getCohortStudentDocRef(activeTeacherCohortId, studentId))
                   )
-              ]);
-              await setDoc(getCohortSettingsDocRef(activeTeacherCohortId, 'dates'), { list: restoredDates }, { merge: true });
-              await setDoc(getCohortSettingsDocRef(activeTeacherCohortId, 'class_averages_v18'), { averages: restoredAverages });
+              );
+              await Promise.all(
+                  allStudentsData
+                      .filter((student) => !restoredStudents.some((item) => item.id === student.id))
+                      .map((student) =>
+                          deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${student.id}`))
+                      )
+              );
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: restoredDates }, { merge: true });
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'class_averages_v18'), { averages: restoredAverages });
               await setDoc(
-                  getCohortSettingsDocRef(activeTeacherCohortId, TEACHER_MESSAGE_DOC_ID),
+                  doc(db, 'artifacts', appId, 'public', 'data', 'settings', TEACHER_MESSAGE_DOC_ID),
                   {
                       globalMessage: restoredGlobalMessage,
                       message: restoredGlobalMessage,
                       byStudent: restoredStudentMessages,
-                      updatedAt: nowIso,
+                      updatedAt: new Date().toISOString(),
                       updatedBy: user?.uid || ''
-                  }
+                  },
+                  { merge: true }
               );
-              const restoredVersion = await bumpStudentsVersion(activeTeacherCohortId);
-              await persistCohortSummary({
-                  cohortId: activeTeacherCohortId,
-                  students: restoredStudents,
-                  datePool: restoredDates,
-                  version: restoredVersion,
-                  hydrateTeacher: true
-              });
           } catch (error) {
               console.error('Restore snapshot remote sync error:', error);
-              setStatusMsg('已還原快照，但遠端同步失敗');
-              setTimeout(() => setStatusMsg(''), 2400);
-              return;
           }
       }
 
@@ -4537,36 +2732,32 @@ export default function App() {
           title: '還原本機快照',
           detail: `${target.label}（${restoredStudents.length} 位學生）`
       });
-      setStatusMsg('已還原快照');
+      setStatusMsg('已還原快照（成績請按儲存變更同步）');
       setTimeout(() => setStatusMsg(''), 2200);
-  }, [activePublicCohortId, activeTeacherCohortId, allStudentsData, appendOperationLog, bumpStudentsVersion, canEditStudentGrades, getCohortCacheKey, getCohortSettingsDocRef, getCohortStudentDocRef, getTestDateID, hasPendingBatchChanges, localSnapshots, normalizeGrades, notifyPermissionDenied, persistCohortSummary, resetBatchDraftState, user]);
+  }, [allStudentsData, localSnapshots, normalizeGrades, getTestDateID, user, appendOperationLog]);
 
-  const loadStudentForTeacher = async (id, options = {}) => {
+  const loadStudentForTeacher = async (id) => {
     if (!user) return;
-    const cohortId = String(options?.cohortId || activeTeacherCohortId || LEGACY_COHORT_ID);
-    const fallbackDates = getDefaultDatesForCohort(cohortId, cohortOptions);
-    const effectiveDates = sanitizeDateList(options?.datePool || (cohortId === datesCohortId ? availableDates : fallbackDates));
-    const getDateIDForCohort = (dateStr) => resolveScopedDateId(dateStr, cohortId, effectiveDates);
     setLoading(true);
     try {
       let data = null;
       if (db) {
-          const docSnap = await getDoc(getCohortStudentDocRef(cohortId, id));
+          const docSnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${id}`));
           if (docSnap.exists()) data = docSnap.data();
       }
       if (data) {
         setCurrentStudentId(data.id); setStudentName(data.name);
-        const normalizedResult = normalizeGrades(data.grades, { withMeta: true, datePool: effectiveDates, getDateID: getDateIDForCohort });
+        const normalizedResult = normalizeGrades(data.grades, { withMeta: true });
         let loadedGrades = { ...normalizedResult.normalized };
         if (normalizedResult.changed && db) {
             setDoc(
-                getCohortStudentDocRef(cohortId, data.id),
+                doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${data.id}`),
                 { ...data, grades: normalizedResult.normalized, lastUpdated: new Date().toISOString() }
             ).catch((err) => console.error('Cleanup invalid student date error:', err));
         }
-        effectiveDates.forEach(d => { 
-             const weekendID = getDateIDForCohort(d);
-             const existingGradeKey = Object.keys(loadedGrades).find(k => getDateIDForCohort(k) === weekendID);
+        availableDates.forEach(d => { 
+             const weekendID = getTestDateID(d);
+             const existingGradeKey = Object.keys(loadedGrades).find(k => getTestDateID(k) === weekendID);
              if (!existingGradeKey) {
                  loadedGrades[d] = { chi: '', eng: '', math: '', total: '', class: 'A班' }; 
              }
@@ -4579,7 +2770,7 @@ export default function App() {
         );
       } else {
         setCurrentStudentId(id); setStudentName('');
-        const gradesObj = {}; effectiveDates.forEach(d => gradesObj[d] = { chi: '', eng: '', math: '', total: '', class: 'A班' });
+        const gradesObj = {}; availableDates.forEach(d => gradesObj[d] = { chi: '', eng: '', math: '', total: '', class: 'A班' });
         setGrades(gradesObj); setStatusMsg('新學生模式');
       }
     } catch (e) {
@@ -4614,32 +2805,37 @@ export default function App() {
           notifyPermissionDenied('2491212 權限無法修改學生成績');
           return;
       }
+      setAllStudentsData(prev => {
+          const index = prev.findIndex((s) => s.id === studentId);
+          if (index < 0) return prev;
 
-      const currentBatchInfo = currentBatchGradeInfoRef.current[studentId];
-      const targetDate = currentBatchInfo?.sourceDate || selectedBatchWeekendID || batchDate;
-      const currentDateGrades = currentBatchInfo?.grade || { chi: '', eng: '', math: '', total: '', class: teacherClassFilter || defaultTeacherClassId };
-      let updatedDateGrades;
-      if (subject === 'class') {
-          updatedDateGrades = { ...currentDateGrades, class: value };
-      } else {
-          updatedDateGrades = { ...currentDateGrades, [subject]: value };
-          updatedDateGrades.total = calculateTotal(
-              subject === 'chi' ? value : updatedDateGrades.chi,
-              subject === 'eng' ? value : updatedDateGrades.eng,
-              subject === 'math' ? value : updatedDateGrades.math
-          );
-      }
+          const student = prev[index];
+          const currentGrades = student.grades || {};
+          let targetDate = batchDate;
+          const batchDateID = getTestDateID(batchDate);
+          const existingKey = Object.keys(currentGrades).find((k) => getTestDateID(k) === batchDateID);
+          if (existingKey) targetDate = existingKey;
 
-      setBatchDraftGradesByStudentId((prev) => ({
-          ...prev,
-          [studentId]: {
-              sourceDate: targetDate,
-              grade: updatedDateGrades
+          const currentDateGrades = currentGrades[targetDate] || { chi: '', eng: '', math: '', total: '', class: teacherClassFilter };
+          let updatedDateGrades;
+          if (subject === 'class') {
+              updatedDateGrades = { ...currentDateGrades, class: value };
+          } else {
+              updatedDateGrades = { ...currentDateGrades, [subject]: value };
+              updatedDateGrades.total = calculateTotal(
+                  subject === 'chi' ? value : updatedDateGrades.chi,
+                  subject === 'eng' ? value : updatedDateGrades.eng,
+                  subject === 'math' ? value : updatedDateGrades.math
+              );
           }
-      }));
+
+          const next = [...prev];
+          next[index] = { ...student, grades: { ...currentGrades, [targetDate]: updatedDateGrades } };
+          return next;
+      });
       batchDirtyStudentIdsRef.current.add(String(studentId));
       setIsBatchDirty(true);
-  }, [batchDate, canEditStudentGrades, defaultTeacherClassId, notifyPermissionDenied, selectedBatchWeekendID, teacherClassFilter]); 
+  }, [batchDate, teacherClassFilter, getTestDateID, canEditStudentGrades, notifyPermissionDenied]); 
 
   const applyPreparedImportPayload = useCallback(async (payload) => {
       if (!payload || typeof payload !== 'object') return;
@@ -4658,10 +2854,9 @@ export default function App() {
 
       if (sortedDates.length) {
           setAvailableDates(sortedDates);
-          setDatesCohortId(activeTeacherCohortId);
-          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, activeTeacherCohortId), sortedDates);
+          writeLocalCache(LOCAL_CACHE_KEYS.dates, sortedDates);
           if (db) {
-              await setDoc(getCohortSettingsDocRef(activeTeacherCohortId, 'dates'), { list: sortedDates }, { merge: true });
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'dates'), { list: sortedDates }, { merge: true });
           }
       }
 
@@ -4673,43 +2868,26 @@ export default function App() {
       }
 
       const sortedStudents = Object.values(studentsMap).sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
-      const touchedIdSet = new Set(touchedStudentIds.map((id) => String(id)));
-      const touchedStudents = sortedStudents.filter((student) => touchedIdSet.has(String(student.id || '')));
+      setAllStudentsData(sortedStudents);
+      setCachedClassData(sortedStudents);
+      writeLocalCache(LOCAL_CACHE_KEYS.students, sortedStudents);
 
-      let summaryVersion = '';
-      if (db && touchedStudents.length > 0) {
+      if (db && touchedStudentIds.length > 0) {
           const nowIso = new Date().toISOString();
           await Promise.all(
-              touchedStudents.map((student) =>
-                  setDoc(
-                      getCohortStudentDocRef(activeTeacherCohortId, student.id),
-                      {
-                          id: student.id,
-                          name: student.name || '',
-                          grades: student.grades || {},
-                          lastUpdated: nowIso
-                      }
+              touchedStudentIds
+                  .map((id) => studentsMap[id])
+                  .filter(Boolean)
+                  .map((student) =>
+                      setDoc(
+                          doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${student.id}`),
+                          { id: student.id, name: student.name || '', grades: student.grades || {}, lastUpdated: nowIso }
+                      )
                   )
-              )
           );
-          summaryVersion = await bumpStudentsVersion(activeTeacherCohortId);
       }
-
-      setAllStudentsData(sortedStudents);
-      setTeacherStudentsCohortId(activeTeacherCohortId);
-      if (activeTeacherCohortId === activePublicCohortId) {
-          setCachedClassData(sortedStudents);
-          setPublicStudentsCohortId(activeTeacherCohortId);
-      }
-      writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.students, activeTeacherCohortId), sortedStudents);
-      await persistCohortSummary({
-          cohortId: activeTeacherCohortId,
-          students: sortedStudents,
-          datePool: sortedDates.length ? sortedDates : availableDates,
-          version: summaryVersion,
-          hydrateTeacher: true
-      });
-      resetBatchDraftState();
+      batchDirtyStudentIdsRef.current = new Set();
+      setIsBatchDirty(false);
 
       const invalidDateSuffix = skippedInvalidDateCount > 0 ? `，略過 ${skippedInvalidDateCount} 筆日期錯誤` : '';
       appendOperationLog({
@@ -4717,9 +2895,9 @@ export default function App() {
           title: '匯入 Excel 完成',
           detail: `${importCount} 筆，${touchedStudentIds.length} 位學生`
       });
-      setStatusMsg(`已匯入並儲存 ${importCount} 筆資料${invalidDateSuffix} (最新日期: ${lastImportedDate})`);
+      setStatusMsg(`匯入 ${importCount} 筆資料${invalidDateSuffix} (最新日期: ${lastImportedDate})`);
       setTimeout(() => setStatusMsg(''), 2200);
-  }, [activePublicCohortId, activeTeacherCohortId, appendOperationLog, availableDates, batchDate, bumpStudentsVersion, getCohortCacheKey, getCohortSettingsDocRef, getCohortStudentDocRef, getTestDateID, persistCohortSummary, resetBatchDraftState]);
+  }, [batchDate, getTestDateID, appendOperationLog]);
 
   const handleConfirmImportPreview = useCallback(async () => {
       const payload = pendingImportPayloadRef.current;
@@ -4756,13 +2934,6 @@ export default function App() {
         notifyPermissionDenied('目前權限無法匯入 Excel');
         return;
     }
-    if (isLegacyCohort(activeTeacherCohortId) && Date.now() > legacyImportUnlockUntilRef.current) {
-        setStatusMsg('上一屆匯入已鎖定，請先輸入安全碼');
-        setTimeout(() => setStatusMsg(''), 2200);
-        if (e?.target) e.target.value = '';
-        return;
-    }
-    legacyImportUnlockUntilRef.current = 0;
     const file = e.target.files[0];
     if (!file) return;
     if (!window.XLSX) {
@@ -4823,13 +2994,11 @@ export default function App() {
              colMap.id = 0; colMap.name = 1; colMap.date = 2; colMap.chi = 3; colMap.eng = 4; colMap.math = 5;
         }
 
-        const validClassSet = activeTeacherClassIdSet;
+        const validClassSet = new Set(CLASS_DEFS.map(({ id }) => id));
         const parseImportedClass = (rawValue) => {
             const rawClass = String(rawValue || '').trim().toUpperCase();
             if (!rawClass) return '';
-            if (validClassSet.has(rawClass)) return rawClass;
-            if (activeTeacherCohortId === NEXT_COHORT_ID && (rawClass.includes('東') || rawClass.includes('DONG') || rawClass.includes('EAST'))) return '東興';
-            if (activeTeacherCohortId !== NEXT_COHORT_ID && (rawClass.includes('日') || rawClass.includes('SUN'))) return rawClass.includes('B') ? '日B班' : '日A班';
+            if (rawClass.includes('日') || rawClass.includes('SUN')) return rawClass.includes('B') ? '日B班' : '日A班';
             if (rawClass.includes('C')) return 'C班';
             if (rawClass.includes('B')) return 'B班';
             if (rawClass.includes('A')) return 'A班';
@@ -4896,7 +3065,7 @@ export default function App() {
           const importedClassName = parseImportedClass(colMap.class !== -1 ? row[colMap.class] : '');
 
           const weekendDatePool = [...availableDates, ...Array.from(newDates)];
-          const weekendID = resolveScopedDateId(normalizedImportDate, activeTeacherCohortId, weekendDatePool);
+          const weekendID = getWeekendID(normalizedImportDate, weekendDatePool);
           if (!weekendID) {
               skippedInvalidDateCount += 1;
               continue;
@@ -4924,11 +3093,11 @@ export default function App() {
                   if (!grade?.class || !validClassSet.has(grade.class)) return false;
                   const normalizedDate = normalizeDateToken(date);
                   if (!normalizedDate) return false;
-                  return resolveScopedDateId(normalizedDate, activeTeacherCohortId, weekendDatePool) === weekendID;
+                  return getWeekendID(normalizedDate, weekendDatePool) === weekendID;
               })?.[1]?.class;
               if (sameWeekendClass) return sameWeekendClass;
               if (teacherClassFilter && validClassSet.has(teacherClassFilter)) return teacherClassFilter;
-              return defaultTeacherClassId;
+              return 'A班';
           };
           const className = importedClassName || resolveFallbackClass();
           const total = calculateTotal(chi, eng, math);
@@ -5038,7 +3207,7 @@ export default function App() {
     }
   }, []);
 
-  const handleKeyDown = useCallback((e, studentIndex, subject) => handleGridKeyDown(e, studentIndex, subject, 'batch', batchRowsForDisplayRef.current.length), [handleGridKeyDown]);
+  const handleKeyDown = useCallback((e, studentIndex, subject) => handleGridKeyDown(e, studentIndex, subject, 'batch', allStudentsData.length), [allStudentsData.length, handleGridKeyDown]);
   const handleSingleKeyDown = useCallback(
       (e, dateIndex, subject) => handleGridKeyDown(e, dateIndex, subject, 'single', singleViewDateEntries.length),
       [singleViewDateEntries.length, handleGridKeyDown]
@@ -5058,46 +3227,46 @@ export default function App() {
       const rows = pasteData.trim().split(/\r\n|\n|\r/);
       const subjects = ['chi', 'eng', 'math'];
       const startSubjectIndex = subjects.indexOf(startSubject);
-
-      const nextDrafts = {};
-      const changedIds = new Set();
-      rows.forEach((row, rIndex) => {
-          const studentIndex = startStudentIndex + rIndex;
-          if (studentIndex >= batchRowsForDisplayRef.current.length) return;
-          const targetRow = batchRowsForDisplayRef.current[studentIndex];
-          if (!targetRow?.student?.id) return;
-
-          const cols = row.split('\t');
-          const currentBatchInfo = currentBatchGradeInfoRef.current[targetRow.student.id];
-          const targetDate = currentBatchInfo?.sourceDate || selectedBatchWeekendID || batchDate;
-          const currentDateGrades = { ...(currentBatchInfo?.grade || targetRow.dateGrades || { chi: '', eng: '', math: '', total: '', class: teacherClassFilter || defaultTeacherClassId }) };
-          let rowUpdated = false;
-
-          cols.forEach((val, cIndex) => {
-              const subjectIndex = startSubjectIndex + cIndex;
-              if (subjectIndex >= 3) return;
-              const subject = subjects[subjectIndex];
-              currentDateGrades[subject] = val.trim();
-              rowUpdated = true;
+      const batchDateID = getTestDateID(batchDate);
+      
+      setAllStudentsData(prev => {
+          const newData = [...prev];
+          let updated = false;
+          const changedIds = new Set();
+          rows.forEach((row, rIndex) => {
+              const studentIndex = startStudentIndex + rIndex;
+              if (studentIndex >= newData.length) return;
+              const cols = row.split('\t');
+              const student = { ...newData[studentIndex] };
+              const currentGrades = student.grades || {};
+              const existingKey = Object.keys(currentGrades).find((key) => getTestDateID(key) === batchDateID);
+              const targetDate = existingKey || batchDateID || batchDate;
+              const currentDateGrades = { ...(currentGrades[targetDate] || { chi: '', eng: '', math: '', total: '', class: 'A班' }) };
+              let rowUpdated = false;
+              cols.forEach((val, cIndex) => {
+                  const subjectIndex = startSubjectIndex + cIndex;
+                  if (subjectIndex >= 3) return;
+                  const subject = subjects[subjectIndex];
+                  currentDateGrades[subject] = val.trim();
+                  rowUpdated = true;
+              });
+              if (rowUpdated) {
+                  currentDateGrades.total = calculateTotal(currentDateGrades.chi, currentDateGrades.eng, currentDateGrades.math);
+                  student.grades = { ...currentGrades, [targetDate]: currentDateGrades };
+                  newData[studentIndex] = student;
+                  changedIds.add(student.id);
+                  updated = true;
+              }
           });
-
-          if (!rowUpdated) return;
-          currentDateGrades.total = calculateTotal(currentDateGrades.chi, currentDateGrades.eng, currentDateGrades.math);
-          nextDrafts[targetRow.student.id] = {
-              sourceDate: targetDate,
-              grade: currentDateGrades
-          };
-          changedIds.add(targetRow.student.id);
+          if(updated) {
+              changedIds.forEach((id) => batchDirtyStudentIdsRef.current.add(String(id)));
+              setStatusMsg(`已貼上 ${rows.length} 筆資料`);
+              setTimeout(() => setStatusMsg(''), 2000);
+              setIsBatchDirty(true);
+          }
+          return newData;
       });
-
-      if (!changedIds.size) return;
-
-      setBatchDraftGradesByStudentId((prev) => ({ ...prev, ...nextDrafts }));
-      changedIds.forEach((id) => batchDirtyStudentIdsRef.current.add(String(id)));
-      setStatusMsg(`已貼上 ${changedIds.size} 筆資料`);
-      setTimeout(() => setStatusMsg(''), 2000);
-      setIsBatchDirty(true);
-  }, [batchDate, canEditStudentGrades, defaultTeacherClassId, notifyPermissionDenied, selectedBatchWeekendID, teacherClassFilter]);
+  }, [batchDate, getTestDateID, canEditStudentGrades, notifyPermissionDenied]);
 
   const handleSinglePaste = (e, startDateIndex, startSubject) => {
       if (!canEditStudentGrades) {
@@ -5199,23 +3368,11 @@ export default function App() {
     }
     if (!studentToDelete) return;
     try {
-        if (db) await deleteDoc(getCohortStudentDocRef(activeTeacherCohortId, studentToDelete.id));
-        const summaryVersion = await bumpStudentsVersion(activeTeacherCohortId);
+        if (db) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${studentToDelete.id}`));
         const nextStudents = allStudentsData.filter((s) => s.id !== studentToDelete.id);
         setAllStudentsData(nextStudents);
-        setTeacherStudentsCohortId(activeTeacherCohortId);
-        if (activeTeacherCohortId === activePublicCohortId) {
-            setCachedClassData(nextStudents);
-            setPublicStudentsCohortId(activeTeacherCohortId);
-        }
-        writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.students, activeTeacherCohortId), nextStudents);
-        await persistCohortSummary({
-            cohortId: activeTeacherCohortId,
-            students: nextStudents,
-            datePool: availableDates,
-            version: summaryVersion,
-            hydrateTeacher: true
-        });
+        setCachedClassData(nextStudents);
+        writeLocalCache(LOCAL_CACHE_KEYS.students, nextStudents);
         setCurrentStudentId(null); setStudentName(''); setGrades({});
         appendOperationLog({
             kind: 'danger',
@@ -5239,27 +3396,15 @@ export default function App() {
     if (!studentName.trim()) { setStatusMsg('請輸入姓名'); return; }
     setStatusMsg('儲存中...');
     try {
-      if (db) await setDoc(getCohortStudentDocRef(activeTeacherCohortId, currentStudentId), { id: currentStudentId, name: studentName, grades: grades, lastUpdated: new Date().toISOString() });
-      const summaryVersion = await bumpStudentsVersion(activeTeacherCohortId);
+      if (db) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${currentStudentId}`), { id: currentStudentId, name: studentName, grades: grades, lastUpdated: new Date().toISOString() });
       const savedStudent = { id: currentStudentId, name: studentName, grades };
       const exists = allStudentsData.find((s) => s.id === currentStudentId);
       const nextStudents = exists
           ? allStudentsData.map((s) => (s.id === currentStudentId ? { ...s, name: studentName, grades } : s))
           : [...allStudentsData, savedStudent].sort((a, b) => a.id.localeCompare(b.id));
       setAllStudentsData(nextStudents);
-      setTeacherStudentsCohortId(activeTeacherCohortId);
-      if (activeTeacherCohortId === activePublicCohortId) {
-          setCachedClassData(nextStudents);
-          setPublicStudentsCohortId(activeTeacherCohortId);
-      }
-      writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.students, activeTeacherCohortId), nextStudents);
-      await persistCohortSummary({
-          cohortId: activeTeacherCohortId,
-          students: nextStudents,
-          datePool: availableDates,
-          version: summaryVersion,
-          hydrateTeacher: true
-      });
+      setCachedClassData(nextStudents);
+      writeLocalCache(LOCAL_CACHE_KEYS.students, nextStudents);
       appendOperationLog({
           kind: 'save',
           title: '儲存個人檔案',
@@ -5284,20 +3429,9 @@ export default function App() {
           return;
       }
       const dirtyIdSet = new Set(Array.from(batchDirtyStudentIdsRef.current));
-      const nextStudents = allStudentsData.map((student) => {
-          const draft = batchDraftGradesByStudentId[student.id];
-          if (!draft) return student;
-          return {
-              ...student,
-              grades: {
-                  ...(student.grades || {}),
-                  [draft.sourceDate]: draft.grade
-              }
-          };
-      });
-      const dirtyStudents = nextStudents.filter((student) => dirtyIdSet.has(String(student.id)));
+      const dirtyStudents = allStudentsData.filter((student) => dirtyIdSet.has(String(student.id)));
       if (dirtyStudents.length === 0) {
-          resetBatchDraftState();
+          setIsBatchDirty(false);
           setStatusMsg('沒有變更需要儲存');
           setTimeout(() => setStatusMsg(''), 1800);
           return;
@@ -5308,28 +3442,16 @@ export default function App() {
           if (db) {
               const batchPromises = dirtyStudents.map((student) =>
                   setDoc(
-                      getCohortStudentDocRef(activeTeacherCohortId, student.id),
+                      doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${student.id}`),
                       { id: student.id, name: student.name, grades: student.grades, lastUpdated: nowIso }
                   )
               );
               await Promise.all(batchPromises);
           }
-          const summaryVersion = await bumpStudentsVersion(activeTeacherCohortId);
-          setAllStudentsData(nextStudents);
-          setTeacherStudentsCohortId(activeTeacherCohortId);
-          if (activeTeacherCohortId === activePublicCohortId) {
-              setCachedClassData(nextStudents);
-              setPublicStudentsCohortId(activeTeacherCohortId);
-          }
-          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.students, activeTeacherCohortId), nextStudents);
-          await persistCohortSummary({
-              cohortId: activeTeacherCohortId,
-              students: nextStudents,
-              datePool: availableDates,
-              version: summaryVersion,
-              hydrateTeacher: true
-          });
-          resetBatchDraftState();
+          setCachedClassData(allStudentsData);
+          writeLocalCache(LOCAL_CACHE_KEYS.students, allStudentsData);
+          batchDirtyStudentIdsRef.current = new Set();
+          setIsBatchDirty(false);
           appendOperationLog({
               kind: 'save',
               title: '批次儲存完成',
@@ -5348,855 +3470,6 @@ export default function App() {
           setStatusMsg("儲存失敗");
       }
   };
-
-  const parentSearchScoreContext = useMemo(() => {
-      if (!parentSortedAvailableDatesAsc.length) return null;
-      if (hasParentSummary) {
-          return buildProbabilityContextFromScoreIndex(parentSummaryByWeekend, parentSortedAvailableDatesAsc, parentGetTestDateID);
-      }
-      if (!deferredParentClassData.length) return null;
-      return buildProbabilityContext(deferredParentClassData, parentSortedAvailableDatesAsc, parentGetTestDateID);
-  }, [deferredParentClassData, hasParentSummary, parentGetTestDateID, parentSortedAvailableDatesAsc, parentSummaryByWeekend]);
-
-  const cachedParentDateSignature = useMemo(
-      () => sortedAvailableDatesAsc.join('|'),
-      [sortedAvailableDatesAsc]
-  );
-
-  const cachedParentClassSignature = useMemo(
-      () => buildClassContextSignature(cachedClassData, getTestDateID),
-      [cachedClassData, getTestDateID]
-  );
-
-  const cachedParentClassAverageSignature = useMemo(
-      () => buildClassAveragesSignature(sortedAvailableDatesAsc, classAverages, getTestDateID),
-      [sortedAvailableDatesAsc, classAverages, getTestDateID]
-  );
-
-  const cachedParentVersionBase = useMemo(
-      () => hashFingerprint([cachedParentDateSignature, cachedParentClassSignature, cachedParentClassAverageSignature].join('||')),
-      [cachedParentDateSignature, cachedParentClassSignature, cachedParentClassAverageSignature]
-  );
-
-  const cachedParentStudentSignatureById = useMemo(() => {
-      const signatureById = {};
-      cachedClassData.forEach((student) => {
-          const normalizedId = String(student?.id || '').toUpperCase().trim();
-          if (!normalizedId) return;
-          signatureById[normalizedId] = buildStudentGradesSignature(student, getTestDateID);
-      });
-      return signatureById;
-  }, [cachedClassData, getTestDateID]);
-
-  const getCachedStudentsForParentSearch = useCallback((cohortId) => {
-      const normalizedId = String(cohortId || LEGACY_COHORT_ID);
-      if (publicStudentsCohortId === normalizedId && cachedClassData.length > 0) {
-          return cachedClassData;
-      }
-      if (teacherStudentsCohortId === normalizedId && allStudentsData.length > 0) {
-          return allStudentsData;
-      }
-      const localCachedStudents = readLocalCache(
-          getCohortCacheKey(LOCAL_CACHE_KEYS.students, normalizedId),
-          STUDENT_CACHE_TTL_MS
-      );
-      return Array.isArray(localCachedStudents) && localCachedStudents.length > 0
-          ? localCachedStudents
-          : [];
-  }, [allStudentsData, cachedClassData, getCohortCacheKey, publicStudentsCohortId, teacherStudentsCohortId]);
-
-  const handleParentSearch = async () => {
-    if (!searchId.trim()) return;
-    if (!user) {
-      setSearchError('系統連線中，請稍候再查詢');
-      setParentSearchShell(null);
-      return;
-    }
-    const searchStartTs = performance.now();
-    let hasRenderableView = false;
-    let loadingReleased = false;
-    const releaseLoading = () => {
-        if (loadingReleased) return;
-        loadingReleased = true;
-        setLoading(false);
-    };
-    setSearchError('');
-    setParentAnalyticsPending(false);
-    setLoading(true);
-    try {
-      const rawSearchKeyword = searchId.trim();
-      const normalizedSearchId = rawSearchKeyword.toUpperCase();
-      const likelyStudentId = /^[A-Z0-9_-]{3,24}$/.test(normalizedSearchId);
-      if (!likelyStudentId) {
-          setViewData(null);
-          setSearchError('請輸入正確學號');
-          setParentSearchShell(null);
-          updateParentQueryPerf(performance.now() - searchStartTs, false);
-          return;
-      }
-      setParentSearchShell({ id: normalizedSearchId });
-      let resolvedSearch = null;
-
-      for (const cohortId of parentSearchCohortOrder) {
-          const quickClassData = getCachedStudentsForParentSearch(cohortId);
-          if (quickClassData.length > 0) {
-              const matchedStudent = findStudentById(quickClassData, normalizedSearchId);
-              if (matchedStudent) {
-                  const cachedDatePool = sanitizeDateList(
-                      readLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, cohortId)) || getDefaultDatesForCohort(cohortId, cohortOptions)
-                  );
-                  const getCachedDateID = (dateStr) => resolveScopedDateId(dateStr, cohortId, cachedDatePool);
-                  const normalizedQuickStudent = {
-                      ...matchedStudent,
-                      grades: normalizeGrades(matchedStudent.grades, {
-                          cohortId,
-                          datePool: cachedDatePool,
-                          getDateID: getCachedDateID
-                      })
-                  };
-
-                  if (!hasDisplayableGradeHistory(normalizedQuickStudent.grades)) {
-                      continue;
-                  }
-
-                  resolvedSearch = {
-                      cohortId,
-                      data: normalizedQuickStudent,
-                      fullClassData: []
-                  };
-                  break;
-              }
-          }
-      }
-
-      if (!resolvedSearch && db && likelyStudentId) {
-          const remoteMatches = await Promise.allSettled(
-              parentSearchCohortOrder.map(async (cohortId) => {
-                  const cachedDatePool = sanitizeDateList(
-                      readLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, cohortId)) || getDefaultDatesForCohort(cohortId, cohortOptions)
-                  );
-                  const getCachedDateID = (dateStr) => resolveScopedDateId(dateStr, cohortId, cachedDatePool);
-                  const docSnap = await getDoc(getCohortStudentDocRef(cohortId, normalizedSearchId));
-                  if (!docSnap.exists()) return null;
-
-                  const rawData = docSnap.data();
-                  const normalizedResult = normalizeGrades(rawData.grades, {
-                      withMeta: true,
-                      cohortId,
-                      datePool: cachedDatePool,
-                      getDateID: getCachedDateID
-                  });
-                  const normalizedStudent = { ...rawData, grades: normalizedResult.normalized };
-                  if (normalizedResult.changed && rawData.id) {
-                      void setDoc(
-                          getCohortStudentDocRef(cohortId, rawData.id),
-                          { ...rawData, grades: normalizedResult.normalized, lastUpdated: new Date().toISOString() }
-                      ).catch((err) => console.error('Parent search cleanup invalid date error:', err));
-                  }
-
-                  return {
-                      cohortId,
-                      data: normalizedStudent,
-                      fullClassData: []
-                  };
-              })
-          );
-
-          resolvedSearch = remoteMatches
-              .map((result) => (result.status === 'fulfilled' ? result.value : null))
-              .find(Boolean) || null;
-      }
-
-      if (!resolvedSearch) {
-          setViewData(null);
-          setSearchError('查無此學號');
-          setParentSearchShell(null);
-          updateParentQueryPerf(performance.now() - searchStartTs, false);
-          return;
-      }
-
-      const {
-          cohortId: foundCohortId,
-          data: matchedStudent,
-          fullClassData
-      } = resolvedSearch;
-
-      const cachedStageDates = sanitizeDateList(
-          readLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, foundCohortId))
-          || (datesCohortId === foundCohortId ? sortedAvailableDatesAsc : getDefaultDatesForCohort(foundCohortId, cohortOptions))
-      );
-      const stageDatePool = mergeDatePools(cachedStageDates, deriveDatePoolFromStudents([matchedStudent]));
-      const getStageDateID = (dateStr) => resolveScopedDateId(dateStr, foundCohortId, stageDatePool);
-      const expectedSummaryVersion = String(
-          readLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.studentsVersion, foundCohortId), SETTINGS_CACHE_TTL_MS) || ''
-      ).trim();
-      const cachedStageAveragesRaw =
-          foundCohortId === classAveragesCohortId
-              ? classAverages
-              : (readLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.classAverages, foundCohortId)) || {});
-      const cachedStageAverages = normalizeClassAveragesByWeekend(cachedStageAveragesRaw, getStageDateID);
-      const cachedStageSummary =
-          foundCohortId === activeTeacherCohortId && teacherCohortSummaryId === foundCohortId
-              ? teacherCohortSummary
-              : getCachedCohortSummary(foundCohortId);
-      const cachedTeacherMessage =
-          foundCohortId === teacherMessageCohortId
-              ? { globalMessage: teacherGlobalMessage, byStudent: teacherStudentMessages }
-              : readLocalCache(
-                  getCohortCacheKey(LOCAL_CACHE_KEYS.teacherMessage, foundCohortId),
-                  TEACHER_MESSAGE_CACHE_TTL_MS
-              );
-      const normalizedStageTeacherMessage = cachedTeacherMessage && typeof cachedTeacherMessage === 'object'
-          ? {
-              globalMessage: String(cachedTeacherMessage.globalMessage ?? cachedTeacherMessage.message ?? '').trim(),
-              byStudent: normalizeTeacherStudentMessages(cachedTeacherMessage.byStudent)
-          }
-          : { globalMessage: '', byStudent: {} };
-      const previewChart = buildParentChartData({
-          grades: matchedStudent.grades,
-          datePool: stageDatePool,
-          classAveragesMap: cachedStageAverages,
-          getDateID: (dateStr) => getStageDateID(dateStr)
-      });
-      const previewViewData = {
-          ...matchedStudent,
-          chartData: previewChart.chartData,
-          average: previewChart.average,
-          prob: '-',
-          cohortId: foundCohortId,
-          isPending: true
-      };
-      hasRenderableView = true;
-      setParentViewContext({
-          cohortId: foundCohortId,
-          dates: stageDatePool,
-          classData: fullClassData.length > 0 ? fullClassData : [],
-          summary: cachedStageSummary,
-          classAverages: cachedStageAverages,
-          teacherMessage: normalizedStageTeacherMessage
-      });
-      if (previewChart.chartData.length > 0) {
-          const latestPreview = previewChart.chartData[previewChart.chartData.length - 1];
-          setActivePhase(resolvePhaseByDate(latestPreview.weekendID || latestPreview.date, stageDatePool));
-      }
-      setViewData(previewViewData);
-      setParentSearchShell(null);
-      setParentAnalyticsPending(true);
-      releaseLoading();
-
-      const cachedContextData = fullClassData.length > 0
-          ? fullClassData
-          : getCachedStudentsForParentSearch(foundCohortId);
-      if (cachedContextData.length > 0 || cachedStageSummary.weekendIds.length > 0) {
-          const cachedEffectiveDatePool = mergeDatePools(stageDatePool, deriveDatePoolFromStudents(cachedContextData));
-          const cachedScoreContext = cachedStageSummary.weekendIds.length > 0
-              ? buildProbabilityContextFromScoreIndex(cachedStageSummary.byWeekend, cachedEffectiveDatePool.length ? cachedEffectiveDatePool : stageDatePool, (dateStr) => getStageDateID(dateStr))
-              : null;
-          const cachedResolved = buildParentResolvedViewData({
-              student: cachedContextData.find((student) => String(student?.id || '').toUpperCase() === String(matchedStudent?.id || '').toUpperCase()) || matchedStudent,
-              cohortId: foundCohortId,
-              classData: cachedContextData,
-              datePool: cachedEffectiveDatePool.length ? cachedEffectiveDatePool : stageDatePool,
-              classAveragesMap: cachedStageAverages,
-              getDateID: (dateStr) => getStageDateID(dateStr),
-              scoreContext: cachedScoreContext
-          });
-
-          setParentViewContext({
-              cohortId: foundCohortId,
-              dates: cachedEffectiveDatePool.length ? cachedEffectiveDatePool : stageDatePool,
-              classData: cachedContextData,
-              summary: cachedStageSummary,
-              classAverages: cachedStageAverages,
-              teacherMessage: normalizedStageTeacherMessage
-          });
-          if (cachedResolved.latestDateKey) {
-              setActivePhase(resolvePhaseByDate(cachedResolved.latestDateKey, cachedEffectiveDatePool.length ? cachedEffectiveDatePool : stageDatePool));
-          }
-          setViewData(cachedResolved.viewData);
-          setParentAnalyticsPending(false);
-      }
-
-      const teacherMessagePromise = loadTeacherMessage({ cohortId: foundCohortId, hydrateState: false });
-      const loadedDatesPromise =
-          datesCohortId === foundCohortId && sortedAvailableDatesAsc.length > 0
-              ? Promise.resolve(sortedAvailableDatesAsc)
-              : loadDates({ cohortId: foundCohortId });
-      const summaryPromise = loadCohortSummary({
-          cohortId: foundCohortId,
-          datePool: stageDatePool.length ? stageDatePool : cachedStageDates,
-          expectedVersion: expectedSummaryVersion
-      });
-      const [loadedDates, loadedSummary, teacherMessagePayload] = await Promise.all([
-          loadedDatesPromise,
-          summaryPromise,
-          teacherMessagePromise
-      ]);
-      const getSearchDateID = (dateStr, datePool = loadedDates) => resolveScopedDateId(dateStr, foundCohortId, datePool);
-      let effectiveSummary = loadedSummary;
-      let contextData = fullClassData.length > 0 ? fullClassData : [];
-      if (!effectiveSummary.weekendIds.length) {
-          contextData = fullClassData.length > 0
-              ? fullClassData
-              : await loadParentSearchStudents(foundCohortId, { datePool: stageDatePool.length ? stageDatePool : cachedStageDates });
-      }
-      const derivedSearchDates = deriveDatePoolFromStudents(contextData);
-      const sortedDates = mergeDatePools(loadedDates, derivedSearchDates);
-      const effectiveDatePool = sortedDates.length ? sortedDates : loadedDates;
-      if (!effectiveSummary.weekendIds.length && contextData.length > 0) {
-          effectiveSummary = buildCohortSummaryPayload(contextData, foundCohortId, effectiveDatePool, {
-              version: expectedSummaryVersion
-          });
-          writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.summary, foundCohortId), effectiveSummary);
-          void persistCohortSummary({
-              cohortId: foundCohortId,
-              students: contextData,
-              datePool: effectiveDatePool,
-              version: expectedSummaryVersion
-          }).catch((error) => console.error('Persist cohort summary on parent search error:', error));
-      }
-      const effectiveClassAverages = await loadClassAverages({ cohortId: foundCohortId, datePool: effectiveDatePool });
-      writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, foundCohortId), effectiveDatePool);
-      const data = contextData.find((student) => String(student?.id || '').toUpperCase() === String(matchedStudent?.id || '').toUpperCase()) || matchedStudent;
-      if (foundCohortId === activePublicCohortId) {
-          setAvailableDates(effectiveDatePool);
-          setDatesCohortId(foundCohortId);
-          setClassAverages(effectiveClassAverages);
-          setClassAveragesCohortId(foundCohortId);
-          setCachedClassData(contextData);
-          setPublicStudentsCohortId(foundCohortId);
-      }
-      const nextParentViewContext = {
-          cohortId: foundCohortId,
-          dates: effectiveDatePool,
-          classData: contextData,
-          summary: effectiveSummary,
-          classAverages: effectiveClassAverages,
-          teacherMessage: teacherMessagePayload && typeof teacherMessagePayload === 'object'
-              ? {
-                  globalMessage: String(teacherMessagePayload.globalMessage || '').trim(),
-                  byStudent: normalizeTeacherStudentMessages(teacherMessagePayload.byStudent)
-              }
-              : { globalMessage: '', byStudent: {} }
-      };
-      setParentViewContext(nextParentViewContext);
-
-      const cacheStudentId = String(data.id || '').toUpperCase();
-      const cacheStudentKey = `${foundCohortId}::${cacheStudentId}`;
-      const hasPublicCachedStudents = publicStudentsCohortId === foundCohortId && cachedClassData.length > 0;
-      const shouldReuseCachedVersionBase =
-          foundCohortId === activePublicCohortId
-          && hasPublicCachedStudents
-          && contextData === cachedClassData
-          && datesCohortId === activePublicCohortId
-          && classAveragesCohortId === activePublicCohortId
-          && effectiveDatePool === sortedAvailableDatesAsc;
-      const parentQueryDataVersion = shouldReuseCachedVersionBase
-          ? hashFingerprint(`${cachedParentVersionBase}||${cachedParentStudentSignatureById[cacheStudentId] || buildStudentGradesSignature(data, (dateStr) => getSearchDateID(dateStr, effectiveDatePool))}`)
-          : effectiveSummary.weekendIds.length > 0
-              ? hashFingerprint([
-                  buildStudentGradesSignature(data, (dateStr) => getSearchDateID(dateStr, effectiveDatePool)),
-                  effectiveDatePool.join('|'),
-                  buildClassAveragesSignature(effectiveDatePool, effectiveClassAverages, (dateStr) => getSearchDateID(dateStr, effectiveDatePool)),
-                  effectiveSummary.version || effectiveSummary.weekendIds.join('|')
-              ].join('||'))
-              : buildParentQueryDataVersion({
-                  student: data,
-                  classData: contextData,
-                  dates: effectiveDatePool,
-                  classAveragesMap: effectiveClassAverages,
-                  getDateID: (dateStr) => getSearchDateID(dateStr, effectiveDatePool)
-              });
-      const cachedView = readParentQueryCache(cacheStudentKey, parentQueryDataVersion);
-      if (cachedView) {
-          setParentViewContext(nextParentViewContext);
-          if (Array.isArray(cachedView.chartData) && cachedView.chartData.length > 0) {
-              const latestCached = cachedView.chartData[cachedView.chartData.length - 1];
-              setActivePhase(resolvePhaseByDate(latestCached.weekendID || latestCached.date, effectiveDatePool));
-          }
-          setViewData(cachedView);
-          incrementQueryCount(data.id, foundCohortId);
-          updateParentQueryPerf(performance.now() - searchStartTs, true);
-          return;
-      }
-
-      const shouldReuseParentContext =
-          foundCohortId === activePublicCohortId
-          && sortedAvailableDatesAsc.length > 0
-          && effectiveDatePool === sortedAvailableDatesAsc
-          && publicStudentsCohortId === activePublicCohortId
-          && datesCohortId === activePublicCohortId;
-      const scoreContext = effectiveSummary.weekendIds.length > 0
-          ? buildProbabilityContextFromScoreIndex(effectiveSummary.byWeekend, effectiveDatePool, (dateStr) => getSearchDateID(dateStr, effectiveDatePool))
-          : shouldReuseParentContext && parentSearchScoreContext
-          ? parentSearchScoreContext
-          : buildProbabilityContext(contextData, effectiveDatePool, (dateStr) => getSearchDateID(dateStr, effectiveDatePool));
-      const { latestDateKey, viewData: nextViewData } = buildParentResolvedViewData({
-          student: data,
-          cohortId: foundCohortId,
-          classData: contextData,
-          datePool: effectiveDatePool,
-          classAveragesMap: effectiveClassAverages,
-          getDateID: (dateStr) => getSearchDateID(dateStr, effectiveDatePool),
-          scoreContext
-      });
-      if (latestDateKey) {
-          setActivePhase(resolvePhaseByDate(latestDateKey, effectiveDatePool));
-      }
-      setViewData(nextViewData);
-      hasRenderableView = true;
-      writeParentQueryCache(cacheStudentKey, parentQueryDataVersion, nextViewData);
-      incrementQueryCount(data.id, foundCohortId);
-      updateParentQueryPerf(performance.now() - searchStartTs, false);
-    } catch (e) {
-      console.error('Parent search error:', e);
-      if (!hasRenderableView) {
-          setViewData(null);
-          setSearchError('系統忙碌');
-      }
-      setParentSearchShell(null);
-      updateParentQueryPerf(performance.now() - searchStartTs, false);
-    } finally {
-      setParentAnalyticsPending(false);
-      setParentSearchShell(null);
-      releaseLoading();
-    }
-  };
-
-  const shouldBuildParentAnalytics = mode === 'parent' && Boolean(viewData?.chartData);
-
-  const parentPhaseData = useMemo(() => {
-      if (!shouldBuildParentAnalytics) return [];
-      return viewData.chartData.filter((d) => {
-          const dateKey = d.weekendID || parentGetTestDateID(d.date);
-          return resolvePhaseByDate(dateKey, parentSortedAvailableDatesAsc) === activePhase;
-      });
-  }, [shouldBuildParentAnalytics, viewData, activePhase, parentGetTestDateID, parentSortedAvailableDatesAsc]);
-  const deferredParentPhaseData = useDeferredValue(parentPhaseData);
-
-  const allSubjectScoresByWeekend = useMemo(() => {
-      if (!shouldBuildParentAnalytics) return {};
-      if (hasParentSummary) {
-          return Object.fromEntries(
-              Object.entries(parentSummaryByWeekend).map(([weekendID, classMap]) => [
-                  weekendID,
-                  classMap?.all || { chi: [], eng: [], math: [] }
-              ])
-          );
-      }
-      const buckets = {};
-      if (!deferredParentClassData.length) return buckets;
-
-      deferredParentClassData.forEach((student) => {
-          const weekendEntries = buildWeekendGradeEntryMap(student.grades, parentGetTestDateID);
-          Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
-              const grade = entry.grade;
-              if (!weekendID) return;
-              if (!buckets[weekendID]) {
-                  buckets[weekendID] = { chi: [], eng: [], math: [] };
-              }
-
-              ['chi', 'eng', 'math'].forEach((subject) => {
-                  const score = toNumberOrNull(grade?.[subject]);
-                  if (score !== null) buckets[weekendID][subject].push(score);
-              });
-          });
-      });
-
-      Object.values(buckets).forEach((bySubject) => {
-          ['chi', 'eng', 'math'].forEach((subject) => {
-              bySubject[subject].sort((a, b) => b - a);
-          });
-      });
-
-      return buckets;
-  }, [deferredParentClassData, hasParentSummary, parentGetTestDateID, parentSummaryByWeekend, shouldBuildParentAnalytics]);
-
-  const parentRadarData = useMemo(() => {
-      if (!deferredParentPhaseData.length) return [];
-      const fallbackAvgKeyBySubject = {
-          chi: 'avgAllChi',
-          eng: 'avgAllEng',
-          math: 'avgAllMath'
-      };
-
-      const summarize = (label, scoreKey) => {
-          const selfValues = deferredParentPhaseData
-              .map((item) => parseFloat(item[scoreKey]))
-              .filter((v) => !isNaN(v));
-          const benchmarkValues = deferredParentPhaseData
-              .map((item) => {
-                  const weekendID = item.weekendID || parentGetTestDateID(item.date);
-                  const scoreList = allSubjectScoresByWeekend[weekendID]?.[scoreKey] || [];
-                  const medianScore = resolveMedianScore(scoreList);
-                  if (medianScore !== null) return medianScore;
-                  const fallbackAvg = toNumberOrNull(item[fallbackAvgKeyBySubject[scoreKey]]);
-                  return fallbackAvg;
-              })
-              .filter((v) => v !== null);
-
-          const selfMean = selfValues.length ? selfValues.reduce((sum, v) => sum + v, 0) / selfValues.length : 0;
-          const benchmarkMean = benchmarkValues.length ? benchmarkValues.reduce((sum, v) => sum + v, 0) / benchmarkValues.length : 0;
-
-          return {
-              subject: label,
-              student: Number(selfMean.toFixed(1)),
-              classAvg: Number(benchmarkMean.toFixed(1))
-          };
-      };
-
-      return [
-          summarize('國文', 'chi'),
-          summarize('英文', 'eng'),
-          summarize('數學', 'math')
-      ];
-  }, [deferredParentPhaseData, allSubjectScoresByWeekend, parentGetTestDateID]);
-  const deferredParentRadarData = useDeferredValue(parentRadarData);
-
-  const parentRadarMax = useMemo(() => {
-      const values = deferredParentRadarData
-          .flatMap((item) => [item.student, item.classAvg])
-          .filter((v) => !isNaN(v));
-
-      if (!values.length) return 100;
-
-      const maxValue = Math.max(...values, 80);
-      return Math.min(120, Math.ceil(maxValue / 10) * 10);
-  }, [deferredParentRadarData]);
-
-  const activePhaseLabel = useMemo(() => {
-      const phase = PHASES.find((item) => item.id === activePhase);
-      return phase ? phase.name : '';
-  }, [activePhase]);
-
-  const parentPhaseDataDesc = useMemo(
-      () => [...deferredParentPhaseData].reverse(),
-      [deferredParentPhaseData]
-  );
-
-  // 預先為每個週末 / 班級 / 科目建立排序好的成績索引，避免在畫面 render 時重複掃描全班資料
-  const scoreIndexByWeekendAndClass = useMemo(() => {
-      if (!shouldBuildParentAnalytics) return {};
-      if (hasParentSummary) return parentSummaryByWeekend;
-      const index = {};
-      if (!deferredParentClassData.length) return index;
-
-      deferredParentClassData.forEach(student => {
-          const weekendEntries = buildWeekendGradeEntryMap(student.grades, parentGetTestDateID);
-          Object.entries(weekendEntries).forEach(([weekendId, entry]) => {
-              const g = entry.grade;
-              if (!weekendId) return;
-
-              const cls = g.class || 'A班';
-              if (!index[weekendId]) index[weekendId] = {};
-
-              // 班級索引
-              if (!index[weekendId][cls]) {
-                  index[weekendId][cls] = { total: [], chi: [], eng: [], math: [] };
-              }
-              // 全部學生（跨班）索引，用於本部 PR
-              if (!index[weekendId].all) {
-                  index[weekendId].all = { total: [], chi: [], eng: [], math: [] };
-              }
-
-              ['total', 'chi', 'eng', 'math'].forEach(subject => {
-                  const val = parseFloat(g[subject]);
-                  if (!isNaN(val)) {
-                      index[weekendId][cls][subject].push(val);
-                      index[weekendId].all[subject].push(val);
-                  }
-              });
-          });
-      });
-
-      // 每個 bucket 的分數都事先由高到低排序好
-      Object.values(index).forEach(byClass => {
-          Object.values(byClass).forEach(bySubject => {
-              Object.keys(bySubject).forEach(subjectKey => {
-                  bySubject[subjectKey].sort((a, b) => b - a);
-              });
-          });
-      });
-
-      return index;
-  }, [deferredParentClassData, hasParentSummary, parentGetTestDateID, parentSummaryByWeekend, shouldBuildParentAnalytics]);
-
-  const distributionProfileByWeekendClass = useMemo(() => {
-      const profile = {};
-      if (!shouldBuildParentAnalytics) return profile;
-
-      Object.entries(scoreIndexByWeekendAndClass).forEach(([weekendID, byClass]) => {
-          profile[weekendID] = {};
-
-          Object.entries(byClass).forEach(([classKey, bySubject]) => {
-              profile[weekendID][classKey] = {};
-
-              ['total', 'chi', 'eng', 'math'].forEach((subject) => {
-                  const maxScore = getMaxScore(weekendID, subject, parentAvailableDates);
-                  const template = buildDistributionTemplate(maxScore);
-                  const counts = new Array(template.buckets.length).fill(0);
-                  const scoreList = bySubject[subject] || [];
-
-                  scoreList.forEach((score) => {
-                      const bucketIdx = resolveDistributionBucketIndex(score, template);
-                      if (bucketIdx >= 0) counts[bucketIdx] += 1;
-                  });
-
-                  profile[weekendID][classKey][subject] = { template, counts };
-              });
-          });
-      });
-
-      return profile;
-  }, [parentAvailableDates, shouldBuildParentAnalytics, scoreIndexByWeekendAndClass]);
-
-  const rankLookupByWeekendClassSubject = useMemo(() => {
-      const lookup = {};
-      if (!shouldBuildParentAnalytics) return lookup;
-
-      Object.entries(scoreIndexByWeekendAndClass).forEach(([weekendID, byClass]) => {
-          lookup[weekendID] = {};
-          Object.entries(byClass).forEach(([classKey, bySubject]) => {
-              lookup[weekendID][classKey] = {};
-              ['total', 'chi', 'eng', 'math'].forEach((subject) => {
-                  const scores = bySubject[subject] || [];
-                  const rankMap = {};
-                  scores.forEach((score, index) => {
-                      if (rankMap[score] === undefined) {
-                          rankMap[score] = index + 1;
-                      }
-                  });
-                  lookup[weekendID][classKey][subject] = rankMap;
-              });
-          });
-      });
-
-      return lookup;
-  }, [shouldBuildParentAnalytics, scoreIndexByWeekendAndClass]);
-
-  const globalPRLookupByWeekendSubject = useMemo(() => {
-      const lookup = {};
-      if (!shouldBuildParentAnalytics) return lookup;
-
-      Object.entries(scoreIndexByWeekendAndClass).forEach(([weekendID, byClass]) => {
-          const allScores = byClass?.all;
-          if (!allScores) return;
-
-          lookup[weekendID] = {};
-          ['total', 'chi', 'eng', 'math'].forEach((subject) => {
-              const scores = allScores[subject] || [];
-              if (scores.length < 100) return;
-              lookup[weekendID][subject] = buildPRLookupByScore(scores);
-          });
-      });
-
-      return lookup;
-  }, [shouldBuildParentAnalytics, scoreIndexByWeekendAndClass]);
-
-  // 計算單科或總分在「本班」中的名次（#1, #2...）
-  const calculateRank = (date, subject, myScore, myClass) => {
-      if ((!hasParentSummary && !parentClassData.length) || !myScore) return '-';
-      const myVal = parseFloat(myScore);
-      if (isNaN(myVal)) return '-';
-      
-      const targetClass = myClass || 'A班';
-      const currentWeekendID = parentGetTestDateID(date);
-
-      const rankLookup = rankLookupByWeekendClassSubject[currentWeekendID]?.[targetClass]?.[subject];
-      if (!rankLookup) return '-';
-
-      const rank = rankLookup[myVal];
-      return rank !== undefined ? rank : '-';
-  };
-
-  // 計算「本部全部學生」的 PR（需樣本數達門檻）
-  const calculateGlobalPR = (date, subject, myScore) => {
-      if ((!hasParentSummary && !parentClassData.length) || !myScore) return '-';
-      const myVal = parseFloat(myScore);
-      if (isNaN(myVal)) return '-';
-
-      const currentWeekendID = parentGetTestDateID(date);
-      const lookup = globalPRLookupByWeekendSubject[currentWeekendID]?.[subject];
-      if (!lookup) return null;
-
-      const pr = lookup.get(myVal);
-      return pr !== undefined ? pr : '-';
-  };
-
-  // 計算某次測驗的成績分布，用於家長端的「落點分析」長條圖
-  const calculateDistribution = (date, subject, myScore, allDates, myClass) => {
-      if (!hasParentSummary && !parentClassData.length) return [];
-      const myVal = parseFloat(myScore);
-      const currentWeekendID = parentGetTestDateID(date);
-      const targetClass = myClass || 'A班';
-      const precomputed = distributionProfileByWeekendClass[currentWeekendID]?.[targetClass]?.[subject];
-
-      const fallbackTemplate = buildDistributionTemplate(getMaxScore(date, subject, allDates));
-      const template = precomputed?.template || fallbackTemplate;
-      const counts = precomputed?.counts || new Array(template.buckets.length).fill(0);
-      const myBucketIdx = resolveDistributionBucketIndex(myVal, template);
-
-      return template.buckets.map((bucket, idx) => ({
-          range: bucket.label,
-          count: counts[idx] || 0,
-          min: bucket.min,
-          max: bucket.max,
-          isMyRange: idx === myBucketIdx
-      }));
-  };
-
-  const relevantWeekendIdsForPR = useMemo(() => {
-      if (!shouldBuildBatchAnalytics) return [];
-      const selectedWeekendID = getTestDateID(batchDate);
-      if (!selectedWeekendID) return [];
-      const ids = [selectedWeekendID];
-      const selectedIndex = orderedWeekendIds.indexOf(selectedWeekendID);
-      if (selectedIndex > 0) ids.push(orderedWeekendIds[selectedIndex - 1]);
-      return ids;
-  }, [shouldBuildBatchAnalytics, batchDate, getTestDateID, orderedWeekendIds]);
-
-  const batchRelevantGradeMapsByStudentId = useMemo(() => {
-      if (!shouldBuildBatchAnalytics || relevantWeekendIdsForPR.length === 0) return {};
-      const targetWeekendIds = new Set(relevantWeekendIdsForPR);
-      const gradeMaps = {};
-
-      allStudentsData.forEach((student) => {
-          const weekendGrades = {};
-          Object.entries(allStudentWeekendGradesByStudentId[student.id] || {}).forEach(([weekendID, grade]) => {
-              if (!targetWeekendIds.has(weekendID)) return;
-              weekendGrades[weekendID] = grade;
-          });
-          const currentBatchInfo = currentBatchGradeInfoByStudentId[student.id];
-          if (currentBatchInfo && selectedBatchWeekendID && targetWeekendIds.has(selectedBatchWeekendID)) {
-              weekendGrades[selectedBatchWeekendID] = currentBatchInfo.grade;
-          }
-          if (Object.keys(weekendGrades).length > 0) {
-              gradeMaps[student.id] = weekendGrades;
-          }
-      });
-
-      return gradeMaps;
-  }, [allStudentWeekendGradesByStudentId, allStudentsData, currentBatchGradeInfoByStudentId, relevantWeekendIdsForPR, selectedBatchWeekendID, shouldBuildBatchAnalytics]);
-
-  const globalPRByStudentAndWeekend = useMemo(() => {
-      if (!shouldBuildBatchAnalytics || relevantWeekendIdsForPR.length === 0) return {};
-      const targetWeekendSet = new Set(relevantWeekendIdsForPR);
-      const totalsByWeekend = {};
-      Object.entries(batchRelevantGradeMapsByStudentId).forEach(([studentId, weekendGrades]) => {
-          targetWeekendSet.forEach((weekendID) => {
-              const grade = weekendGrades?.[weekendID];
-              if (!grade) return;
-              const total = toNumberOrNull(grade?.total);
-              if (total === null) return;
-              if (!totalsByWeekend[weekendID]) totalsByWeekend[weekendID] = [];
-              totalsByWeekend[weekendID].push({ studentId, total });
-          });
-      });
-
-      const prByStudent = {};
-      Object.entries(totalsByWeekend).forEach(([weekendID, entries]) => {
-          if (entries.length < 50) return;
-          const sortedTotals = entries.map((item) => item.total).sort((a, b) => b - a);
-          const prLookup = buildPRLookupByScore(sortedTotals);
-          entries.forEach(({ studentId, total }) => {
-              const pr = prLookup.get(total);
-              if (pr === undefined) return;
-              if (!prByStudent[studentId]) prByStudent[studentId] = {};
-              prByStudent[studentId][weekendID] = pr;
-          });
-      });
-
-      return prByStudent;
-  }, [batchRelevantGradeMapsByStudentId, shouldBuildBatchAnalytics, relevantWeekendIdsForPR]);
-
-  const batchRowsForDisplay = useMemo(() => {
-      if (!shouldBuildBatchAnalytics) return [];
-
-      const weekendID = getTestDateID(batchDate);
-      const rows = [];
-
-      allStudentsData.forEach(student => {
-          const dateGrades = batchRelevantGradeMapsByStudentId[student.id]?.[weekendID];
-          if (!dateGrades) return;
-
-          const currentClass = dateGrades.class || 'A班';
-          if (currentClass !== teacherClassFilter) return;
-          if (!hasAnySubjectScore(dateGrades)) return;
-
-          rows.push({ student, dateGrades });
-      });
-
-      const computedRows = rows.map((row) => {
-          const prValue = globalPRByStudentAndWeekend[row.student.id]?.[weekendID] ?? '-';
-          const probValue = admissionProbabilities[row.student.id] ?? '-';
-          const prSortValue = prValue === '-' ? -1 : prValue;
-          const probNumeric = probValue === '-' ? -1 : Number(probValue);
-          const probSortValue = isNaN(probNumeric) ? -1 : probNumeric;
-
-          return {
-              ...row,
-              prValue,
-              probValue,
-              prSortValue,
-              probSortValue
-          };
-      });
-
-      if (sortByPR) {
-          computedRows.sort((a, b) => b.prSortValue - a.prSortValue);
-      } else if (sortByProb) {
-          computedRows.sort((a, b) => b.probSortValue - a.probSortValue);
-      }
-
-      return computedRows;
-  }, [
-      shouldBuildBatchAnalytics,
-      allStudentsData,
-      batchDate,
-      teacherClassFilter,
-      getTestDateID,
-      sortByPR,
-      sortByProb,
-      admissionProbabilities,
-      batchRelevantGradeMapsByStudentId,
-      globalPRByStudentAndWeekend
-  ]);
-  batchRowsForDisplayRef.current = batchRowsForDisplay;
-
-  const batchClassCounts = useMemo(() => {
-      if (!shouldBuildBatchAnalytics) return {};
-      const counts = {};
-      allStudentsData.forEach((student) => {
-          const grade = currentBatchGradeInfoByStudentId[student.id]?.grade;
-          if (!grade || !hasAnySubjectScore(grade)) return;
-          const classId = grade.class || defaultTeacherClassId;
-          counts[classId] = (counts[classId] || 0) + 1;
-      });
-      return counts;
-  }, [allStudentsData, currentBatchGradeInfoByStudentId, defaultTeacherClassId, shouldBuildBatchAnalytics]);
-
-  const fallbackBatchClassId = useMemo(() => {
-      let target = defaultTeacherClassId;
-      let maxCount = batchClassCounts[target] || 0;
-      activeTeacherClassDefs.forEach(({ id }) => {
-          const count = batchClassCounts[id] || 0;
-          if (count > maxCount) {
-              target = id;
-              maxCount = count;
-          }
-      });
-      return maxCount > 0 ? target : '';
-  }, [activeTeacherClassDefs, batchClassCounts, defaultTeacherClassId]);
-
-  useEffect(() => {
-      if (!shouldBuildBatchAnalytics || isBatchDirty) return;
-      if (batchRowsForDisplay.length > 0) return;
-      if (!fallbackBatchClassId || fallbackBatchClassId === teacherClassFilter) return;
-      const autoScopeKey = `${activeTeacherCohortId || ''}::${selectedBatchWeekendID || batchDate || ''}`;
-      if (batchAutoClassScopeRef.current === autoScopeKey) return;
-      batchAutoClassScopeRef.current = autoScopeKey;
-      setTeacherClassFilter(fallbackBatchClassId);
-  }, [activeTeacherCohortId, batchDate, batchRowsForDisplay.length, fallbackBatchClassId, isBatchDirty, selectedBatchWeekendID, shouldBuildBatchAnalytics, teacherClassFilter]);
 
   const handleExportBatchExcel = async () => {
       if (!window.XLSX) {
@@ -6245,74 +3518,669 @@ export default function App() {
       setTimeout(() => setStatusMsg(''), 2000);
   };
 
-  const handleDownloadImportTemplate = useCallback(async () => {
-      if (!window.XLSX) {
-          setStatusMsg('Excel 模組載入中，請稍後');
-          try {
-              await ensureXlsxReady();
-          } catch (error) {
-              console.error('XLSX load error:', error);
-              setStatusMsg('Excel 模組載入失敗');
-              setTimeout(() => setStatusMsg(''), 2000);
-              return;
+  const parentSearchScoreContext = useMemo(() => {
+      if (!cachedClassData.length || !sortedAvailableDatesAsc.length) return null;
+      return buildProbabilityContext(cachedClassData, sortedAvailableDatesAsc, getTestDateID);
+  }, [cachedClassData, sortedAvailableDatesAsc, getTestDateID]);
+
+  const cachedParentDateSignature = useMemo(
+      () => sortedAvailableDatesAsc.join('|'),
+      [sortedAvailableDatesAsc]
+  );
+
+  const cachedParentClassSignature = useMemo(
+      () => buildClassContextSignature(cachedClassData, getTestDateID),
+      [cachedClassData, getTestDateID]
+  );
+
+  const cachedParentClassAverageSignature = useMemo(
+      () => buildClassAveragesSignature(sortedAvailableDatesAsc, classAverages, getTestDateID),
+      [sortedAvailableDatesAsc, classAverages, getTestDateID]
+  );
+
+  const cachedParentVersionBase = useMemo(
+      () => hashFingerprint([cachedParentDateSignature, cachedParentClassSignature, cachedParentClassAverageSignature].join('||')),
+      [cachedParentDateSignature, cachedParentClassSignature, cachedParentClassAverageSignature]
+  );
+
+  const cachedParentStudentSignatureById = useMemo(() => {
+      const signatureById = {};
+      cachedClassData.forEach((student) => {
+          const normalizedId = String(student?.id || '').toUpperCase().trim();
+          if (!normalizedId) return;
+          signatureById[normalizedId] = buildStudentGradesSignature(student, getTestDateID);
+      });
+      return signatureById;
+  }, [cachedClassData, getTestDateID]);
+
+  const handleParentSearch = async () => {
+    if (!searchId.trim()) return;
+    if (!user) {
+      setSearchError('系統連線中，請稍候再查詢');
+      return;
+    }
+    const searchStartTs = performance.now();
+    setSearchError(''); setViewData(null); setLoading(true);
+    try {
+      const rawSearchKeyword = searchId.trim();
+      const normalizedSearchId = rawSearchKeyword.toUpperCase();
+      const matchFromList = (list) => findStudentByIdOrName(list, rawSearchKeyword);
+
+      const effectiveDates = sortedAvailableDatesAsc.length > 0
+          ? sortedAvailableDatesAsc
+          : await loadDates();
+      const sortedDates = effectiveDates;
+      const getSearchDateID = (dateStr) => getWeekendID(dateStr, effectiveDates);
+      const weekendOrder = new Map();
+      sortedDates.forEach((date, index) => {
+          const weekendID = getSearchDateID(date);
+          if (weekendID && !weekendOrder.has(weekendID)) {
+              weekendOrder.set(weekendID, index);
+          }
+      });
+      let data = null;
+      let fullClassData = [];
+      let hasDuplicateName = false;
+
+      if (cachedClassData.length > 0) {
+          fullClassData = cachedClassData;
+          const matched = matchFromList(cachedClassData);
+          data = matched.student;
+          hasDuplicateName = matched.duplicateName;
+      } else if (allStudentsData.length > 0) {
+          fullClassData = allStudentsData;
+          const matched = matchFromList(allStudentsData);
+          data = matched.student;
+          hasDuplicateName = matched.duplicateName;
+      }
+
+      if (!data && hasDuplicateName) {
+          setSearchError('同名學生超過 1 位，請改用學號查詢');
+          updateParentQueryPerf(performance.now() - searchStartTs, false);
+          setLoading(false);
+          return;
+      }
+
+      const likelyStudentId = /^[A-Z0-9_-]{3,24}$/.test(normalizedSearchId);
+      if (db && !data && likelyStudentId) {
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${normalizedSearchId}`);
+          const docSnap = await getDoc(docRef);
+          if (docSnap.exists()) {
+              const rawData = docSnap.data();
+              const normalizedResult = normalizeGrades(rawData.grades, { withMeta: true });
+              data = { ...rawData, grades: normalizedResult.normalized };
+              if (normalizedResult.changed && rawData.id) {
+                  void setDoc(
+                      doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${rawData.id}`),
+                      { ...rawData, grades: normalizedResult.normalized, lastUpdated: new Date().toISOString() }
+                  ).catch((err) => console.error('Parent search cleanup invalid date error:', err));
+              }
           }
       }
 
-      const workbook = window.XLSX.utils.book_new();
-      const applyCenteredCellLayout = (sheet) => {
-          if (!sheet?.['!ref']) return;
-          const range = window.XLSX.utils.decode_range(sheet['!ref']);
-          for (let row = range.s.r; row <= range.e.r; row += 1) {
-              for (let col = range.s.c; col <= range.e.c; col += 1) {
-                  const cellAddress = window.XLSX.utils.encode_cell({ r: row, c: col });
-                  const cell = sheet[cellAddress];
-                  if (!cell) continue;
-                  cell.s = {
-                      ...(cell.s || {}),
-                      alignment: {
-                          ...(cell.s?.alignment || {}),
-                          horizontal: 'center',
-                          vertical: 'center'
-                      }
-                  };
+      if (db && fullClassData.length === 0) {
+          const cachedStudents = readLocalCache(LOCAL_CACHE_KEYS.students, STUDENT_CACHE_TTL_MS);
+          if (Array.isArray(cachedStudents) && cachedStudents.length > 0) {
+              fullClassData = cachedStudents;
+              setCachedClassData(cachedStudents);
+          } else {
+              const qSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'students'));
+              fullClassData = [];
+              const cleanupPayloads = [];
+              qSnap.forEach(d => {
+                  const rawData = d.data();
+                  const normalizedResult = normalizeGrades(rawData.grades, { withMeta: true });
+                  fullClassData.push({ ...rawData, grades: normalizedResult.normalized });
+                  if (normalizedResult.changed && rawData.id) {
+                      cleanupPayloads.push({
+                          id: rawData.id,
+                          payload: { ...rawData, grades: normalizedResult.normalized, lastUpdated: new Date().toISOString() }
+                      });
+                  }
+              });
+              if (cleanupPayloads.length > 0) {
+                  void Promise.all(
+                      cleanupPayloads.map((item) =>
+                          setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'students', `student_${item.id}`), item.payload)
+                      )
+                  ).catch((err) => console.error('Parent search cleanup invalid date error:', err));
               }
+              setCachedClassData(fullClassData);
+              writeLocalCache(LOCAL_CACHE_KEYS.students, fullClassData);
           }
+
+      }
+
+      if (!data && fullClassData.length > 0) {
+          const matched = matchFromList(fullClassData);
+          if (matched.duplicateName) {
+              setSearchError('同名學生超過 1 位，請改用學號查詢');
+              updateParentQueryPerf(performance.now() - searchStartTs, false);
+              setLoading(false);
+              return;
+          }
+          data = matched.student;
+      }
+      if (data) {
+        const contextData = fullClassData.length > 0
+            ? fullClassData
+            : (cachedClassData.length > 0 ? cachedClassData : allStudentsData);
+        const cacheStudentId = String(data.id || '').toUpperCase();
+        const shouldReuseCachedVersionBase =
+            contextData === cachedClassData
+            && sortedDates === sortedAvailableDatesAsc;
+        const parentQueryDataVersion = shouldReuseCachedVersionBase
+            ? hashFingerprint(`${cachedParentVersionBase}||${cachedParentStudentSignatureById[cacheStudentId] || buildStudentGradesSignature(data, getSearchDateID)}`)
+            : buildParentQueryDataVersion({
+                student: data,
+                classData: contextData,
+                dates: sortedDates,
+                classAveragesMap: classAverages,
+                getDateID: getSearchDateID
+            });
+        const cachedView = readParentQueryCache(cacheStudentId, parentQueryDataVersion);
+        if (cachedView) {
+            setViewData(cachedView);
+            incrementQueryCount(data.id);
+            updateParentQueryPerf(performance.now() - searchStartTs, true);
+            setLoading(false);
+            return;
+        }
+
+        const allChartData = [];
+        
+        // 建立 availableDates 的 weekendID Set，用於快速查找（使用新的連續日期邏輯）
+        const availableWeekendIDs = new Set(weekendOrder.keys());
+        
+        // 遍歷學生所有成績（同考次去重），確保連續日期的成績也能被找到
+        if (data.grades) {
+          const weekendGradeEntries = buildWeekendGradeEntryMap(data.grades, getSearchDateID);
+          Object.entries(weekendGradeEntries).forEach(([weekendID, entry]) => {
+            const weekData = entry.grade;
+            if (!weekData || !weekData.total) return;
+
+            // 只處理在 availableDates 範圍內的成績
+            if (!availableWeekendIDs.has(weekendID)) return;
+            
+            const t = parseFloat(weekData.total);
+            if (isNaN(t) || t <= 0) return;
+            
+            const weekClass = weekData.class || 'A班';
+            const avgData = (classAverages[weekendID] && classAverages[weekendID][weekClass]) 
+                          ? classAverages[weekendID][weekClass] 
+                          : {};
+            const avgAllData = (classAverages[weekendID] && classAverages[weekendID].all)
+                          ? classAverages[weekendID].all
+                          : {};
+            const resolveAverageValue = (primaryValue, fallbackValue) => {
+                const primaryNumber = toNumberOrNull(primaryValue);
+                if (primaryNumber !== null) return primaryNumber;
+                return toNumberOrNull(fallbackValue);
+            };
+            
+            // 決定顯示日期：日A班/日B班顯示週日，其他顯示週六
+            let displayDate = weekendID;
+            if (weekClass === '日A班' || weekClass === '日B班') {
+                displayDate = getSundayDate(weekendID);
+            } 
+            
+            allChartData.push({
+                date: displayDate, 
+                weekendID: weekendID, // 保存 weekendID 用於排序
+                total: t, 
+                chi: parseFloat(weekData.chi)||0, 
+                eng: parseFloat(weekData.eng)||0, 
+                math: parseFloat(weekData.math)||0,
+                avgTotal: resolveAverageValue(avgData.total, avgAllData.total), 
+                avgChi: resolveAverageValue(avgData.chi, avgAllData.chi), 
+                avgEng: resolveAverageValue(avgData.eng, avgAllData.eng), 
+                avgMath: resolveAverageValue(avgData.math, avgAllData.math),
+                avgAllTotal: toNumberOrNull(avgAllData.total),
+                avgAllChi: toNumberOrNull(avgAllData.chi),
+                avgAllEng: toNumberOrNull(avgAllData.eng),
+                avgAllMath: toNumberOrNull(avgAllData.math),
+                class: weekClass
+            });
+          });
+        }
+        
+        // 依照 weekendID 在 sortedDates 中的位置排序，確保折線圖順序正確
+        allChartData.sort((a, b) => {
+          const indexA = weekendOrder.has(a.weekendID) ? weekendOrder.get(a.weekendID) : Number.POSITIVE_INFINITY;
+          const indexB = weekendOrder.has(b.weekendID) ? weekendOrder.get(b.weekendID) : Number.POSITIVE_INFINITY;
+          if (indexA === indexB) return 0;
+          return indexA - indexB;
+        });
+        const avg = allChartData.length > 0 ? (allChartData.reduce((a,b)=>a+b.total,0)/allChartData.length).toFixed(1) : 0;
+        let studentProb = '-';
+        
+        if (contextData.length > 0) {
+            const shouldReuseParentContext = sortedAvailableDatesAsc.length > 0 && effectiveDates === sortedAvailableDatesAsc;
+            const scoreContext = shouldReuseParentContext && parentSearchScoreContext
+                ? parentSearchScoreContext
+                : buildProbabilityContext(contextData, sortedDates, getSearchDateID);
+            
+            // Build simple grade map for target student
+            const studentGradeMap = {};
+            studentGradeMap[data.id] = {};
+            const weekendEntries = buildWeekendGradeEntryMap(data.grades, getSearchDateID);
+            Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
+                studentGradeMap[data.id][weekendID] = entry.grade;
+            });
+            
+            studentProb = calculateProbLogic(
+                data,
+                scoreContext.scoresByDate,
+                scoreContext.mathScoresByDate,
+                studentGradeMap,
+                scoreContext.normalizedDates,
+                scoreContext.probabilityProfiles,
+                scoreContext.totalPRLookupByDate,
+                scoreContext.mathPRLookupByDate
+            );
+        }
+
+        const nextViewData = { ...data, chartData: allChartData, average: avg, prob: studentProb };
+        setViewData(nextViewData);
+        writeParentQueryCache(cacheStudentId, parentQueryDataVersion, nextViewData);
+        incrementQueryCount(data.id);
+        updateParentQueryPerf(performance.now() - searchStartTs, false);
+      } else {
+        setSearchError('查無此學號或姓名');
+        updateParentQueryPerf(performance.now() - searchStartTs, false);
+      }
+    } catch (e) {
+      console.error('Parent search error:', e);
+      setSearchError('系統忙碌');
+      updateParentQueryPerf(performance.now() - searchStartTs, false);
+    }
+    setLoading(false);
+  };
+
+  const shouldBuildParentAnalytics = mode === 'parent' && Boolean(viewData?.chartData);
+
+  const parentPhaseData = useMemo(() => {
+      if (!shouldBuildParentAnalytics) return [];
+      return viewData.chartData.filter((d) => {
+          const dateKey = d.weekendID || getTestDateID(d.date);
+          return resolvePhaseByDate(dateKey, sortedAvailableDatesAsc) === activePhase;
+      });
+  }, [shouldBuildParentAnalytics, viewData, activePhase, sortedAvailableDatesAsc, getTestDateID]);
+  const deferredParentPhaseData = useDeferredValue(parentPhaseData);
+
+  const allSubjectScoresByWeekend = useMemo(() => {
+      const buckets = {};
+      if (!shouldBuildParentAnalytics || !cachedClassData.length) return buckets;
+
+      cachedClassData.forEach((student) => {
+          const weekendEntries = buildWeekendGradeEntryMap(student.grades, getTestDateID);
+          Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
+              const grade = entry.grade;
+              if (!weekendID) return;
+              if (!buckets[weekendID]) {
+                  buckets[weekendID] = { chi: [], eng: [], math: [] };
+              }
+
+              ['chi', 'eng', 'math'].forEach((subject) => {
+                  const score = toNumberOrNull(grade?.[subject]);
+                  if (score !== null) buckets[weekendID][subject].push(score);
+              });
+          });
+      });
+
+      Object.values(buckets).forEach((bySubject) => {
+          ['chi', 'eng', 'math'].forEach((subject) => {
+              bySubject[subject].sort((a, b) => b - a);
+          });
+      });
+
+      return buckets;
+  }, [shouldBuildParentAnalytics, cachedClassData, getTestDateID]);
+
+  const parentRadarData = useMemo(() => {
+      if (!deferredParentPhaseData.length) return [];
+      const fallbackAvgKeyBySubject = {
+          chi: 'avgAllChi',
+          eng: 'avgAllEng',
+          math: 'avgAllMath'
       };
-      const templateRows = [
-          importFormatGuide.sampleHeaders,
-          ...importFormatGuide.sampleRows
-      ];
-      const templateSheet = window.XLSX.utils.aoa_to_sheet(templateRows);
-      templateSheet['!cols'] = [
-          { wch: 12 },
-          { wch: 14 },
-          { wch: 12 },
-          { wch: 10 },
-          { wch: 8 },
-          { wch: 8 },
-          { wch: 8 }
-      ];
-      applyCenteredCellLayout(templateSheet);
-      window.XLSX.utils.book_append_sheet(workbook, templateSheet, '成績匯入範本');
 
-      const guideRows = [
-          ['項目', '說明'],
-          ['建議欄位', importFormatGuide.sampleHeaders.join(' / ')],
-          ...importFormatGuide.headerHints.map((text, index) => [`欄位辨識 ${index + 1}`, text]),
-          ...importFormatGuide.rules.map((text, index) => [`注意事項 ${index + 1}`, text])
-      ];
-      const guideSheet = window.XLSX.utils.aoa_to_sheet(guideRows);
-      guideSheet['!cols'] = [
-          { wch: 16 },
-          { wch: 72 }
-      ];
-      applyCenteredCellLayout(guideSheet);
-      window.XLSX.utils.book_append_sheet(workbook, guideSheet, '匯入說明');
+      const summarize = (label, scoreKey) => {
+          const selfValues = deferredParentPhaseData
+              .map((item) => parseFloat(item[scoreKey]))
+              .filter((v) => !isNaN(v));
+          const benchmarkValues = deferredParentPhaseData
+              .map((item) => {
+                  const weekendID = item.weekendID || getTestDateID(item.date);
+                  const scoreList = allSubjectScoresByWeekend[weekendID]?.[scoreKey] || [];
+                  const medianScore = resolveMedianScore(scoreList);
+                  if (medianScore !== null) return medianScore;
+                  const fallbackAvg = toNumberOrNull(item[fallbackAvgKeyBySubject[scoreKey]]);
+                  return fallbackAvg;
+              })
+              .filter((v) => v !== null);
 
-      window.XLSX.writeFile(workbook, '成績匯入模板.xlsx');
-      setStatusMsg('已下載匯入範本');
-      setTimeout(() => setStatusMsg(''), 1800);
-  }, [ensureXlsxReady, importFormatGuide]);
+          const selfMean = selfValues.length ? selfValues.reduce((sum, v) => sum + v, 0) / selfValues.length : 0;
+          const benchmarkMean = benchmarkValues.length ? benchmarkValues.reduce((sum, v) => sum + v, 0) / benchmarkValues.length : 0;
+
+          return {
+              subject: label,
+              student: Number(selfMean.toFixed(1)),
+              classAvg: Number(benchmarkMean.toFixed(1))
+          };
+      };
+
+      return [
+          summarize('國文', 'chi'),
+          summarize('英文', 'eng'),
+          summarize('數學', 'math')
+      ];
+  }, [deferredParentPhaseData, allSubjectScoresByWeekend, getTestDateID]);
+  const deferredParentRadarData = useDeferredValue(parentRadarData);
+
+  const parentRadarMax = useMemo(() => {
+      const values = deferredParentRadarData
+          .flatMap((item) => [item.student, item.classAvg])
+          .filter((v) => !isNaN(v));
+
+      if (!values.length) return 100;
+
+      const maxValue = Math.max(...values, 80);
+      return Math.min(120, Math.ceil(maxValue / 10) * 10);
+  }, [deferredParentRadarData]);
+
+  const activePhaseLabel = useMemo(() => {
+      const phase = PHASES.find((item) => item.id === activePhase);
+      return phase ? phase.name : '';
+  }, [activePhase]);
+
+  const parentPhaseDataDesc = useMemo(
+      () => [...deferredParentPhaseData].reverse(),
+      [deferredParentPhaseData]
+  );
+
+  // 預先為每個週末 / 班級 / 科目建立排序好的成績索引，避免在畫面 render 時重複掃描全班資料
+  const scoreIndexByWeekendAndClass = useMemo(() => {
+      const index = {};
+
+      if (!shouldBuildParentAnalytics || !cachedClassData.length) return index;
+
+      cachedClassData.forEach(student => {
+          const weekendEntries = buildWeekendGradeEntryMap(student.grades, getTestDateID);
+          Object.entries(weekendEntries).forEach(([weekendId, entry]) => {
+              const g = entry.grade;
+              if (!weekendId) return;
+
+              const cls = g.class || 'A班';
+              if (!index[weekendId]) index[weekendId] = {};
+
+              // 班級索引
+              if (!index[weekendId][cls]) {
+                  index[weekendId][cls] = { total: [], chi: [], eng: [], math: [] };
+              }
+              // 全部學生（跨班）索引，用於本部 PR
+              if (!index[weekendId].all) {
+                  index[weekendId].all = { total: [], chi: [], eng: [], math: [] };
+              }
+
+              ['total', 'chi', 'eng', 'math'].forEach(subject => {
+                  const val = parseFloat(g[subject]);
+                  if (!isNaN(val)) {
+                      index[weekendId][cls][subject].push(val);
+                      index[weekendId].all[subject].push(val);
+                  }
+              });
+          });
+      });
+
+      // 每個 bucket 的分數都事先由高到低排序好
+      Object.values(index).forEach(byClass => {
+          Object.values(byClass).forEach(bySubject => {
+              Object.keys(bySubject).forEach(subjectKey => {
+                  bySubject[subjectKey].sort((a, b) => b - a);
+              });
+          });
+      });
+
+      return index;
+  }, [shouldBuildParentAnalytics, cachedClassData, getTestDateID]);
+
+  const distributionProfileByWeekendClass = useMemo(() => {
+      const profile = {};
+      if (!shouldBuildParentAnalytics) return profile;
+
+      Object.entries(scoreIndexByWeekendAndClass).forEach(([weekendID, byClass]) => {
+          profile[weekendID] = {};
+
+          Object.entries(byClass).forEach(([classKey, bySubject]) => {
+              profile[weekendID][classKey] = {};
+
+              ['total', 'chi', 'eng', 'math'].forEach((subject) => {
+                  const maxScore = getMaxScore(weekendID, subject, availableDates);
+                  const template = buildDistributionTemplate(maxScore);
+                  const counts = new Array(template.buckets.length).fill(0);
+                  const scoreList = bySubject[subject] || [];
+
+                  scoreList.forEach((score) => {
+                      const bucketIdx = resolveDistributionBucketIndex(score, template);
+                      if (bucketIdx >= 0) counts[bucketIdx] += 1;
+                  });
+
+                  profile[weekendID][classKey][subject] = { template, counts };
+              });
+          });
+      });
+
+      return profile;
+  }, [shouldBuildParentAnalytics, scoreIndexByWeekendAndClass, availableDates]);
+
+  const rankLookupByWeekendClassSubject = useMemo(() => {
+      const lookup = {};
+      if (!shouldBuildParentAnalytics) return lookup;
+
+      Object.entries(scoreIndexByWeekendAndClass).forEach(([weekendID, byClass]) => {
+          lookup[weekendID] = {};
+          Object.entries(byClass).forEach(([classKey, bySubject]) => {
+              lookup[weekendID][classKey] = {};
+              ['total', 'chi', 'eng', 'math'].forEach((subject) => {
+                  const scores = bySubject[subject] || [];
+                  const rankMap = {};
+                  scores.forEach((score, index) => {
+                      if (rankMap[score] === undefined) {
+                          rankMap[score] = index + 1;
+                      }
+                  });
+                  lookup[weekendID][classKey][subject] = rankMap;
+              });
+          });
+      });
+
+      return lookup;
+  }, [shouldBuildParentAnalytics, scoreIndexByWeekendAndClass]);
+
+  const globalPRLookupByWeekendSubject = useMemo(() => {
+      const lookup = {};
+      if (!shouldBuildParentAnalytics) return lookup;
+
+      Object.entries(scoreIndexByWeekendAndClass).forEach(([weekendID, byClass]) => {
+          const allScores = byClass?.all;
+          if (!allScores) return;
+
+          lookup[weekendID] = {};
+          ['total', 'chi', 'eng', 'math'].forEach((subject) => {
+              const scores = allScores[subject] || [];
+              if (scores.length < 100) return;
+              lookup[weekendID][subject] = buildPRLookupByScore(scores);
+          });
+      });
+
+      return lookup;
+  }, [shouldBuildParentAnalytics, scoreIndexByWeekendAndClass]);
+
+  // 計算單科或總分在「本班」中的名次（#1, #2...）
+  const calculateRank = (date, subject, myScore, myClass) => {
+      if (!cachedClassData.length || !myScore) return '-';
+      const myVal = parseFloat(myScore);
+      if (isNaN(myVal)) return '-';
+      
+      const targetClass = myClass || 'A班';
+      const currentWeekendID = getTestDateID(date);
+
+      const rankLookup = rankLookupByWeekendClassSubject[currentWeekendID]?.[targetClass]?.[subject];
+      if (!rankLookup) return '-';
+
+      const rank = rankLookup[myVal];
+      return rank !== undefined ? rank : '-';
+  };
+
+  // 計算「本部全部學生」的 PR（需樣本數達門檻）
+  const calculateGlobalPR = (date, subject, myScore) => {
+      if (!cachedClassData.length || !myScore) return '-';
+      const myVal = parseFloat(myScore);
+      if (isNaN(myVal)) return '-';
+
+      const currentWeekendID = getTestDateID(date);
+      const lookup = globalPRLookupByWeekendSubject[currentWeekendID]?.[subject];
+      if (!lookup) return null;
+
+      const pr = lookup.get(myVal);
+      return pr !== undefined ? pr : '-';
+  };
+
+  // 計算某次測驗的成績分布，用於家長端的「落點分析」長條圖
+  const calculateDistribution = (date, subject, myScore, allDates, myClass) => {
+      if (!cachedClassData.length) return [];
+      const myVal = parseFloat(myScore);
+      const currentWeekendID = getTestDateID(date);
+      const targetClass = myClass || 'A班';
+      const precomputed = distributionProfileByWeekendClass[currentWeekendID]?.[targetClass]?.[subject];
+
+      const fallbackTemplate = buildDistributionTemplate(getMaxScore(date, subject, allDates));
+      const template = precomputed?.template || fallbackTemplate;
+      const counts = precomputed?.counts || new Array(template.buckets.length).fill(0);
+      const myBucketIdx = resolveDistributionBucketIndex(myVal, template);
+
+      return template.buckets.map((bucket, idx) => ({
+          range: bucket.label,
+          count: counts[idx] || 0,
+          min: bucket.min,
+          max: bucket.max,
+          isMyRange: idx === myBucketIdx
+      }));
+  };
+
+  const relevantWeekendIdsForPR = useMemo(() => {
+      if (!shouldBuildBatchAnalytics) return [];
+      const selectedWeekendID = getTestDateID(batchDate);
+      if (!selectedWeekendID) return [];
+      const ids = [selectedWeekendID];
+      const selectedIndex = orderedWeekendIds.indexOf(selectedWeekendID);
+      if (selectedIndex > 0) ids.push(orderedWeekendIds[selectedIndex - 1]);
+      return ids;
+  }, [shouldBuildBatchAnalytics, batchDate, getTestDateID, orderedWeekendIds]);
+
+  const batchRelevantGradeMapsByStudentId = useMemo(() => {
+      if (!shouldBuildBatchAnalytics || relevantWeekendIdsForPR.length === 0) return {};
+      const targetWeekendIds = new Set(relevantWeekendIdsForPR);
+      const gradeMaps = {};
+
+      deferredStudentsForDerived.forEach((student) => {
+          const weekendEntries = buildTargetWeekendGradeEntryMap(student.grades, targetWeekendIds, getTestDateID);
+          const weekendGrades = {};
+          Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
+              weekendGrades[weekendID] = entry.grade;
+          });
+          if (Object.keys(weekendGrades).length > 0) {
+              gradeMaps[student.id] = weekendGrades;
+          }
+      });
+
+      return gradeMaps;
+  }, [deferredStudentsForDerived, getTestDateID, relevantWeekendIdsForPR, shouldBuildBatchAnalytics]);
+
+  const globalPRByStudentAndWeekend = useMemo(() => {
+      if (!shouldBuildBatchAnalytics || relevantWeekendIdsForPR.length === 0) return {};
+      const targetWeekendSet = new Set(relevantWeekendIdsForPR);
+      const totalsByWeekend = {};
+      Object.entries(batchRelevantGradeMapsByStudentId).forEach(([studentId, weekendGrades]) => {
+          targetWeekendSet.forEach((weekendID) => {
+              const grade = weekendGrades?.[weekendID];
+              if (!grade) return;
+              const total = toNumberOrNull(grade?.total);
+              if (total === null) return;
+              if (!totalsByWeekend[weekendID]) totalsByWeekend[weekendID] = [];
+              totalsByWeekend[weekendID].push({ studentId, total });
+          });
+      });
+
+      const prByStudent = {};
+      Object.entries(totalsByWeekend).forEach(([weekendID, entries]) => {
+          if (entries.length < 50) return;
+          const sortedTotals = entries.map((item) => item.total).sort((a, b) => b - a);
+          const prLookup = buildPRLookupByScore(sortedTotals);
+          entries.forEach(({ studentId, total }) => {
+              const pr = prLookup.get(total);
+              if (pr === undefined) return;
+              if (!prByStudent[studentId]) prByStudent[studentId] = {};
+              prByStudent[studentId][weekendID] = pr;
+          });
+      });
+
+      return prByStudent;
+  }, [batchRelevantGradeMapsByStudentId, shouldBuildBatchAnalytics, relevantWeekendIdsForPR]);
+
+  const batchRowsForDisplay = useMemo(() => {
+      if (!shouldBuildBatchAnalytics) return [];
+
+      const weekendID = getTestDateID(batchDate);
+      const rows = [];
+
+      deferredStudentsForDerived.forEach(student => {
+          const dateGrades = batchRelevantGradeMapsByStudentId[student.id]?.[weekendID];
+          if (!dateGrades) return;
+
+          const currentClass = dateGrades.class || 'A班';
+          if (currentClass !== teacherClassFilter) return;
+          if (!hasAnySubjectScore(dateGrades)) return;
+
+          rows.push({ student, dateGrades });
+      });
+
+      const computedRows = rows.map((row) => {
+          const prValue = globalPRByStudentAndWeekend[row.student.id]?.[weekendID] ?? '-';
+          const probValue = admissionProbabilities[row.student.id] || '-';
+          const prSortValue = prValue === '-' ? -1 : prValue;
+          const probNumeric = probValue === '-' ? -1 : Number(probValue);
+          const probSortValue = isNaN(probNumeric) ? -1 : probNumeric;
+
+          return {
+              ...row,
+              prValue,
+              probValue,
+              prSortValue,
+              probSortValue
+          };
+      });
+
+      if (sortByPR) {
+          computedRows.sort((a, b) => b.prSortValue - a.prSortValue);
+      } else if (sortByProb) {
+          computedRows.sort((a, b) => b.probSortValue - a.probSortValue);
+      }
+
+      return computedRows;
+  }, [
+      shouldBuildBatchAnalytics,
+      deferredStudentsForDerived,
+      batchDate,
+      teacherClassFilter,
+      getTestDateID,
+      sortByPR,
+      sortByProb,
+      admissionProbabilities,
+      batchRelevantGradeMapsByStudentId,
+      globalPRByStudentAndWeekend
+  ]);
 
   useEffect(() => {
       if (teacherViewMode !== 'batch' || batchInsightTab !== 'grades') return;
@@ -6567,15 +4435,35 @@ export default function App() {
       setQueryPanelStage('shell');
       let cancelled = false;
       let rafId = null;
+      let idleId = null;
+      let timerId = null;
+
+      const promoteToFull = () => {
+          if (cancelled) return;
+          startTransition(() => {
+              setQueryPanelStage('full');
+          });
+      };
 
       rafId = requestAnimationFrame(() => {
           if (cancelled) return;
           setQueryPanelStage('core');
+
+          if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+              idleId = window.requestIdleCallback(() => promoteToFull(), { timeout: 700 });
+              return;
+          }
+
+          timerId = window.setTimeout(promoteToFull, 180);
       });
 
       return () => {
           cancelled = true;
           if (rafId) cancelAnimationFrame(rafId);
+          if (idleId && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+              window.cancelIdleCallback(idleId);
+          }
+          if (timerId) window.clearTimeout(timerId);
       };
   }, [isQueryTabRequested]);
 
@@ -6583,21 +4471,24 @@ export default function App() {
       mode === 'teacher'
       && teacherViewMode === 'batch'
       && deferredBatchInsightTab === 'query'
-      && queryPanelStage === 'core';
+      && queryPanelStage !== 'idle'
+      && queryPanelStage !== 'shell';
+  const shouldBuildQueryDeepInsights =
+      shouldBuildQueryInsights && queryPanelStage === 'full';
   const isQueryInsightsPending =
       isQueryTabRequested
-      && (deferredBatchInsightTab !== 'query' || queryPanelStage !== 'core');
+      && (deferredBatchInsightTab !== 'query' || queryPanelStage === 'idle' || queryPanelStage === 'shell');
+  const isQueryDeepInsightsPending =
+      shouldBuildQueryInsights && queryPanelStage !== 'full';
 
   const studentNameById = useMemo(() => {
       if (!shouldBuildQueryInsights) return {};
       const map = {};
-      allStudentsData.forEach((student) => {
-          const studentId = String(student?.id || '').toUpperCase().trim();
-          if (!studentId) return;
-          map[studentId] = student.name || '';
+      deferredStudentsForDerived.forEach((student) => {
+          map[student.id] = student.name || '';
       });
       return map;
-  }, [allStudentsData, shouldBuildQueryInsights]);
+  }, [deferredStudentsForDerived, shouldBuildQueryInsights]);
 
   const queryEventTimeline = useMemo(() => {
       if (!shouldBuildQueryInsights) return [];
@@ -6618,7 +4509,7 @@ export default function App() {
               };
           })
           .filter(Boolean)
-          .sort((a, b) => b.ts - a.ts);
+          .sort((a, b) => a.ts - b.ts);
   }, [deferredQueryEvents, studentNameById, shouldBuildQueryInsights]);
 
   const queryEventsByDay = useMemo(() => {
@@ -6631,6 +4522,10 @@ export default function App() {
           grouped[event.dateKey].items.push(event);
       });
       return Object.values(grouped)
+          .map((day) => ({
+              ...day,
+              items: [...day.items].sort((a, b) => b.ts - a.ts)
+          }))
           .sort((a, b) => b.dateKey.localeCompare(a.dateKey));
   }, [queryEventTimeline, shouldBuildQueryInsights]);
 
@@ -6638,9 +4533,7 @@ export default function App() {
       if (!shouldBuildQueryInsights) return [];
       const latestTsById = {};
       queryEventTimeline.forEach((event) => {
-          if (!latestTsById[event.id] || event.ts > latestTsById[event.id]) {
-              latestTsById[event.id] = event.ts;
-          }
+          latestTsById[event.id] = event.ts;
       });
 
       return Object.entries(deferredQueryStatsById)
@@ -6663,6 +4556,55 @@ export default function App() {
           });
   }, [deferredQueryStatsById, studentNameById, queryEventTimeline, shouldBuildQueryInsights]);
 
+  const latestQueryTsById = useMemo(() => {
+      if (!shouldBuildQueryInsights) return {};
+      const map = {};
+      queryEventTimeline.forEach((event) => {
+          map[event.id] = event.ts;
+      });
+      return map;
+  }, [queryEventTimeline, shouldBuildQueryInsights]);
+
+  const queryClassCoverageRows = useMemo(() => {
+      if (!shouldBuildQueryInsights) return [];
+      const rows = deferredBatchRowsForDisplay.map((row) => {
+          const id = String(row.student.id || '').toUpperCase();
+          const count = Number(deferredQueryStatsById[id] || 0);
+          const latestTs = Number(latestQueryTsById[id]) || 0;
+          const latestAtLabel = latestTs
+              ? formatMonitorDateTimeLabel(latestTs, false)
+              : '--';
+
+          return {
+              id,
+              name: row.student.name || '',
+              count,
+              latestTs,
+              latestAtLabel
+          };
+      });
+
+      return rows.sort((a, b) => {
+          if (b.count !== a.count) return b.count - a.count;
+          return b.latestTs - a.latestTs;
+      });
+  }, [deferredBatchRowsForDisplay, deferredQueryStatsById, latestQueryTsById, shouldBuildQueryInsights]);
+
+  const queryClassStudentIdSet = useMemo(() => {
+      if (!shouldBuildQueryInsights) return new Set();
+      const idSet = new Set();
+      queryClassCoverageRows.forEach((row) => {
+          const id = String(row.id || '').toUpperCase();
+          if (id) idSet.add(id);
+      });
+      return idSet;
+  }, [queryClassCoverageRows, shouldBuildQueryInsights]);
+
+  const queryMonitorBaseRows = useMemo(() => {
+      if (!shouldBuildQueryInsights) return [];
+      return deferredQueryMonitorScope === 'class' ? queryClassCoverageRows : queryStatsRows;
+  }, [deferredQueryMonitorScope, queryClassCoverageRows, queryStatsRows, shouldBuildQueryInsights]);
+
   const queryStatsRowsFiltered = useMemo(() => {
       if (!shouldBuildQueryInsights) return [];
       const keyword = deferredQueryMonitorKeyword.trim();
@@ -6670,7 +4612,7 @@ export default function App() {
       const upperKeyword = keyword.toUpperCase();
       const lowerKeyword = keyword.toLowerCase();
 
-      const rows = queryStatsRows.filter((row) => {
+      const rows = queryMonitorBaseRows.filter((row) => {
           if (!hasKeyword) return true;
           const idText = String(row.id || '').toUpperCase();
           const nameText = String(row.name || '').toLowerCase();
@@ -6695,7 +4637,7 @@ export default function App() {
           return b.latestTs - a.latestTs;
       });
       return rows;
-  }, [queryStatsRows, deferredQueryMonitorKeyword, deferredQueryMonitorSort, shouldBuildQueryInsights]);
+  }, [queryMonitorBaseRows, deferredQueryMonitorKeyword, deferredQueryMonitorSort, shouldBuildQueryInsights]);
 
   const queryEventsByDayFiltered = useMemo(() => {
       if (!shouldBuildQueryInsights) return [];
@@ -6703,11 +4645,15 @@ export default function App() {
       const hasKeyword = keyword.length > 0;
       const upperKeyword = keyword.toUpperCase();
       const lowerKeyword = keyword.toLowerCase();
+      const shouldLimitToClass = deferredQueryMonitorScope === 'class';
 
       return queryEventsByDay
           .filter((day) => deferredQueryMonitorDateFilter === 'all' || day.dateKey === deferredQueryMonitorDateFilter)
           .map((day) => {
               let items = day.items;
+              if (shouldLimitToClass) {
+                  items = items.filter((event) => queryClassStudentIdSet.has(String(event.id || '').toUpperCase()));
+              }
               if (hasKeyword) {
                   items = items.filter((event) => {
                       const idText = String(event.id || '').toUpperCase();
@@ -6718,7 +4664,7 @@ export default function App() {
               return { ...day, items };
           })
           .filter((day) => day.items.length > 0);
-  }, [queryEventsByDay, deferredQueryMonitorDateFilter, deferredQueryMonitorKeyword, shouldBuildQueryInsights]);
+  }, [queryEventsByDay, deferredQueryMonitorDateFilter, deferredQueryMonitorKeyword, deferredQueryMonitorScope, queryClassStudentIdSet, shouldBuildQueryInsights]);
 
   const queryFilteredEventList = useMemo(
       () => (shouldBuildQueryInsights ? queryEventsByDayFiltered.flatMap((day) => day.items) : []),
@@ -6729,19 +4675,206 @@ export default function App() {
       if (!shouldBuildQueryInsights) {
           return {
               totalQueries: 0,
-              rankedStudentCount: 0,
-              filteredEventCount: 0,
+              uniqueStudentCount: 0,
+              peakHourLabel: '--',
+              peakHourCount: 0,
               latestDayCount: 0
           };
       }
+      const hourCounts = Array.from({ length: 24 }, (_, hour) => ({ hour, count: 0 }));
+      queryFilteredEventList.forEach((event) => {
+          const hour = new Date(event.ts).getHours();
+          hourCounts[hour].count += 1;
+      });
+
+      const peak = hourCounts.reduce((top, current) => {
+          if (!top || current.count > top.count) return current;
+          return top;
+      }, null);
+
+      const uniqueStudentCount = queryStatsRowsFiltered.filter((row) => Number(row.count) > 0).length;
 
       return {
-          totalQueries: queryEventTimeline.length,
-          rankedStudentCount: queryStatsRowsFiltered.length,
-          filteredEventCount: queryFilteredEventList.length,
+          totalQueries: queryFilteredEventList.length,
+          uniqueStudentCount,
+          peakHourLabel: peak && peak.count > 0 ? `${String(peak.hour).padStart(2, '0')}:00-${String((peak.hour + 1) % 24).padStart(2, '0')}:00` : '--',
+          peakHourCount: peak?.count || 0,
           latestDayCount: queryEventsByDayFiltered[0]?.items.length || 0
       };
-  }, [queryEventTimeline, queryFilteredEventList.length, queryStatsRowsFiltered.length, queryEventsByDayFiltered, shouldBuildQueryInsights]);
+  }, [queryFilteredEventList, queryStatsRowsFiltered, queryEventsByDayFiltered, shouldBuildQueryInsights]);
+
+  const queryRecentWindowSummary = useMemo(() => {
+      if (!shouldBuildQueryInsights) return { last24h: 0, last3d: 0, last7d: 0 };
+      const now = Date.now();
+      const oneDayAgo = now - (24 * 60 * 60 * 1000);
+      const threeDaysAgo = now - (3 * 24 * 60 * 60 * 1000);
+      const sevenDaysAgo = now - (7 * 24 * 60 * 60 * 1000);
+      let last24h = 0;
+      let last3d = 0;
+      let last7d = 0;
+
+      queryFilteredEventList.forEach((event) => {
+          if (event.ts >= sevenDaysAgo) {
+              last7d += 1;
+              if (event.ts >= threeDaysAgo) {
+                  last3d += 1;
+                  if (event.ts >= oneDayAgo) {
+                      last24h += 1;
+                  }
+              }
+          }
+      });
+
+      return { last24h, last3d, last7d };
+  }, [queryFilteredEventList, shouldBuildQueryInsights]);
+
+  const queryBiHourBuckets = useMemo(() => {
+      if (!shouldBuildQueryDeepInsights) return [];
+      const buckets = Array.from({ length: 12 }, (_, index) => ({
+          key: index,
+          startHour: index * 2,
+          endHour: (index * 2) + 2,
+          count: 0
+      }));
+
+      queryFilteredEventList.forEach((event) => {
+          const hour = new Date(event.ts).getHours();
+          const bucketIndex = Math.floor(hour / 2);
+          buckets[bucketIndex].count += 1;
+      });
+
+      const maxCount = buckets.reduce((max, item) => Math.max(max, item.count), 0);
+      const safeMax = maxCount > 0 ? maxCount : 1;
+      return buckets.map((bucket) => ({
+          ...bucket,
+          label: `${String(bucket.startHour).padStart(2, '0')}-${String(bucket.endHour % 24).padStart(2, '0')}`,
+          ratio: bucket.count / safeMax
+      }));
+  }, [queryFilteredEventList, shouldBuildQueryDeepInsights]);
+
+  const queryDailyTrend = useMemo(() => {
+      if (!shouldBuildQueryDeepInsights) return [];
+      const trendDays = [...queryEventsByDayFiltered].slice(0, 14).reverse();
+      const maxCount = trendDays.reduce((max, day) => Math.max(max, day.items.length), 0);
+      const safeMax = maxCount > 0 ? maxCount : 1;
+      return trendDays.map((day) => ({
+          dateKey: day.dateKey,
+          label: day.dateLabel,
+          count: day.items.length,
+          ratio: day.items.length / safeMax
+      }));
+  }, [queryEventsByDayFiltered, shouldBuildQueryDeepInsights]);
+
+  const queryDayCountByIdMap = useMemo(() => {
+      if (!shouldBuildQueryDeepInsights) return {};
+      const map = {};
+      queryEventsByDayFiltered.forEach((day) => {
+          const dayCount = {};
+          day.items.forEach((event) => {
+              const id = String(event.id || '').toUpperCase();
+              if (!id) return;
+              dayCount[id] = (dayCount[id] || 0) + 1;
+          });
+          Object.entries(dayCount).forEach(([id, count]) => {
+              if (!map[id]) map[id] = [];
+              map[id].push(count);
+          });
+      });
+      return map;
+  }, [queryEventsByDayFiltered, shouldBuildQueryDeepInsights]);
+
+  const queryRecent48hCountById = useMemo(() => {
+      if (!shouldBuildQueryDeepInsights) return {};
+      const cutoff = Date.now() - (48 * 60 * 60 * 1000);
+      const map = {};
+      queryFilteredEventList.forEach((event) => {
+          if (event.ts < cutoff) return;
+          const id = String(event.id || '').toUpperCase();
+          if (!id) return;
+          map[id] = (map[id] || 0) + 1;
+      });
+      return map;
+  }, [queryFilteredEventList, shouldBuildQueryDeepInsights]);
+
+  const queryMonitorAlertRows = useMemo(() => {
+      if (!shouldBuildQueryDeepInsights) return [];
+      const now = Date.now();
+      return queryStatsRowsFiltered
+          .map((row) => {
+              const latestTs = Number(row.latestTs) || 0;
+              const daysSinceLast = latestTs ? Math.floor((now - latestTs) / (24 * 60 * 60 * 1000)) : null;
+              const dayCounts = queryDayCountByIdMap[row.id] || [];
+              const maxDayCount = dayCounts.length ? Math.max(...dayCounts) : 0;
+              const recent48hCount = Number(queryRecent48hCountById[row.id] || 0);
+              const tags = [];
+              let alertScore = 0;
+
+              if (Number(row.count) === 0) {
+                  alertScore += 100;
+                  tags.push('尚未查詢');
+              }
+
+              if (daysSinceLast !== null) {
+                  if (daysSinceLast >= 14) {
+                      alertScore += 34;
+                      tags.push(`${daysSinceLast} 天未查`);
+                  } else if (daysSinceLast >= 7) {
+                      alertScore += 20;
+                      tags.push(`${daysSinceLast} 天未查`);
+                  }
+              }
+
+              if (maxDayCount >= 6) {
+                  alertScore += 24;
+                  tags.push(`單日 ${maxDayCount} 次`);
+              } else if (maxDayCount >= 4) {
+                  alertScore += 12;
+                  tags.push(`單日 ${maxDayCount} 次`);
+              }
+
+              if (recent48hCount >= 5) {
+                  alertScore += 16;
+                  tags.push(`48h ${recent48hCount} 次`);
+              } else if (recent48hCount >= 3) {
+                  alertScore += 8;
+                  tags.push(`48h ${recent48hCount} 次`);
+              }
+
+              if (alertScore <= 0) return null;
+
+              return {
+                  ...row,
+                  alertScore,
+                  daysSinceLast,
+                  maxDayCount,
+                  recent48hCount,
+                  tags: tags.slice(0, 3)
+              };
+          })
+          .filter(Boolean)
+          .sort((a, b) => {
+              if (b.alertScore !== a.alertScore) return b.alertScore - a.alertScore;
+              if (b.count !== a.count) return b.count - a.count;
+              return b.latestTs - a.latestTs;
+          })
+          .slice(0, 12);
+  }, [queryStatsRowsFiltered, queryDayCountByIdMap, queryRecent48hCountById, shouldBuildQueryDeepInsights]);
+
+  const queryClassCoverageSummary = useMemo(() => {
+      if (!shouldBuildQueryInsights) {
+          return { total: 0, queried: 0, unqueried: 0, coverageRate: 0 };
+      }
+      const total = queryClassCoverageRows.length;
+      const queried = queryClassCoverageRows.filter((row) => row.count > 0).length;
+      const unqueried = Math.max(total - queried, 0);
+      const coverageRate = total > 0 ? Math.round((queried / total) * 100) : 0;
+      return { total, queried, unqueried, coverageRate };
+  }, [queryClassCoverageRows, shouldBuildQueryInsights]);
+
+  const queryClassUnqueriedPreview = useMemo(
+      () => (shouldBuildQueryInsights ? queryClassCoverageRows.filter((row) => row.count === 0).slice(0, 16) : []),
+      [queryClassCoverageRows, shouldBuildQueryInsights]
+  );
 
   useEffect(() => {
       if (!shouldBuildQueryInsights) return;
@@ -6757,6 +4890,235 @@ export default function App() {
       return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
   }, [queryStatsLastResetAt]);
 
+  const dataQualityReport = useMemo(() => {
+      const emptySummary = {
+          totalStudents: 0,
+          missingNameCount: 0,
+          duplicateNameCount: 0,
+          invalidDateKeyCount: 0,
+          outOfRangeScoreCount: 0,
+          invalidClassCount: 0,
+          orphanDateCount: 0,
+          emptyGradeStudentCount: 0,
+          issueCount: 0
+      };
+      const emptyDetails = {
+          missingName: [],
+          duplicateName: [],
+          invalidDateKey: [],
+          outOfRangeScore: [],
+          invalidClass: [],
+          orphanDate: [],
+          emptyGradeStudent: []
+      };
+
+      if (!shouldBuildQueryDeepInsights) {
+          return { summary: emptySummary, details: emptyDetails };
+      }
+
+      const validClassSet = new Set(CLASS_DEFS.map((item) => item.id));
+      const duplicateNameMap = {};
+      const usedWeekendIds = new Set();
+      const details = {
+          missingName: [],
+          duplicateName: [],
+          invalidDateKey: [],
+          outOfRangeScore: [],
+          invalidClass: [],
+          orphanDate: [],
+          emptyGradeStudent: []
+      };
+      const pushDetail = (type, item) => {
+          const list = details[type];
+          if (!Array.isArray(list)) return;
+          if (list.length >= MAX_QUALITY_DETAIL_ITEMS) return;
+          list.push(item);
+      };
+
+      let invalidDateKeyCount = 0;
+      let outOfRangeScoreCount = 0;
+      let missingNameCount = 0;
+      let invalidClassCount = 0;
+      let emptyGradeStudentCount = 0;
+
+      deferredStudentsForDerived.forEach((student) => {
+          const studentId = String(student?.id || '').toUpperCase().trim() || '未填學號';
+          const studentName = String(student?.name || '').trim();
+          const displayName = studentName || '未命名';
+          if (!studentName) {
+              missingNameCount += 1;
+              pushDetail('missingName', {
+                  key: `missing-${studentId}`,
+                  primary: studentId,
+                  secondary: '姓名欄位空白'
+              });
+          } else {
+              const normalizedName = normalizeSearchText(studentName);
+              if (normalizedName) {
+                  if (!duplicateNameMap[normalizedName]) duplicateNameMap[normalizedName] = [];
+                  duplicateNameMap[normalizedName].push({ id: studentId, name: studentName });
+              }
+          }
+
+          const gradesObj = student?.grades && typeof student.grades === 'object' ? student.grades : {};
+          let studentHasScore = false;
+          Object.entries(gradesObj).forEach(([rawDate, grade]) => {
+              const normalizedDate = normalizeDateToken(rawDate);
+              if (!normalizedDate) {
+                  invalidDateKeyCount += 1;
+                  pushDetail('invalidDateKey', {
+                      key: `invalid-date-${studentId}-${rawDate}`,
+                      primary: `${studentId} ${displayName}`,
+                      secondary: `不合理日期鍵：${String(rawDate)}`
+                  });
+                  return;
+              }
+              const weekendID = getTestDateID(normalizedDate);
+              if (!weekendID) return;
+              const weekendLabel = getWeekendDisplayLabel(weekendID);
+              const className = String(grade?.class || '').trim();
+              if (className && !validClassSet.has(className)) {
+                  invalidClassCount += 1;
+                  pushDetail('invalidClass', {
+                      key: `invalid-class-${studentId}-${weekendID}-${className}`,
+                      primary: `${studentId} ${displayName}`,
+                      secondary: `${weekendLabel} 班級欄位異常：${className}`
+                  });
+              }
+
+              SCORE_KEYS.forEach((subject) => {
+                  const score = toNumberOrNull(grade?.[subject]);
+                  if (score === null) return;
+                  const maxScore = getMaxScore(weekendID, subject, deferredDatesForDerived);
+                  if (score < 0 || score > maxScore) {
+                      outOfRangeScoreCount += 1;
+                      pushDetail('outOfRangeScore', {
+                          key: `oor-${studentId}-${weekendID}-${subject}-${score}`,
+                          primary: `${studentId} ${displayName}`,
+                          secondary: `${weekendLabel} ${COLORS[subject]?.label || subject}=${score}（合理上限 ${maxScore}）`
+                      });
+                      return;
+                  }
+                  studentHasScore = true;
+                  usedWeekendIds.add(weekendID);
+              });
+          });
+
+          if (!studentHasScore) {
+              emptyGradeStudentCount += 1;
+              pushDetail('emptyGradeStudent', {
+                  key: `empty-grade-${studentId}`,
+                  primary: `${studentId} ${displayName}`,
+                  secondary: '目前沒有任何有效科目分數'
+              });
+          }
+      });
+
+      let duplicateNameCount = 0;
+      Object.entries(duplicateNameMap).forEach(([normalized, students]) => {
+          if (!Array.isArray(students) || students.length <= 1) return;
+          duplicateNameCount += students.length;
+          const displayName = students[0]?.name || normalized;
+          pushDetail('duplicateName', {
+              key: `duplicate-${normalized}`,
+              primary: displayName,
+              secondary: `重複學號：${students.map((item) => item.id).join('、')}`
+          });
+      });
+
+      const orphanWeekendIds = new Set();
+      sanitizeDateList(deferredDatesForDerived).forEach((date) => {
+          const weekendID = getTestDateID(date);
+          if (!weekendID) return;
+          if (usedWeekendIds.has(weekendID)) return;
+          orphanWeekendIds.add(weekendID);
+      });
+      const orphanDateCount = orphanWeekendIds.size;
+      Array.from(orphanWeekendIds).sort(customDateSort).forEach((weekendID) => {
+          pushDetail('orphanDate', {
+              key: `orphan-${weekendID}`,
+              primary: getWeekendDisplayLabel(weekendID),
+              secondary: '此考次目前沒有任何有效分數'
+          });
+      });
+
+      const issueCount =
+          invalidDateKeyCount +
+          outOfRangeScoreCount +
+          missingNameCount +
+          invalidClassCount +
+          duplicateNameCount +
+          orphanDateCount;
+
+      return {
+          summary: {
+              totalStudents: deferredStudentsForDerived.length,
+              missingNameCount,
+              duplicateNameCount,
+              invalidDateKeyCount,
+              outOfRangeScoreCount,
+              invalidClassCount,
+              orphanDateCount,
+              emptyGradeStudentCount,
+              issueCount
+          },
+          details
+      };
+  }, [deferredDatesForDerived, deferredStudentsForDerived, getTestDateID, shouldBuildQueryDeepInsights]);
+
+  const dataQualitySummary = dataQualityReport.summary;
+  const dataQualityDetails = dataQualityReport.details;
+
+  const qualityIssueCountByType = useMemo(() => ({
+      missingName: dataQualitySummary.missingNameCount,
+      duplicateName: dataQualitySummary.duplicateNameCount,
+      invalidDateKey: dataQualitySummary.invalidDateKeyCount,
+      outOfRangeScore: dataQualitySummary.outOfRangeScoreCount,
+      invalidClass: dataQualitySummary.invalidClassCount,
+      orphanDate: dataQualitySummary.orphanDateCount,
+      emptyGradeStudent: dataQualitySummary.emptyGradeStudentCount
+  }), [dataQualitySummary]);
+
+  const qualityMetricCards = useMemo(() => ([
+      { type: 'missingName', label: '缺姓名', count: dataQualitySummary.missingNameCount, tone: 'rose' },
+      { type: 'duplicateName', label: '重複姓名', count: dataQualitySummary.duplicateNameCount, tone: 'amber' },
+      { type: 'emptyGradeStudent', label: '空成績檔', count: dataQualitySummary.emptyGradeStudentCount, tone: 'amber' },
+      { type: 'invalidDateKey', label: '無效日期鍵', count: dataQualitySummary.invalidDateKeyCount, tone: 'rose' },
+      { type: 'outOfRangeScore', label: '異常分數', count: dataQualitySummary.outOfRangeScoreCount, tone: 'rose' },
+      { type: 'invalidClass', label: '無效班級', count: dataQualitySummary.invalidClassCount, tone: 'amber' },
+      { type: 'orphanDate', label: '空白考次', count: dataQualitySummary.orphanDateCount, tone: 'amber' }
+  ]), [dataQualitySummary]);
+
+  const activeQualityIssueTitle = useMemo(() => {
+      const titleMap = {
+          missingName: '缺姓名學生',
+          duplicateName: '重複姓名名單',
+          invalidDateKey: '無效日期鍵',
+          outOfRangeScore: '異常分數明細',
+          invalidClass: '無效班級資料',
+          orphanDate: '空白考次',
+          emptyGradeStudent: '空成績檔學生'
+      };
+      return titleMap[activeQualityIssueType] || '';
+  }, [activeQualityIssueType]);
+
+  const activeQualityIssueItems = useMemo(
+      () => (activeQualityIssueType ? (dataQualityDetails[activeQualityIssueType] || []) : []),
+      [activeQualityIssueType, dataQualityDetails]
+  );
+
+  useEffect(() => {
+      if (shouldBuildQueryDeepInsights) return;
+      if (!activeQualityIssueType) return;
+      setActiveQualityIssueType('');
+  }, [shouldBuildQueryDeepInsights, activeQualityIssueType]);
+
+  useEffect(() => {
+      if (!activeQualityIssueType) return;
+      if ((qualityIssueCountByType[activeQualityIssueType] || 0) > 0) return;
+      setActiveQualityIssueType('');
+  }, [activeQualityIssueType, qualityIssueCountByType]);
+
   const operationLogPreview = useMemo(
       () => operationLogs.slice(0, 36),
       [operationLogs]
@@ -6766,10 +5128,10 @@ export default function App() {
       setStatsModalData({
           date,
           className: className || 'A班',
-          total: calculateDistribution(date, 'total', grades.total, parentAvailableDates, className),
-          chi: calculateDistribution(date, 'chi', grades.chi, parentAvailableDates, className),
-          eng: calculateDistribution(date, 'eng', grades.eng, parentAvailableDates, className),
-          math: calculateDistribution(date, 'math', grades.math, parentAvailableDates, className),
+          total: calculateDistribution(date, 'total', grades.total, availableDates, className),
+          chi: calculateDistribution(date, 'chi', grades.chi, availableDates, className),
+          eng: calculateDistribution(date, 'eng', grades.eng, availableDates, className),
+          math: calculateDistribution(date, 'math', grades.math, availableDates, className),
           myGrades: grades
       });
   };
@@ -6778,18 +5140,16 @@ export default function App() {
       () => getProbabilityVisual(viewData?.prob, darkMode),
       [viewData, darkMode]
   );
-  const shouldShowParentWideShell = Boolean(viewData || parentSearchShell);
-  const isParentViewPending = Boolean(parentAnalyticsPending);
 
   const teacherMessageForParent = useMemo(
       () => {
           const studentId = String(viewData?.id || '').toUpperCase().trim();
           if (!studentId) return '';
-          const personalMessage = String(parentTeacherMessageContext.byStudent?.[studentId] || '').trim();
+          const personalMessage = String(teacherStudentMessages[studentId] || '').trim();
           if (personalMessage) return personalMessage;
-          return String(parentTeacherMessageContext.globalMessage || '').trim();
+          return String(teacherGlobalMessage || '').trim();
       },
-      [parentTeacherMessageContext, viewData]
+      [viewData, teacherStudentMessages, teacherGlobalMessage]
   );
 
   const statsSummary = useMemo(() => {
@@ -6806,7 +5166,7 @@ export default function App() {
       }, null);
 
       const myScore = toNumberOrNull(statsModalData.myGrades?.[statsActiveTab]);
-      const weekendID = parentGetTestDateID(statsModalData.date);
+      const weekendID = getTestDateID(statsModalData.date);
       const className = statsModalData.className || 'A班';
       const classScores = scoreIndexByWeekendAndClass[weekendID]?.[className]?.[statsActiveTab] || [];
 
@@ -6859,7 +5219,7 @@ export default function App() {
           equalCount,
           lowerCount
       };
-  }, [statsModalData, statsActiveTab, parentGetTestDateID, scoreIndexByWeekendAndClass]);
+  }, [statsModalData, statsActiveTab, getTestDateID, scoreIndexByWeekendAndClass]);
 
   const isLandingMode = mode === 'landing';
   const isConnectionReady = Boolean(user);
@@ -6912,17 +5272,18 @@ export default function App() {
                 <p className={`truncate block text-[8px] sm:text-[9px] font-black tracking-[0.2em] sm:tracking-[0.28em] uppercase leading-none ${darkMode ? 'text-slate-300/85' : 'text-[#64748b]'}`}>Grade Tracker</p>
             </div>
           </div>
-          <div className={`premium-control-rail ml-2 flex shrink-0 items-center gap-1 sm:gap-1.5 rounded-full border px-1.5 sm:px-2 py-1 backdrop-blur-md ${darkMode ? 'border-white/15 bg-slate-900/35' : 'border-white/80 bg-white/72 shadow-[0_8px_24px_rgba(15,23,42,0.08)] ring-1 ring-white/45'}`}>
+          <div className={`ml-2 flex shrink-0 items-center gap-1 sm:gap-1.5 rounded-full border px-1.5 sm:px-2 py-1 backdrop-blur-md ${darkMode ? 'border-white/15 bg-slate-900/35' : 'border-white/80 bg-white/72 shadow-[0_8px_24px_rgba(15,23,42,0.08)] ring-1 ring-white/45'}`}>
                 <button
                   onClick={() => runWithBatchDiscardGuard(() => {
                     if (isAuthenticated) {
                       if (!user) return;
                       setMode('teacher');
+                      if (!allStudentsData.length) loadAllStudents();
                     } else {
                       setMode('teacher_login');
                     }
                   })}
-                  className={`${mode.includes('teacher') ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.segment} shrink-0 px-2.5 sm:px-4 py-1.5 rounded-full text-[10px] sm:text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : (darkMode ? 'text-slate-200 hover:text-white bg-slate-900/45 border border-emerald-200/20 hover:bg-slate-900/70' : 'text-slate-600 hover:text-slate-800 bg-white/70 border border-white/80 hover:bg-white/95')}`}
+                  className={`btn-sheen shrink-0 px-2.5 sm:px-4 py-1.5 rounded-full text-[10px] sm:text-xs font-bold transition-all duration-300 ${mode.includes('teacher') ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : (darkMode ? 'text-slate-200 hover:text-white bg-slate-900/45 border border-emerald-200/20 hover:bg-slate-900/70' : 'text-slate-600 hover:text-slate-800 bg-white/70 border border-white/80 hover:bg-white/95')}`}
                 >
                   {isAuthenticated ? '後台' : '老師'}
                 </button>
@@ -6932,12 +5293,12 @@ export default function App() {
                     setSearchError('');
                     setMode('parent');
                   })}
-                  className={`${mode === 'parent' ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.segment} shrink-0 px-2.5 sm:px-4 py-1.5 rounded-full text-[10px] sm:text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : (darkMode ? 'text-slate-200 hover:text-white bg-slate-900/45 border border-emerald-200/20 hover:bg-slate-900/70' : 'text-slate-600 hover:text-slate-800 bg-white/70 border border-white/80 hover:bg-white/95')}`}
+                  className={`btn-sheen shrink-0 px-2.5 sm:px-4 py-1.5 rounded-full text-[10px] sm:text-xs font-bold transition-all duration-300 ${mode === 'parent' ? (darkMode ? 'bg-[#1c2722] text-emerald-300 shadow-lg shadow-black/35 ring-1 ring-emerald-200/20' : 'bg-white/96 text-emerald-700 shadow-md shadow-slate-300/35 ring-1 ring-white/95 border border-white/80') : (darkMode ? 'text-slate-200 hover:text-white bg-slate-900/45 border border-emerald-200/20 hover:bg-slate-900/70' : 'text-slate-600 hover:text-slate-800 bg-white/70 border border-white/80 hover:bg-white/95')}`}
                 >
                   家長
                 </button>
             {isAuthenticated && (
-                <button onClick={handleLogout} className={`${BUTTON_SYSTEM.iconDanger} ml-0.5 p-1.5 sm:p-2 text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-full transition-colors`} title="登出"><LogOut className="w-4 h-4 sm:w-5 sm:h-5"/></button>
+                <button onClick={handleLogout} className="ml-0.5 p-1.5 sm:p-2 text-red-400 hover:text-red-500 hover:bg-red-500/10 rounded-full transition-colors" title="登出"><LogOut className="w-4 h-4 sm:w-5 sm:h-5"/></button>
             )}
           </div>
         </div>
@@ -6963,6 +5324,7 @@ export default function App() {
                         if (isAuthenticated) {
                           if (!user) return;
                           setMode('teacher');
+                          if (!allStudentsData.length) loadAllStudents();
                         } else {
                           setMode('teacher_login');
                         }
@@ -6982,7 +5344,7 @@ export default function App() {
                       className={`btn-sheen group w-full p-5 rounded-[1.45rem] border flex items-center gap-4 transition-all duration-200 backdrop-blur-xl ${darkMode ? 'bg-[#081c18]/82 border-emerald-200/22 shadow-[0_14px_32px_rgba(2,6,23,0.45)] hover:bg-[#0c2620]/90 hover:border-cyan-300/45 hover:-translate-y-0.5' : 'bg-white/94 border-white/95 shadow-[0_14px_32px_rgba(15,23,42,0.09)] hover:bg-white hover:border-emerald-200/90 hover:-translate-y-0.5'}`}
                     >
                       <div className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-colors ${darkMode ? 'bg-gradient-to-br from-cyan-500/24 to-emerald-400/20 text-cyan-100' : 'bg-gradient-to-br from-sky-100 to-emerald-100 text-sky-700'}`}><BarChart3 className="w-5 h-5" /></div>
-                      <div className="text-left flex-1"><h3 className={`text-base font-black ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>家長查詢</h3><p className={`text-[11px] mt-0.5 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>輸入學號查看分析</p></div>
+                      <div className="text-left flex-1"><h3 className={`text-base font-black ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>家長查詢</h3><p className={`text-[11px] mt-0.5 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>輸入學號或姓名查看分析</p></div>
                       <ChevronRight className={`w-4.5 h-4.5 opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all ${darkMode ? 'text-slate-300' : 'text-slate-400'}`}/>
                    </button>
                 </div>
@@ -7003,7 +5365,7 @@ export default function App() {
                     <h2 className={`text-xl font-black mb-6 tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>身份驗證</h2>
                     <input type="password" value={passwordInput} onChange={(e) => { setPasswordInput(e.target.value); setLoginError(false); }} onKeyDown={(e) => e.key === 'Enter' && handleLoginSubmit()} className={`w-full p-4 rounded-2xl text-center text-xl font-bold tracking-widest outline-none transition-all mb-6 placeholder:text-base placeholder:tracking-normal placeholder:font-medium border shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5 text-white focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 placeholder:text-slate-500' : 'bg-slate-50 border-slate-200/60 text-slate-800 focus:bg-white focus:ring-2 focus:ring-blue-100 placeholder:text-slate-400'}`} placeholder="輸入密碼" autoFocus />
                     {loginError && <p className="text-red-500 text-xs font-bold mb-4">密碼錯誤</p>}
-                    <button onClick={handleLoginSubmit} className={`${BUTTON_SYSTEM.primary} w-full bg-blue-600 hover:bg-blue-500 text-white py-3.5 rounded-2xl font-bold shadow-lg shadow-blue-500/30 active:scale-[0.98] transition-all`}>登入</button>
+                    <button onClick={handleLoginSubmit} className="btn-sheen w-full bg-blue-600 hover:bg-blue-500 text-white py-3.5 rounded-2xl font-bold shadow-lg shadow-blue-500/30 active:scale-[0.98] transition-all">登入</button>
                 </div>
             </div>
         )}
@@ -7017,107 +5379,98 @@ export default function App() {
                         2491212 權限：唯讀成績
                     </div>
                 )}
-                <div className={`mb-5 rounded-[1.7rem] border px-3.5 py-3.5 sm:px-4 sm:py-4 backdrop-blur-xl ${darkMode ? 'bg-[#020617]/35 border-white/10' : 'bg-white/82 border-white/85 ring-1 ring-white/55 shadow-[0_12px_30px_rgba(15,23,42,0.08)]'}`}>
-                    <div className="flex flex-col gap-3 xl:grid xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.45fr)] xl:items-center">
-                        <div className="flex flex-wrap items-center gap-2">
-                            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-black tracking-[0.18em] uppercase ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>
-                                <GraduationCap className="w-3.5 h-3.5 text-emerald-500" />
-                                Cohort
-                            </span>
-                            <div className={`premium-control-rail inline-flex rounded-2xl p-1 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-slate-100/90 border-slate-200/80 shadow-inner'}`}>
-                                {cohortOptions.map((cohort) => {
-                                    const isTeacherSelected = cohort.id === activeTeacherCohortId;
+                <div className={`mb-6 rounded-2xl border p-3.5 sm:p-4 backdrop-blur-md ${darkMode ? 'bg-[#020617]/35 border-white/10' : 'bg-white/80 border-white/85 ring-1 ring-white/55 shadow-[0_12px_30px_rgba(15,23,42,0.08)]'}`}>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                            <div className={`flex items-center gap-2 font-black tracking-wide ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>
+                                <Calendar className="w-4 h-4 text-blue-500" />
+                                管理日期
+                            </div>
+                            <p className={`mt-1 text-[11px] font-semibold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                目前共 {orderedWeekendIds.length} 個考次
+                            </p>
+                        </div>
+                        <div className="flex gap-2 items-center flex-wrap justify-end">
+                            {teacherViewMode === 'batch' && latestAvailableDate && selectedBatchWeekendID !== latestAvailableDate && (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        startTransition(() => {
+                                            setBatchDate(latestAvailableDate);
+                                        });
+                                    }}
+                                    className={`btn-sheen px-3 py-2 rounded-xl text-[11px] font-bold transition-colors border shadow-sm ${darkMode ? 'bg-slate-800 text-slate-200 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+                                >
+                                    切到最新
+                                </button>
+                            )}
+                            <input type="text" placeholder="MM/DD" className={`w-24 p-2.5 rounded-xl text-xs text-center font-bold outline-none transition-colors tracking-widest border shadow-sm ${darkMode ? 'bg-[#020617]/50 border-white/10 text-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20' : 'bg-white border-slate-200 text-slate-700 focus:border-blue-400'}`} value={newDateInput} onChange={e=>setNewDateInput(e.target.value)} />
+                            <button onClick={addDate} className={`px-3.5 py-2.5 rounded-xl transition-colors shadow-sm border ${darkMode ? 'bg-slate-800 text-white hover:bg-slate-700 border-white/10' : 'bg-slate-800 text-white hover:bg-slate-700 border-slate-800'}`}>
+                                <Plus className="w-4 h-4"/>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className={`mt-3.5 rounded-2xl border p-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-white/85 border-slate-200/80'}`}>
+                        <div className="overflow-x-auto pb-1 snap-x snap-mandatory scroll-smooth [scrollbar-width:none] [-ms-overflow-style:none]">
+                            <div className={`inline-flex gap-2.5 min-w-full ${prefersReducedMotion ? '' : 'list-fade-in'}`}>
+                                {teacherDateCards.map((item) => {
+                                    const { weekendID, label, phaseId, phaseLabel, isLatest, isSelected } = item;
+                                    const phaseTagClass = phaseId === 'p1'
+                                        ? (darkMode ? 'bg-cyan-500/15 text-cyan-200 border-cyan-300/25' : 'bg-cyan-50 text-cyan-700 border-cyan-200')
+                                        : phaseId === 'mock'
+                                            ? (darkMode ? 'bg-violet-500/15 text-violet-200 border-violet-300/25' : 'bg-violet-50 text-violet-700 border-violet-200')
+                                            : (darkMode ? 'bg-emerald-500/15 text-emerald-200 border-emerald-300/25' : 'bg-emerald-50 text-emerald-700 border-emerald-200');
+
                                     return (
                                         <button
-                                            key={cohort.id}
+                                            key={weekendID}
                                             type="button"
-                                            onClick={() => handleSwitchTeacherCohort(cohort.id)}
-                                            className={`${isTeacherSelected ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.segment} rounded-[0.95rem] px-3 py-1.5 text-[11px] font-black transition-all ${isTeacherSelected ? (darkMode ? 'bg-slate-800 text-emerald-100 shadow-md' : 'bg-white text-emerald-700 shadow-sm') : (darkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700')}`}
+                                            onClick={() => {
+                                                if (teacherViewMode === 'batch' && weekendID !== selectedBatchWeekendID) {
+                                                    startTransition(() => {
+                                                        setBatchDate(weekendID);
+                                                    });
+                                                }
+                                            }}
+                                            className={`btn-sheen snap-start shrink-0 text-left min-w-[126px] rounded-2xl border px-3 py-2.5 transition-all will-change-transform ${darkMode ? 'bg-slate-800/88 border-white/10 hover:border-emerald-300/30' : 'bg-white border-slate-200/80 shadow-[0_8px_18px_rgba(15,23,42,0.06)] hover:border-emerald-200'} ${isSelected ? (darkMode ? 'ring-1 ring-emerald-300/40 border-emerald-300/40 scale-[1.01]' : 'ring-2 ring-emerald-100 border-emerald-300/60 scale-[1.01]') : ''}`}
                                         >
-                                            {cohort.label}
+                                            <div className="flex items-start justify-between gap-2">
+                                                <span className={`text-[9px] font-black px-2 py-0.5 rounded-full border tracking-wide ${phaseTagClass}`}>{phaseLabel}</span>
+                                                {isLatest && (
+                                                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${darkMode ? 'bg-blue-500/20 text-blue-200' : 'bg-blue-100 text-blue-700'}`}>最新</span>
+                                                )}
+                                            </div>
+                                            <div className={`mt-2 text-xs font-black tracking-wide ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>
+                                                {label}
+                                            </div>
+                                            <div className="mt-2 flex justify-end">
+                                                {canDeleteDates ? (
+                                                    <button onClick={(e) => { e.stopPropagation(); handleDeleteDate(weekendID); }} className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg transition-colors ${darkMode ? 'text-rose-300 hover:text-rose-200 bg-rose-500/10' : 'text-rose-600 hover:text-rose-700 bg-rose-50'}`} title="危險操作：刪除日期">
+                                                        <X className="w-3 h-3"/> 刪除
+                                                    </button>
+                                                ) : (
+                                                    <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg ${darkMode ? 'text-slate-400 bg-slate-700/70' : 'text-slate-500 bg-slate-100'}`} title="2491212 權限不可刪除日期">
+                                                        <Lock className="w-3 h-3"/> 鎖定
+                                                    </span>
+                                                )}
+                                            </div>
                                         </button>
                                     );
                                 })}
                             </div>
-                            <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold ${darkMode ? 'bg-sky-500/12 text-sky-200' : 'bg-sky-50 text-sky-700'}`}>
-                                家長預設 {activePublicCohort?.label || getCohortLabel(activePublicCohortId)}
-                            </span>
-                            {activeTeacherCohortId !== activePublicCohortId && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleSetPublicCohort(activeTeacherCohortId)}
-                                  disabled={publicCohortSaving || cohortRegistryLoading}
-                                  className={`${BUTTON_SYSTEM.secondary} rounded-full px-2.5 py-1 text-[10px] font-bold transition-colors ${darkMode ? 'bg-slate-800 text-slate-100 border border-white/10 hover:bg-slate-700' : 'bg-slate-800 text-white hover:bg-slate-700 shadow-sm'} disabled:opacity-50 disabled:cursor-not-allowed`}
-                                >
-                                  {publicCohortSaving ? '切換中...' : '同步為家長預設'}
-                                </button>
-                            )}
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2 xl:justify-end">
-                            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-black tracking-[0.18em] uppercase ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-500'}`}>
-                                <Calendar className="w-3.5 h-3.5 text-blue-500" />
-                                Exam
-                            </span>
-                            <select
-                                className={`min-w-[132px] rounded-xl px-3 py-2 text-[11px] font-bold outline-none transition-colors border shadow-sm ${darkMode ? 'bg-[#020617]/55 border-white/10 text-slate-200' : 'bg-white border-slate-200 text-slate-700'}`}
-                                value={selectedBatchWeekendID || latestPopulatedWeekendID || latestAvailableDate || ''}
-                                disabled={!teacherDateCards.length}
-                                onChange={(e) => {
-                                    const nextValue = e.target.value;
-                                    applyBatchDateChange(nextValue);
-                                }}
-                            >
-                                {!teacherDateCards.length && <option value="">尚無考次</option>}
-                                {teacherDateCards.map((item) => (
-                                    <option key={item.weekendID} value={item.weekendID}>
-                                        {item.label}
-                                    </option>
-                                ))}
-                            </select>
-                            {selectedTeacherDateMeta && (
-                                <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold ${selectedTeacherDateMeta.phaseId === 'p1' ? (darkMode ? 'bg-cyan-500/12 text-cyan-200' : 'bg-cyan-50 text-cyan-700') : selectedTeacherDateMeta.phaseId === 'mock' ? (darkMode ? 'bg-violet-500/12 text-violet-200' : 'bg-violet-50 text-violet-700') : (darkMode ? 'bg-emerald-500/12 text-emerald-200' : 'bg-emerald-50 text-emerald-700')}`}>
-                                    {selectedTeacherDateMeta.phaseLabel}
-                                </span>
-                            )}
-                            <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
-                                {orderedWeekendIds.length} 考次
-                            </span>
-                            {teacherViewMode === 'batch' && (latestPopulatedWeekendID || latestAvailableDate) && selectedBatchWeekendID !== (latestPopulatedWeekendID || latestAvailableDate) && (
-                                <button
-                                    type="button"
-                                    onClick={() => applyBatchDateChange(latestPopulatedWeekendID || latestAvailableDate)}
-                                    className={`${BUTTON_SYSTEM.secondary} rounded-full px-2.5 py-1 text-[10px] font-bold transition-colors border ${darkMode ? 'bg-slate-800 text-slate-200 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 shadow-sm'}`}
-                                >
-                                    最新
-                                </button>
-                            )}
-                            <div className={`inline-flex items-center gap-1.5 rounded-2xl px-2 py-1.5 border ${darkMode ? 'bg-slate-900/60 border-white/10' : 'bg-white/92 border-slate-200/80 shadow-sm'}`}>
-                                <input type="text" placeholder="MM/DD" className={`w-16 bg-transparent text-center text-[11px] font-black outline-none tracking-widest ${darkMode ? 'text-slate-200 placeholder:text-slate-500' : 'text-slate-700 placeholder:text-slate-400'}`} value={newDateInput} onChange={e=>setNewDateInput(e.target.value)} />
-                                <button onClick={addDate} className={`${BUTTON_SYSTEM.icon} inline-flex items-center justify-center w-7 h-7 rounded-xl transition-colors ${darkMode ? 'bg-slate-800 text-white hover:bg-slate-700' : 'bg-slate-800 text-white hover:bg-slate-700'}`}>
-                                    <Plus className="w-3.5 h-3.5"/>
-                                </button>
-                            </div>
-                            {selectedTeacherDateMeta && (canDeleteDates ? (
-                                <button onClick={() => handleDeleteDate(selectedTeacherDateMeta.weekendID)} className={`${BUTTON_SYSTEM.danger} inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold transition-colors ${darkMode ? 'text-rose-300 hover:text-rose-200 bg-rose-500/10' : 'text-rose-600 hover:text-rose-700 bg-rose-50'}`} title="危險操作：刪除目前所選考次">
-                                    <X className="w-3 h-3"/> 刪除所選
-                                </button>
-                            ) : (
-                                <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold ${darkMode ? 'text-slate-400 bg-slate-700/70' : 'text-slate-500 bg-slate-100'}`} title="2491212 權限不可刪除日期">
-                                    <Lock className="w-3 h-3"/> 刪除鎖定
-                                </span>
-                            ))}
                         </div>
                     </div>
                 </div>
 
-                <div className={`premium-control-rail flex p-1 rounded-xl mb-6 shadow-inner border ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-100/90 border-slate-200/70'}`}>
+                <div className={`flex p-1 rounded-xl mb-6 shadow-inner border ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-100/90 border-slate-200/70'}`}>
                      <button
                        onClick={() => {
                          startTransition(() => {
                            setTeacherViewMode('batch');
                          });
                        }}
-                       className={`${teacherViewMode==='batch' ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.segment} flex-1 py-2 text-xs font-bold rounded-lg transition-all ${teacherViewMode==='batch' ? (darkMode ? 'bg-slate-800 text-blue-400 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-blue-700 shadow-sm') : 'text-slate-500'}`}
+                       className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${teacherViewMode==='batch' ? (darkMode ? 'bg-slate-800 text-blue-400 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-blue-700 shadow-sm') : 'text-slate-500'}`}
                      >
                        批量檢視
                      </button>
@@ -7127,7 +5480,7 @@ export default function App() {
                          if (!confirmDiscardBatchChanges()) return;
                          setTeacherViewMode('single');
                        }}
-                       className={`${teacherViewMode==='single' ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.segment} flex-1 py-2 text-xs font-bold rounded-lg transition-all ${teacherViewMode==='single' ? (darkMode ? 'bg-slate-800 text-slate-200 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-700 shadow-sm') : 'text-slate-500'}`}
+                       className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${teacherViewMode==='single' ? (darkMode ? 'bg-slate-800 text-slate-200 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-700 shadow-sm') : 'text-slate-500'}`}
                      >
                        個人檢視
                      </button>
@@ -7146,40 +5499,24 @@ export default function App() {
                                 const studentId = loadInput?.value?.trim().toUpperCase();
                                 if (studentId) loadStudentForTeacher(studentId);
                               }}
-                              className={`btn-sheen px-4 rounded-xl text-xs font-bold whitespace-nowrap transition-colors shadow-sm border ${darkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-white/5' : 'bg-white hover:bg-slate-50 text-slate-600 border-slate-200'}`}
+                              className={`px-4 rounded-xl text-xs font-bold whitespace-nowrap transition-colors shadow-sm border ${darkMode ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-white/5' : 'bg-white hover:bg-slate-50 text-slate-600 border-slate-200'}`}
                             >
                               載入
                             </button>
                         </div>
-                        <div className="premium-action-rail flex gap-2 overflow-x-auto no-scrollbar pb-1">
-                            <button onClick={() => setShowAddStudentModal(true)} className={`${BUTTON_SYSTEM.primary} bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all whitespace-nowrap`}><UserPlus className="w-4 h-4"/> 新增學生</button>
+                        <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                            <button onClick={() => setShowAddStudentModal(true)} className="btn-sheen bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all whitespace-nowrap"><UserPlus className="w-4 h-4"/> 新增學生</button>
                             {canImportExcel ? (
-                                <>
-                                    <button type="button" onClick={requestExcelImport} className={`${BUTTON_SYSTEM.primary} cursor-pointer bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all whitespace-nowrap`}>
-                                        <FileSpreadsheet className="w-4 h-4" /> {isLegacyCohort(activeTeacherCohortId) ? '匯入 Excel（需驗證）' : '匯入 Excel'}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={handleDownloadImportTemplate}
-                                      className={`${BUTTON_SYSTEM.secondary} px-3 py-2.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors border ${darkMode ? 'text-slate-200 bg-slate-900/55 border-white/10 hover:bg-slate-800' : 'text-slate-600 bg-white border-slate-200 hover:bg-slate-50 shadow-sm'}`}
-                                    >
-                                        <ArrowDownWideNarrow className="w-3.5 h-3.5" /> 下載範本.xlsx
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setShowImportFormatGuide(true)}
-                                      className={`${BUTTON_SYSTEM.secondary} px-3 py-2.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors border ${darkMode ? 'text-slate-200 bg-slate-900/55 border-white/10 hover:bg-slate-800' : 'text-slate-600 bg-white border-slate-200 hover:bg-slate-50 shadow-sm'}`}
-                                    >
-                                        <Info className="w-3.5 h-3.5" /> 匯入格式
-                                    </button>
-                                    <input ref={importFileInputRef} type="file" accept=".xlsx, .xls" className="hidden" onChange={handleExcelUpload} />
-                                </>
+                                <label className="btn-sheen cursor-pointer bg-blue-600 hover:bg-blue-500 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-blue-600/20 active:scale-[0.98] transition-all whitespace-nowrap">
+                                    <FileSpreadsheet className="w-4 h-4" /> 匯入 Excel
+                                    <input type="file" accept=".xlsx, .xls" className="hidden" onChange={handleExcelUpload} />
+                                </label>
                             ) : (
-                                <button type="button" disabled className={`${BUTTON_SYSTEM.primary} bg-slate-300 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap cursor-not-allowed`}>
+                                <button type="button" disabled className="bg-slate-300 text-white px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap cursor-not-allowed">
                                     <FileSpreadsheet className="w-4 h-4" /> 匯入 Excel（唯讀）
                                 </button>
                             )}
-                            <button onClick={() => setShowAvgModal(true)} className={`${BUTTON_SYSTEM.secondary} px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors border ${darkMode ? 'text-indigo-300 bg-indigo-500/10 border-indigo-500/20 hover:bg-indigo-500/20' : 'text-indigo-700 bg-white border-indigo-100 hover:bg-indigo-50 shadow-sm'}`}><Edit3 className="w-4 h-4"/> 平均設定</button>
+                            <button onClick={() => setShowAvgModal(true)} className={`px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap transition-colors border ${darkMode ? 'text-indigo-300 bg-indigo-500/10 border-indigo-500/20 hover:bg-indigo-500/20' : 'text-indigo-700 bg-white border-indigo-100 hover:bg-indigo-50 shadow-sm'}`}><Edit3 className="w-4 h-4"/> 平均設定</button>
                         </div>
                     </div>
                 )}
@@ -7188,37 +5525,41 @@ export default function App() {
                     <div className="pt-2 space-y-4">
                         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
                             <div className="flex items-center gap-2 flex-wrap">
-                                {selectedTeacherDateMeta && (
-                                    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold ${darkMode ? 'bg-slate-800 text-slate-200' : 'bg-white text-slate-700 border border-slate-200 shadow-sm'}`}>
-                                        {selectedTeacherDateMeta.label}
-                                    </span>
-                                )}
-                                {selectedTeacherDateMeta && (
-                                    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold ${selectedTeacherDateMeta.phaseId === 'p1' ? (darkMode ? 'bg-cyan-500/12 text-cyan-200' : 'bg-cyan-50 text-cyan-700') : selectedTeacherDateMeta.phaseId === 'mock' ? (darkMode ? 'bg-violet-500/12 text-violet-200' : 'bg-violet-50 text-violet-700') : (darkMode ? 'bg-emerald-500/12 text-emerald-200' : 'bg-emerald-50 text-emerald-700')}`}>
-                                        {selectedTeacherDateMeta.phaseLabel}
-                                    </span>
-                                )}
+                                <span className="text-xs font-bold text-slate-500">日期</span>
+                                <select
+                                    className={`border rounded-lg px-2 py-1.5 text-xs font-bold outline-none shadow-sm ${darkMode ? 'bg-[#020617]/50 border-white/10 text-slate-300' : 'bg-white border-slate-200 text-slate-700'}`}
+                                    value={selectedBatchWeekendID || ''}
+                                    onChange={(e) => {
+                                        const nextValue = e.target.value;
+                                        startTransition(() => {
+                                            setBatchDate(nextValue);
+                                        });
+                                    }}
+                                >
+                                    {teacherDateCards.map((item) => (
+                                        <option key={item.weekendID} value={item.weekendID}>
+                                            {item.label}
+                                        </option>
+                                    ))}
+                                </select>
                                 <span className={`text-[11px] font-bold px-2 py-1 rounded-full ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-600'}`}>
                                     共 {batchRowsForDisplay.length} 筆
                                 </span>
-                                <span className={`text-[11px] font-bold px-2 py-1 rounded-full ${Object.keys(admissionProbabilities).length ? (darkMode ? 'bg-emerald-500/12 text-emerald-200' : 'bg-emerald-50 text-emerald-700') : (darkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-100 text-slate-500')}`}>
-                                    {Object.keys(admissionProbabilities).length ? `機率就緒 ${Object.keys(admissionProbabilities).length}` : '機率計算中'}
-                                </span>
                             </div>
                             <div className="flex gap-2 flex-wrap items-center">
-                                <button onClick={() => { setSortByPR((prev) => !prev); setSortByProb(false); }} className={`${sortByPR ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.secondary} px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByPR ? 'bg-indigo-600 text-white shadow-indigo-500/30' : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
+                                <button onClick={() => { setSortByPR((prev) => !prev); setSortByProb(false); }} className={`btn-sheen px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByPR ? 'bg-indigo-600 text-white shadow-indigo-500/30' : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
                                     <ArrowDownWideNarrow className="w-3.5 h-3.5" /> PR排序
                                 </button>
-                                <button onClick={() => { setSortByProb((prev) => !prev); setSortByPR(false); }} className={`${sortByProb ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.secondary} px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByProb ? (darkMode ? 'bg-emerald-700 text-white shadow-emerald-900/45 ring-1 ring-emerald-200/30' : 'bg-emerald-600 text-white shadow-emerald-600/25') : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
+                                <button onClick={() => { setSortByProb((prev) => !prev); setSortByPR(false); }} className={`btn-sheen px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all shadow-sm ${sortByProb ? (darkMode ? 'bg-emerald-700 text-white shadow-emerald-900/45 ring-1 ring-emerald-200/30' : 'bg-emerald-600 text-white shadow-emerald-600/25') : (darkMode ? 'bg-slate-800 text-slate-400 border border-white/5' : 'bg-white text-slate-600 border border-slate-200')}`}>
                                     <Percent className="w-3.5 h-3.5" /> 機率排序
                                 </button>
-                                <button onClick={handleExportBatchExcel} className={`${BUTTON_SYSTEM.secondary} px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1 border ${darkMode ? 'bg-slate-800 text-slate-300 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
+                                <button onClick={handleExportBatchExcel} className={`btn-sheen px-3 py-1.5 rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-1 border ${darkMode ? 'bg-slate-800 text-slate-300 border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
                                     <FileSpreadsheet className="w-3.5 h-3.5" /> 下載 Excel
                                 </button>
                                 <button
                                   onClick={handleSaveBatchGrades}
                                   disabled={!canEditStudentGrades}
-                                  className={`${BUTTON_SYSTEM.primary} text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-md transition-all active:scale-[0.98] flex items-center gap-1 ${
+                                  className={`btn-sheen text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-md transition-all active:scale-[0.98] flex items-center gap-1 ${
                                     !canEditStudentGrades
                                       ? 'bg-slate-400 cursor-not-allowed shadow-none'
                                       : isBatchDirty
@@ -7231,27 +5572,14 @@ export default function App() {
                             </div>
                         </div>
 
-                        <div className={`premium-control-rail flex p-1 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
-                            {activeTeacherClassDefs.map(c => {
-                                const isActive = teacherClassFilter === c.id;
-                                const classTheme = getClassPillTheme(c.id, darkMode);
-                                return (
-                                    <button
-                                      key={c.id}
-                                      onClick={() => {
-                                          startTransition(() => {
-                                              setTeacherClassFilter(c.id);
-                                          });
-                                      }}
-                                      className={`${isActive ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.segment} flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${isActive ? classTheme.active : classTheme.inactive}`}
-                                    >
-                                      <span className="inline-flex items-center justify-center gap-1.5">
-                                        <span className={`h-1.5 w-1.5 rounded-full ${classTheme.dot} ${isActive ? 'opacity-100' : 'opacity-72'}`} />
-                                        <span>{c.label}</span>
-                                      </span>
-                                    </button>
-                                );
-                            })}
+                        <div className={`flex p-1 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
+                            {CLASS_DEFS.map(c => (
+                                <button key={c.id} onClick={() => {
+                                    startTransition(() => {
+                                        setTeacherClassFilter(c.id);
+                                    });
+                                }} className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${teacherClassFilter === c.id ? (darkMode ? 'bg-slate-800 text-white shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-700 shadow-sm border border-slate-200/50') : 'text-slate-500 hover:text-slate-400'}`}>{c.label}</button>
+                            ))}
                         </div>
 
                         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
@@ -7273,7 +5601,7 @@ export default function App() {
                             </div>
                         </div>
 
-                        <div className={`premium-control-rail flex p-1 rounded-xl border overflow-x-auto shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
+                        <div className={`flex p-1 rounded-xl border overflow-x-auto shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
                             {BATCH_INSIGHT_TABS.map((tab) => (
                                 <button
                                   key={tab.id}
@@ -7282,7 +5610,7 @@ export default function App() {
                                           setBatchInsightTab(tab.id);
                                       });
                                   }}
-                                  className={`${batchInsightTab === tab.id ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.segment} flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${batchInsightTab === tab.id ? (darkMode ? 'bg-slate-800 text-emerald-100 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-700 shadow-sm border border-slate-200/50') : 'text-slate-500 hover:text-slate-400'}`}
+                                  className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${batchInsightTab === tab.id ? (darkMode ? 'bg-slate-800 text-emerald-100 shadow-md border border-white/5 ring-1 ring-white/5' : 'bg-white text-slate-700 shadow-sm border border-slate-200/50') : 'text-slate-500 hover:text-slate-400'}`}
                                 >
                                   {tab.label}
                                 </button>
@@ -7334,7 +5662,6 @@ export default function App() {
                                                 probValue={row.probValue}
                                                 darkMode={darkMode} 
                                                 canEdit={canEditStudentGrades}
-                                                classDefs={activeTeacherClassDefs}
                                                 handleBatchGradeChange={handleBatchGradeChange} 
                                                 handleKeyDown={handleKeyDown} 
                                                 handlePaste={handlePaste} 
@@ -7486,7 +5813,7 @@ export default function App() {
                                         <button
                                           onClick={handleSaveGlobalTeacherMessage}
                                           disabled={teacherMessageSaving || teacherMessageLoading || !user}
-                                          className={`${BUTTON_SYSTEM.primary} px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors`}
+                                          className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                                         >
                                           {teacherMessageSaving ? '儲存中...' : '儲存全班訊息'}
                                         </button>
@@ -7526,7 +5853,7 @@ export default function App() {
                                                     <button
                                                       onClick={() => handleSaveStudentTeacherMessage(studentId)}
                                                       disabled={isSaving || teacherMessageLoading || !user}
-                                                      className={`${BUTTON_SYSTEM.primary} px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-white bg-sky-600 hover:bg-sky-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors`}
+                                                      className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-white bg-sky-600 hover:bg-sky-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                                                     >
                                                       {isSaving ? '儲存中' : '儲存'}
                                                     </button>
@@ -7583,7 +5910,7 @@ export default function App() {
                                         <button
                                           onClick={() => loadQueryStats({ force: true })}
                                           disabled={queryStatsLoading}
-                                          className={`${BUTTON_SYSTEM.secondary} px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-colors ${
+                                          className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-colors ${
                                             queryStatsLoading
                                               ? 'bg-slate-300 text-white cursor-not-allowed'
                                               : 'bg-slate-700 text-white hover:bg-slate-600'
@@ -7596,7 +5923,7 @@ export default function App() {
                                               title: '重置查詢次數'
                                           })}
                                           disabled={queryStatsLoading}
-                                          className={`${BUTTON_SYSTEM.danger} px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-colors ${
+                                          className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-colors ${
                                             queryStatsLoading
                                               ? 'bg-slate-300 text-white cursor-not-allowed'
                                               : 'bg-red-500 text-white hover:bg-red-400'
@@ -7607,7 +5934,7 @@ export default function App() {
                                     </div>
                                 </div>
 
-                                <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_10.5rem_auto] gap-1.5">
+                                <div className="grid grid-cols-1 md:grid-cols-[1fr_8.8rem_auto] gap-1.5">
                                     <div className={`flex items-center gap-2 rounded-xl border px-2.5 py-1.5 ${darkMode ? 'border-white/10 bg-slate-900/50' : 'border-slate-200 bg-white'}`}>
                                         <Search className={`w-3.5 h-3.5 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`} />
                                         <input
@@ -7633,13 +5960,27 @@ export default function App() {
                                           setQueryMonitorKeyword('');
                                           setQueryMonitorDateFilter('all');
                                       }}
-                                      className={`${BUTTON_SYSTEM.secondary} rounded-xl border px-3 py-1.5 text-[10px] font-bold transition-colors ${darkMode ? 'border-white/10 bg-slate-900/50 text-slate-200 hover:bg-slate-800' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+                                      className={`rounded-xl border px-3 py-1.5 text-[10px] font-bold transition-colors ${darkMode ? 'border-white/10 bg-slate-900/50 text-slate-200 hover:bg-slate-800' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
                                     >
                                       清除條件
                                     </button>
                                 </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-[11.4rem_1fr] gap-1.5">
+                                <div className="grid grid-cols-1 md:grid-cols-[12.5rem_11.4rem] gap-1.5">
+                                    <div className={`rounded-xl border p-1 flex ${darkMode ? 'border-white/10 bg-slate-900/50' : 'border-slate-200 bg-white'}`}>
+                                        <button
+                                          onClick={() => setQueryMonitorScope('all')}
+                                          className={`flex-1 rounded-lg px-2 py-1.5 text-[11px] font-black transition-colors ${queryMonitorScope === 'all' ? 'bg-emerald-600 text-white' : (darkMode ? 'text-slate-300 hover:bg-slate-800' : 'text-slate-600 hover:bg-slate-50')}`}
+                                        >
+                                          全部學生
+                                        </button>
+                                        <button
+                                          onClick={() => setQueryMonitorScope('class')}
+                                          className={`flex-1 rounded-lg px-2 py-1.5 text-[11px] font-black transition-colors ${queryMonitorScope === 'class' ? 'bg-emerald-600 text-white' : (darkMode ? 'text-slate-300 hover:bg-slate-800' : 'text-slate-600 hover:bg-slate-50')}`}
+                                        >
+                                          目前班級
+                                        </button>
+                                    </div>
                                     <select
                                       value={queryMonitorSort}
                                       onChange={(e) => setQueryMonitorSort(e.target.value)}
@@ -7649,34 +5990,91 @@ export default function App() {
                                         <option value="latest_desc">依最近查詢</option>
                                         <option value="id_asc">依學號排序</option>
                                     </select>
-                                    <div className={`flex flex-wrap items-center justify-between gap-1.5 rounded-xl border px-2.5 py-1.5 text-[10px] font-semibold ${darkMode ? 'border-white/10 bg-slate-900/45 text-slate-300' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
-                                        <span>上次重置：{queryStatsLastResetText}</span>
-                                        <span>排行 {queryStatsRowsFiltered.length} 人 / 事件 {queryFilteredSummary.filteredEventCount} 筆</span>
-                                    </div>
                                 </div>
 
-                                <div className="grid grid-cols-2 lg:grid-cols-4 gap-1.5">
-                                    <div className={`rounded-xl border px-2.5 py-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                <div className={`flex flex-wrap items-center justify-between gap-1.5 text-[10px] font-semibold ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
+                                    <span>上次重置：{queryStatsLastResetText}（時間依本機）</span>
+                                    <span>
+                                        監控範圍：{queryMonitorScope === 'class' ? `目前班級（${teacherClassFilter}）` : '全部學生'} / 排行 {queryStatsRowsFiltered.length} 人 / 事件 {queryFilteredEventList.length} 筆
+                                    </span>
+                                </div>
+
+                                <div className="grid grid-cols-3 lg:grid-cols-6 gap-1.5">
+                                    <div className={`rounded-xl border px-2.5 py-1.5 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
                                         <div className={`text-[9px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>總查詢數</div>
-                                        <div className={`text-base font-black ${darkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>{queryFilteredSummary.totalQueries}</div>
+                                        <div className={`text-base font-black ${darkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>{queryEventTimeline.length}</div>
                                         <div className={`text-[9px] font-semibold ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>累積</div>
                                     </div>
-                                    <div className={`rounded-xl border px-2.5 py-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
-                                        <div className={`text-[9px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>排行學生數</div>
-                                        <div className={`text-base font-black ${darkMode ? 'text-sky-200' : 'text-sky-700'}`}>{queryFilteredSummary.rankedStudentCount}</div>
+                                    <div className={`rounded-xl border px-2.5 py-1.5 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                        <div className={`text-[9px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>有查詢學號數</div>
+                                        <div className={`text-base font-black ${darkMode ? 'text-sky-200' : 'text-sky-700'}`}>{queryFilteredSummary.uniqueStudentCount}</div>
                                     </div>
-                                    <div className={`rounded-xl border px-2.5 py-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
-                                        <div className={`text-[9px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>目前篩選事件</div>
-                                        <div className={`text-base font-black ${darkMode ? 'text-cyan-200' : 'text-cyan-700'}`}>{queryFilteredSummary.filteredEventCount}</div>
+                                    <div className={`rounded-xl border px-2.5 py-1.5 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                        <div className={`text-[9px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>近24小時</div>
+                                        <div className={`text-base font-black ${darkMode ? 'text-indigo-200' : 'text-indigo-700'}`}>{queryRecentWindowSummary.last24h}</div>
                                     </div>
-                                    <div className={`rounded-xl border px-2.5 py-2 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
-                                        <div className={`text-[9px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>最新一天查詢</div>
-                                        <div className={`text-base font-black ${darkMode ? 'text-indigo-200' : 'text-indigo-700'}`}>{queryFilteredSummary.latestDayCount}</div>
+                                    <div className={`rounded-xl border px-2.5 py-1.5 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                        <div className={`text-[9px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>近3天</div>
+                                        <div className={`text-base font-black ${darkMode ? 'text-cyan-200' : 'text-cyan-700'}`}>{queryRecentWindowSummary.last3d}</div>
+                                    </div>
+                                    <div className={`rounded-xl border px-2.5 py-1.5 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                        <div className={`text-[9px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>近7天</div>
+                                        <div className={`text-base font-black ${darkMode ? 'text-amber-200' : 'text-amber-700'}`}>{queryRecentWindowSummary.last7d}</div>
+                                    </div>
+                                    <div className={`rounded-xl border px-2.5 py-1.5 ${darkMode ? 'bg-slate-900/45 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                        <div className={`text-[9px] font-bold tracking-wider uppercase ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>高峰時段</div>
+                                        <div className={`text-[11px] font-black ${darkMode ? 'text-violet-200' : 'text-violet-700'}`}>{queryFilteredSummary.peakHourLabel}</div>
+                                        <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>共 {queryFilteredSummary.peakHourCount} 次</div>
                                     </div>
                                 </div>
 
-                                <div className="grid grid-cols-1 xl:grid-cols-[1.02fr_0.98fr] gap-2">
-                                    <div className={`rounded-xl border overflow-hidden ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`} style={{ contentVisibility: 'auto', containIntrinsicSize: '420px' }}>
+                                <div className={`rounded-xl border p-2.5 ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
+                                    <div className="flex items-center justify-between mb-2">
+                                        <div className={`text-[10px] font-black tracking-widest uppercase ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>監控提醒</div>
+                                        <div className={`text-[10px] font-black ${darkMode ? 'text-amber-200' : 'text-amber-700'}`}>{isQueryDeepInsightsPending ? '整理中' : `${queryMonitorAlertRows.length} 筆`}</div>
+                                    </div>
+                                    {isQueryDeepInsightsPending ? (
+                                        <div className={`rounded-lg border px-3 py-3 text-center text-xs font-bold ${darkMode ? 'border-white/10 bg-slate-900/55 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                                            進階監控提醒整理中，基本排行與事件紀錄已可先操作。
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-1 max-h-[12.5rem] overflow-y-auto pr-1">
+                                            {queryMonitorAlertRows.map((row) => (
+                                                <div
+                                                  key={`alert-${row.id}`}
+                                                  onClick={() => setQueryMonitorKeyword(row.id)}
+                                                  className={`rounded-lg border px-2 py-1.5 cursor-pointer transition-colors ${darkMode ? 'border-white/10 bg-slate-900/55 hover:bg-slate-800' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}`}
+                                                  title="點擊可快速篩選此學號"
+                                                >
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <div className={`text-[11px] font-black ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>
+                                                            <span className="font-mono">{row.id}</span>
+                                                            <span className="ml-1.5">{row.name || '-'}</span>
+                                                        </div>
+                                                        <div className={`text-[10px] font-black ${darkMode ? 'text-rose-200' : 'text-rose-700'}`}>
+                                                            {row.alertScore}
+                                                        </div>
+                                                    </div>
+                                                    <div className="mt-1 flex flex-wrap gap-1">
+                                                        {row.tags.map((tag) => (
+                                                            <span key={`${row.id}-${tag}`} className={`inline-flex text-[10px] font-bold rounded-full px-2 py-0.5 ${darkMode ? 'bg-rose-400/20 text-rose-100 border border-rose-300/25' : 'bg-rose-100 text-rose-700 border border-rose-200'}`}>
+                                                                {tag}
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            {!queryMonitorAlertRows.length && (
+                                                <div className={`rounded-lg border px-3 py-3 text-center text-xs font-bold ${darkMode ? 'border-white/10 bg-slate-900/55 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                                                    目前沒有明顯異常行為
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="grid grid-cols-1 lg:grid-cols-[1.34fr_0.86fr] gap-2">
+                                    <div className={`rounded-xl border overflow-hidden ${darkMode ? 'border-white/10' : 'border-slate-200'}`} style={{ contentVisibility: 'auto', containIntrinsicSize: '420px' }}>
                                         <div className={`grid grid-cols-[5.6rem_1fr_3.6rem_6rem_4.2rem] px-2.5 py-1.5 text-[10px] font-bold tracking-wide ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>
                                             <span className="text-center">學號</span>
                                             <span className="text-center">姓名</span>
@@ -7694,7 +6092,12 @@ export default function App() {
                                                     ? 'bg-emerald-400/20 text-emerald-100 border-emerald-300/30'
                                                     : 'bg-emerald-100 text-emerald-700 border-emerald-200';
 
-                                                if (daysSinceLast !== null && daysSinceLast >= 14) {
+                                                if (Number(row.count) === 0) {
+                                                    statusText = '未查詢';
+                                                    statusClass = darkMode
+                                                        ? 'bg-rose-400/20 text-rose-100 border-rose-300/30'
+                                                        : 'bg-rose-100 text-rose-700 border-rose-200';
+                                                } else if (daysSinceLast !== null && daysSinceLast >= 14) {
                                                     statusText = '久未查';
                                                     statusClass = darkMode
                                                         ? 'bg-amber-400/20 text-amber-100 border-amber-300/30'
@@ -7734,46 +6137,229 @@ export default function App() {
                                         </div>
                                     </div>
 
-                                    <div className={`rounded-xl border overflow-hidden ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`} style={{ contentVisibility: 'auto', containIntrinsicSize: '420px' }}>
-                                        <div className={`px-2.5 py-1.5 text-[10px] font-bold tracking-wide uppercase ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>每日查詢名單（由新到舊）</div>
-                                        <div className="max-h-[24rem] overflow-y-auto">
-                                            {queryEventsByDayFiltered.map((day) => (
-                                                <div key={day.dateKey} className={`border-t ${darkMode ? 'border-white/5' : 'border-slate-100'}`}>
-                                                    <div className={`px-2.5 py-1.5 text-[10px] font-black flex items-center justify-between ${darkMode ? 'text-slate-200 bg-slate-900/55' : 'text-slate-700 bg-slate-50/80'}`}>
-                                                        <span>{day.dateLabel}</span>
-                                                        <span className={`${darkMode ? 'text-emerald-300' : 'text-emerald-700'}`}>{day.items.length} 次</span>
-                                                    </div>
-                                                    <div>
-                                                        {day.items.map((event, idx) => (
-                                                            <div key={`${event.id}-${event.ts}-${idx}`} className={`grid grid-cols-[4.9rem_5.7rem_1fr_3.8rem] gap-1.5 px-2.5 py-1 text-[10px] ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>
-                                                                <span className="font-mono">{event.timeLabel}</span>
-                                                                <span className="font-mono">{event.id}</span>
-                                                                <span className="truncate">{event.name || '-'}</span>
-                                                                <span className={`text-right text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>{event.relativeLabel}</span>
-                                                            </div>
-                                                        ))}
-                                                    </div>
+                                    <div className="space-y-2">
+                                        <div className={`rounded-xl border p-2.5 ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
+                                            <div className="flex items-center justify-between mb-2">
+                                                <div className={`text-[10px] font-black tracking-widest uppercase ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>本班查詢覆蓋</div>
+                                                <div className={`text-sm font-black ${darkMode ? 'text-emerald-200' : 'text-emerald-700'}`}>{queryClassCoverageSummary.coverageRate}%</div>
+                                            </div>
+                                            <div className={`w-full h-2 rounded-full overflow-hidden ${darkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>
+                                                <div
+                                                  className="h-full rounded-full bg-[linear-gradient(90deg,#22c55e_0%,#16a34a_50%,#15803d_100%)]"
+                                                  style={{ width: `${queryClassCoverageSummary.coverageRate}%` }}
+                                                />
+                                            </div>
+                                            <div className={`mt-2 text-[11px] font-semibold ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                                                已查詢 {queryClassCoverageSummary.queried} / 總人數 {queryClassCoverageSummary.total}，未查詢 {queryClassCoverageSummary.unqueried}
+                                            </div>
+                                            {queryClassUnqueriedPreview.length > 0 && (
+                                                <div className="mt-1.5 space-y-1">
+                                                    {queryClassUnqueriedPreview.map((row) => (
+                                                        <div key={row.id} className={`grid grid-cols-[5.5rem_1fr] gap-1.5 text-[10px] rounded-lg px-2 py-1 border ${darkMode ? 'border-white/10 bg-slate-900/55 text-slate-300' : 'border-slate-200 bg-slate-50 text-slate-600'}`}>
+                                                            <span className="font-mono">{row.id}</span>
+                                                            <span className="truncate">{row.name || '-'}</span>
+                                                        </div>
+                                                    ))}
+                                                    {queryClassCoverageSummary.unqueried > queryClassUnqueriedPreview.length && (
+                                                        <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                            尚有 {queryClassCoverageSummary.unqueried - queryClassUnqueriedPreview.length} 位未顯示
+                                                        </div>
+                                                    )}
                                                 </div>
-                                            ))}
-                                            {!queryEventsByDayFiltered.length && (
-                                                <div className={`px-3 py-3 text-center text-xs ${darkMode ? 'text-slate-400' : 'text-slate-400'}`}>
-                                                    目前沒有符合條件的每日查詢資料
+                                            )}
+                                            {queryClassCoverageSummary.total === 0 && (
+                                                <div className={`mt-2 text-[11px] font-semibold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                    目前班級名單尚未載入，請先確認日期與班級
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div className={`rounded-xl border p-2.5 ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
+                                            <div className={`text-[10px] font-black tracking-widest uppercase mb-2 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>兩小時查詢熱區</div>
+                                            {isQueryDeepInsightsPending ? (
+                                                <div className={`rounded-lg border px-3 py-3 text-center text-xs font-bold ${darkMode ? 'border-white/10 bg-slate-900/55 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                                                    正在整理熱區資料...
+                                                </div>
+                                            ) : (
+                                                <div className="grid grid-cols-2 gap-1.5">
+                                                    {queryBiHourBuckets.map((bucket) => (
+                                                        <div key={bucket.key} className={`rounded-lg border px-1.5 py-1.5 ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-slate-50'}`}>
+                                                            <div className={`text-[10px] font-bold mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>{bucket.label}</div>
+                                                            <div className={`h-1.5 rounded-full overflow-hidden ${darkMode ? 'bg-slate-800' : 'bg-slate-200'}`}>
+                                                                <div
+                                                                  className="h-full rounded-full bg-[linear-gradient(90deg,#22c55e_0%,#0ea5e9_55%,#6366f1_100%)]"
+                                                                  style={{ width: `${bucket.count > 0 ? Math.max(8, Math.round(bucket.ratio * 100)) : 0}%` }}
+                                                                />
+                                                            </div>
+                                                            <div className={`text-[10px] font-black mt-1 ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}>{bucket.count}</div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div className={`rounded-xl border p-2.5 ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
+                                            <div className={`text-[10px] font-black tracking-widest uppercase mb-2 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>14日查詢趨勢</div>
+                                            {isQueryDeepInsightsPending ? (
+                                                <div className={`rounded-lg border px-3 py-3 text-center text-xs font-bold ${darkMode ? 'border-white/10 bg-slate-900/55 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                                                    正在整理趨勢資料...
+                                                </div>
+                                            ) : (
+                                                <div className="space-y-1 max-h-[11rem] overflow-y-auto pr-1">
+                                                    {queryDailyTrend.map((day) => (
+                                                        <div key={day.dateKey} className="grid grid-cols-[3.9rem_1fr_2rem] items-center gap-2">
+                                                            <span className={`text-[10px] font-bold ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>{day.label.slice(0, 5)}</span>
+                                                            <div className={`h-1.5 rounded-full overflow-hidden ${darkMode ? 'bg-slate-800' : 'bg-slate-200'}`}>
+                                                                <div
+                                                                  className="h-full rounded-full bg-[linear-gradient(90deg,#10b981_0%,#22c55e_35%,#0ea5e9_100%)]"
+                                                                  style={{ width: `${day.count > 0 ? Math.max(8, Math.round(day.ratio * 100)) : 0}%` }}
+                                                                />
+                                                            </div>
+                                                            <span className={`text-[10px] font-black text-right ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>{day.count}</span>
+                                                        </div>
+                                                    ))}
+                                                    {!queryDailyTrend.length && (
+                                                        <div className={`text-[11px] text-center font-semibold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                            目前沒有趨勢資料
+                                                        </div>
+                                                    )}
                                                 </div>
                                             )}
                                         </div>
                                     </div>
                                 </div>
 
-                                <div className={`rounded-lg border px-2.5 py-1.5 ${darkMode ? 'border-white/10 bg-slate-900/55 text-slate-300' : 'border-slate-200 bg-slate-50 text-slate-600'} text-[10px] font-semibold`}>
-                                    家長查詢效能：快取命中 <span className="font-black text-emerald-600">{parentQueryPerf.cacheHit}</span> / 未命中 <span className="font-black text-sky-600">{parentQueryPerf.cacheMiss}</span>，平均 <span className="font-black">{parentQueryPerf.avgMs}ms</span>，P95 <span className="font-black">{parentQueryPerf.p95Ms}ms</span>，最近一次 <span className="font-black">{parentQueryPerf.latestMs}ms</span>。
+                                <div className={`rounded-xl border overflow-hidden ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`} style={{ contentVisibility: 'auto', containIntrinsicSize: '420px' }}>
+                                    <div className={`px-2.5 py-1.5 text-[10px] font-bold tracking-wide uppercase ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>每日查詢名單（由新到舊）</div>
+                                    <div className="max-h-[18rem] overflow-y-auto">
+                                        {queryEventsByDayFiltered.map((day) => (
+                                            <div key={day.dateKey} className={`border-t ${darkMode ? 'border-white/5' : 'border-slate-100'}`}>
+                                                <div className={`px-2.5 py-1.5 text-[10px] font-black flex items-center justify-between ${darkMode ? 'text-slate-200 bg-slate-900/55' : 'text-slate-700 bg-slate-50/80'}`}>
+                                                    <span>{day.dateLabel}</span>
+                                                    <span className={`${darkMode ? 'text-emerald-300' : 'text-emerald-700'}`}>{day.items.length} 次</span>
+                                                </div>
+                                                <div>
+                                                    {day.items.map((event, idx) => (
+                                                        <div key={`${event.id}-${event.ts}-${idx}`} className={`grid grid-cols-[4.9rem_5.7rem_1fr_3.8rem] gap-1.5 px-2.5 py-1 text-[10px] ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>
+                                                            <span className="font-mono">{event.timeLabel}</span>
+                                                            <span className="font-mono">{event.id}</span>
+                                                            <span className="truncate">{event.name || '-'}</span>
+                                                            <span className={`text-right text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>{event.relativeLabel}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ))}
+                                        {!queryEventsByDayFiltered.length && (
+                                            <div className={`px-3 py-3 text-center text-xs ${darkMode ? 'text-slate-400' : 'text-slate-400'}`}>
+                                                目前沒有符合條件的每日查詢資料
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
+
+                                <div className="grid grid-cols-1 xl:grid-cols-[1.06fr_0.94fr] gap-2">
+                                    <div className={`rounded-xl border p-2.5 space-y-2 ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
+                                        <div className="flex items-center justify-between gap-2">
+                                            <div className={`text-[10px] font-black tracking-widest uppercase ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>資料品質中心</div>
+                                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
+                                                isQueryDeepInsightsPending
+                                                    ? (darkMode ? 'text-slate-200 border-white/15 bg-slate-800/70' : 'text-slate-600 border-slate-200 bg-slate-50')
+                                                    : dataQualitySummary.issueCount > 0
+                                                        ? (darkMode ? 'text-amber-200 border-amber-300/40 bg-amber-500/15' : 'text-amber-700 border-amber-200 bg-amber-50')
+                                                        : (darkMode ? 'text-emerald-200 border-emerald-300/35 bg-emerald-500/15' : 'text-emerald-700 border-emerald-200 bg-emerald-50')
+                                            }`}>
+                                                {isQueryDeepInsightsPending ? '整理中' : (dataQualitySummary.issueCount > 0 ? `${dataQualitySummary.issueCount} 項待檢查` : '狀態良好')}
+                                            </span>
+                                        </div>
+                                        {isQueryDeepInsightsPending ? (
+                                            <div className={`rounded-lg border px-3 py-3 text-center text-xs font-bold ${darkMode ? 'border-white/10 bg-slate-900/55 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                                                正在掃描資料品質，先不阻塞查詢監控主畫面。
+                                            </div>
+                                        ) : (
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5">
+                                            <div className={`rounded-lg border px-2 py-1.5 ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-slate-50'}`}>
+                                                <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>總學生數</div>
+                                                <div className={`text-[13px] font-black ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>{dataQualitySummary.totalStudents}</div>
+                                                <div className={`mt-0.5 text-[9px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>資料母體</div>
+                                            </div>
+                                            {qualityMetricCards.map((metric) => {
+                                                const hasIssue = metric.count > 0;
+                                                const isActive = activeQualityIssueType === metric.type;
+                                                const countClass = metric.tone === 'rose'
+                                                    ? (hasIssue ? 'text-rose-500' : (darkMode ? 'text-slate-100' : 'text-slate-700'))
+                                                    : (hasIssue ? 'text-amber-500' : (darkMode ? 'text-slate-100' : 'text-slate-700'));
+                                                return (
+                                                    <button
+                                                      key={metric.type}
+                                                      type="button"
+                                                      disabled={!hasIssue}
+                                                      onClick={() => setActiveQualityIssueType((prev) => (prev === metric.type ? '' : metric.type))}
+                                                      className={`rounded-lg border px-2 py-1.5 text-left transition-all ${
+                                                          darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-slate-50'
+                                                      } ${
+                                                          hasIssue ? 'cursor-pointer hover:-translate-y-[1px] hover:shadow-sm' : 'cursor-default opacity-85'
+                                                      } ${
+                                                          isActive ? (darkMode ? 'ring-1 ring-sky-300/50 border-sky-300/50' : 'ring-2 ring-sky-100 border-sky-300/65') : ''
+                                                      }`}
+                                                    >
+                                                        <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>{metric.label}</div>
+                                                        <div className={`text-[13px] font-black ${countClass}`}>{metric.count}</div>
+                                                        <div className={`mt-0.5 text-[9px] font-bold ${hasIssue ? (darkMode ? 'text-sky-300' : 'text-sky-600') : (darkMode ? 'text-slate-500' : 'text-slate-400')}`}>
+                                                            {hasIssue ? '點擊查看明細' : '-'}
+                                                        </div>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                        )}
+                                        {!isQueryDeepInsightsPending && activeQualityIssueType && (
+                                            <div className={`rounded-lg border p-2 space-y-1.5 ${darkMode ? 'border-sky-300/30 bg-slate-900/55' : 'border-sky-200 bg-sky-50/60'}`}>
+                                                <div className="flex items-center justify-between gap-2">
+                                                    <div className={`text-[10px] font-black tracking-widest uppercase ${darkMode ? 'text-sky-200' : 'text-sky-700'}`}>
+                                                        {activeQualityIssueTitle || '問題明細'}
+                                                    </div>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => setActiveQualityIssueType('')}
+                                                      className={`text-[10px] font-black px-2 py-0.5 rounded-md transition-colors ${darkMode ? 'bg-slate-800 text-slate-200 hover:bg-slate-700' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'}`}
+                                                    >
+                                                      收起
+                                                    </button>
+                                                </div>
+                                                <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
+                                                    {activeQualityIssueItems.map((item) => (
+                                                        <div key={item.key} className={`rounded-lg border px-2 py-1 ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-white'}`}>
+                                                            <div className={`text-[10px] font-black ${darkMode ? 'text-slate-100' : 'text-slate-700'}`}>{item.primary}</div>
+                                                            {item.secondary && (
+                                                                <div className={`text-[10px] mt-0.5 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>{item.secondary}</div>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                    {!activeQualityIssueItems.length && (
+                                                        <div className={`text-[10px] font-semibold text-center py-1.5 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                            目前沒有可顯示的問題明細
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                {(qualityIssueCountByType[activeQualityIssueType] || 0) > activeQualityIssueItems.length && (
+                                                    <div className={`text-[10px] font-bold ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                                                        僅顯示前 {activeQualityIssueItems.length} 筆，請先逐步清理後再查看其餘資料
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                        <div className={`rounded-lg border px-2.5 py-1.5 ${darkMode ? 'border-white/10 bg-slate-900/55 text-slate-300' : 'border-slate-200 bg-slate-50 text-slate-600'} text-[10px] font-semibold`}>
+                                            家長查詢效能：快取命中 <span className="font-black text-emerald-600">{parentQueryPerf.cacheHit}</span> / 未命中 <span className="font-black text-sky-600">{parentQueryPerf.cacheMiss}</span>，平均 <span className="font-black">{parentQueryPerf.avgMs}ms</span>，P95 <span className="font-black">{parentQueryPerf.p95Ms}ms</span>，最近一次 <span className="font-black">{parentQueryPerf.latestMs}ms</span>。
+                                        </div>
+                                    </div>
 
                                     <div className={`rounded-xl border p-2.5 space-y-2 ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-white'}`}>
                                         <div className="flex items-center justify-between gap-2">
                                             <div className={`text-[10px] font-black tracking-widest uppercase ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>系統操作歷程</div>
                                             <button
                                               onClick={handleCreateLocalSnapshot}
-                                              className={`${BUTTON_SYSTEM.secondary} px-2.5 py-1 rounded-lg text-[10px] font-bold transition-colors ${darkMode ? 'bg-slate-800 text-slate-200 hover:bg-slate-700' : 'bg-slate-800 text-white hover:bg-slate-700'}`}
+                                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-colors ${darkMode ? 'bg-slate-800 text-slate-200 hover:bg-slate-700' : 'bg-slate-800 text-white hover:bg-slate-700'}`}
                                             >
                                               建立快照
                                             </button>
@@ -7789,13 +6375,13 @@ export default function App() {
                                                             <div className="flex items-center gap-1">
                                                                 <button
                                                                   onClick={() => executeWithSecurity(() => handleRestoreLocalSnapshot(snapshot.id), { title: '還原本機快照' })}
-                                                                  className={`${BUTTON_SYSTEM.primary} text-[10px] font-black px-2 py-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-500 transition-colors`}
+                                                                  className="text-[10px] font-black px-2 py-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-500 transition-colors"
                                                                 >
                                                                   還原
                                                                 </button>
                                                                 <button
                                                                   onClick={() => executeWithSecurity(() => handleDeleteLocalSnapshot(snapshot.id), { title: '刪除本機快照' })}
-                                                                  className={`${BUTTON_SYSTEM.danger} text-[10px] font-black px-2 py-0.5 rounded bg-rose-500 text-white hover:bg-rose-400 transition-colors`}
+                                                                  className="text-[10px] font-black px-2 py-0.5 rounded bg-rose-500 text-white hover:bg-rose-400 transition-colors"
                                                                 >
                                                                   刪除
                                                                 </button>
@@ -7848,6 +6434,7 @@ export default function App() {
                                             )}
                                         </div>
                                     </div>
+                                </div>
                                     </>
                                 )}
                             </div>
@@ -7875,9 +6462,9 @@ export default function App() {
                   </div>
                   <div className="flex gap-2">
                     {canEditStudentGrades ? (
-                      <button onClick={handleDeleteStudent} className={`${BUTTON_SYSTEM.iconDanger} bg-red-500/10 text-red-500 p-2.5 rounded-xl hover:bg-red-500/20 transition-colors active:scale-95`}><Trash2 className="w-5 h-5"/></button>
+                      <button onClick={handleDeleteStudent} className="bg-red-500/10 text-red-500 p-2.5 rounded-xl hover:bg-red-500/20 transition-colors active:scale-95"><Trash2 className="w-5 h-5"/></button>
                     ) : (
-                      <button type="button" disabled className={`${BUTTON_SYSTEM.icon} bg-slate-200 text-slate-400 p-2.5 rounded-xl cursor-not-allowed`} title="2491212 權限不可刪除學生">
+                      <button type="button" disabled className="bg-slate-200 text-slate-400 p-2.5 rounded-xl cursor-not-allowed" title="2491212 權限不可刪除學生">
                         <Trash2 className="w-5 h-5"/>
                       </button>
                     )}
@@ -7915,7 +6502,7 @@ export default function App() {
                                                     onChange={(e) => handleGradeChange(entry.gradeKey, 'class', e.target.value)}
                                                     className={`w-full text-center p-2 rounded-lg bg-transparent border border-transparent outline-none text-base font-bold transition-all ${canEditStudentGrades ? 'cursor-pointer hover:bg-black/5 dark:hover:bg-white/5' : 'cursor-not-allowed opacity-70'} ${darkMode ? 'text-slate-200 focus:bg-slate-800' : 'text-slate-700 focus:bg-white'}`}
                                                 >
-                                                    {activeTeacherClassDefs.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                                                    {CLASS_DEFS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
                                                 </select>
                                             </td>
                                             {['chi', 'eng', 'math'].map(sub => (
@@ -7937,62 +6524,17 @@ export default function App() {
 
         {/* ... Parent View ... */}
         {mode === 'parent' && (
-          <div className={`${shouldShowParentWideShell ? 'max-w-5xl pt-1 sm:pt-2' : 'max-w-md pt-6'} mx-auto space-y-6 transition-all duration-300`}> 
-            {!viewData && !parentSearchShell && (
-            <div className="max-w-md mx-auto pt-6">
-              <div className={`panel-fade-in backdrop-blur-[26px] p-8 rounded-[2.5rem] shadow-2xl border text-center relative overflow-hidden ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/15 shadow-black/30' : 'bg-white/78 border-white/85 ring-1 ring-white/55 shadow-[0_24px_55px_rgba(15,23,42,0.12)]'}`}>
-                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-sky-500 via-emerald-500 to-indigo-500"></div>
-                <h2 className={`text-2xl font-black mb-8 tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>查詢成績</h2>
-                <div className={`w-full p-2 rounded-2xl border transition-all mb-6 shadow-inner ${darkMode ? 'bg-[#08120d]/70 border-emerald-200/15 focus-within:ring-2 focus-within:ring-emerald-500/20' : 'bg-white/75 border-white/85 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100'}`}>
-                  <input type="text" placeholder="請輸入學號" className={`w-full bg-transparent border-none px-4 py-3 outline-none text-xl font-bold text-center tracking-widest placeholder:text-base placeholder:tracking-normal placeholder:font-medium ${darkMode ? 'text-white placeholder:text-slate-600' : 'text-slate-800 placeholder:text-slate-400'}`} value={searchId} onChange={(e) => setSearchId(e.target.value)} />
-                </div>
-                <button onClick={handleParentSearch} disabled={loading || !user} className={`${BUTTON_SYSTEM.primary} w-full bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-2xl font-bold text-lg shadow-sm transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 tracking-wide`}>{loading ? '查詢中...' : (!user ? '連線中...' : '開始查詢')}</button>
-                {searchError && <p className="mt-6 text-red-500 text-xs font-bold bg-red-500/10 inline-block px-4 py-2 rounded-full animate-pulse">{searchError}</p>}
+          <div className={`${viewData ? 'max-w-5xl pt-1 sm:pt-2' : 'max-w-md pt-6'} mx-auto space-y-6 transition-all duration-300`}> 
+            {!viewData && (
+            <div className={`panel-fade-in backdrop-blur-[26px] p-8 rounded-[2.5rem] shadow-2xl border text-center relative overflow-hidden ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/15 shadow-black/30' : 'bg-white/78 border-white/85 ring-1 ring-white/55 shadow-[0_24px_55px_rgba(15,23,42,0.12)]'}`}>
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-sky-500 via-emerald-500 to-indigo-500"></div>
+              <h2 className={`text-2xl font-black mb-8 tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>查詢成績</h2>
+              <div className={`w-full p-2 rounded-2xl border transition-all mb-6 shadow-inner ${darkMode ? 'bg-[#08120d]/70 border-emerald-200/15 focus-within:ring-2 focus-within:ring-emerald-500/20' : 'bg-white/75 border-white/85 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100'}`}>
+                <input type="text" placeholder="請輸入學號或姓名" className={`w-full bg-transparent border-none px-4 py-3 outline-none text-xl font-bold text-center tracking-widest placeholder:text-base placeholder:tracking-normal placeholder:font-medium ${darkMode ? 'text-white placeholder:text-slate-600' : 'text-slate-800 placeholder:text-slate-400'}`} value={searchId} onChange={(e) => setSearchId(e.target.value)} />
               </div>
+              <button onClick={handleParentSearch} disabled={loading || !user} className="btn-sheen w-full bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-2xl font-bold text-lg shadow-sm transition-all active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 tracking-wide">{loading ? '查詢中...' : (!user ? '連線中...' : '開始查詢')}</button>
+              {searchError && <p className="mt-6 text-red-500 text-xs font-bold bg-red-500/10 inline-block px-4 py-2 rounded-full animate-pulse">{searchError}</p>}
             </div>
-            )}
-
-            {!viewData && parentSearchShell && (
-              <div className={`panel-fade-in rounded-[2.5rem] shadow-2xl overflow-hidden border backdrop-blur-[28px] animate-pulse ${darkMode ? 'bg-[#121c17]/88 border-emerald-200/15 shadow-black/30' : 'bg-white/74 border-white/85 ring-1 ring-white/55 shadow-[0_26px_60px_rgba(15,23,42,0.13)]'}`}>
-                <div className={`p-8 pb-6 relative overflow-hidden ${darkMode ? 'bg-[#0d1712] border-b border-emerald-200/10' : 'bg-[linear-gradient(112deg,rgba(236,253,245,0.93)_0%,rgba(224,242,254,0.9)_54%,rgba(255,255,255,0.92)_100%)] border-b border-white/70'}`}>
-                  <div className={`absolute top-0 right-0 w-64 h-64 rounded-full -mr-20 -mt-20 blur-3xl ${darkMode ? 'bg-emerald-500 opacity-20' : 'bg-emerald-300 opacity-25'}`}></div>
-                  <div className="relative z-10 mb-6 pr-[9.5rem] sm:pr-[12.5rem]">
-                    <div className={`h-5 w-28 rounded-full ${darkMode ? 'bg-white/10' : 'bg-emerald-100/80'}`} />
-                    <div className={`mt-4 h-10 w-44 rounded-2xl ${darkMode ? 'bg-white/10' : 'bg-slate-200/85'}`} />
-                    <div className={`mt-3 h-4 w-28 rounded-full ${darkMode ? 'bg-white/10' : 'bg-slate-200/85'}`} />
-                  </div>
-                  <div className="absolute top-0 right-0 z-20 flex flex-col items-end gap-3.5 sm:gap-4">
-                    <div className={`h-9 w-9 rounded-full ${darkMode ? 'bg-white/10' : 'bg-white border border-slate-200'}`} />
-                    <div className="w-[9rem] sm:w-[11rem] text-right">
-                      <div className={`ml-auto h-3 w-16 rounded-full ${darkMode ? 'bg-white/10' : 'bg-emerald-100/90'}`} />
-                      <div className={`mt-3 ml-auto h-12 w-24 rounded-2xl ${darkMode ? 'bg-white/10' : 'bg-slate-200/85'}`} />
-                      <div className={`mt-2 ml-auto h-3 w-28 rounded-full ${darkMode ? 'bg-white/10' : 'bg-slate-200/85'}`} />
-                    </div>
-                  </div>
-                </div>
-                <div className="p-6 space-y-6">
-                  <div className={`h-16 rounded-2xl ${darkMode ? 'bg-white/5' : 'bg-slate-100/90'}`} />
-                  <div className={`premium-control-rail flex p-1 rounded-xl ${darkMode ? 'bg-[#08120d]/70' : 'bg-slate-100'}`}>
-                    {Array.from({ length: 3 }).map((_, idx) => (
-                      <div key={`parent-shell-phase-${idx}`} className={`flex-1 h-9 rounded-lg ${darkMode ? 'bg-white/10' : 'bg-white/90 border border-slate-100'}`} />
-                    ))}
-                  </div>
-                  <div className={`premium-control-rail flex p-1 rounded-2xl ${darkMode ? 'bg-[#08120d]/70' : 'bg-slate-100'}`}>
-                    {Array.from({ length: 4 }).map((_, idx) => (
-                      <div key={`parent-shell-tab-${idx}`} className={`flex-1 h-10 rounded-xl ${darkMode ? 'bg-white/10' : 'bg-white/90 border border-slate-100'}`} />
-                    ))}
-                  </div>
-                  <div className={`h-72 rounded-3xl border ${darkMode ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200'}`} />
-                  <div className="space-y-4">
-                    {Array.from({ length: 2 }).map((_, idx) => (
-                      <div key={`parent-shell-detail-${idx}`} className={`rounded-3xl border p-5 ${darkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200/90'}`}>
-                        <div className={`h-4 w-24 rounded-full ${darkMode ? 'bg-white/10' : 'bg-slate-200/85'}`} />
-                        <div className={`mt-4 h-10 w-full rounded-2xl ${darkMode ? 'bg-white/10' : 'bg-slate-100/90'}`} />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
             )}
 
             {viewData && (
@@ -8001,28 +6543,33 @@ export default function App() {
                    <div className={`absolute top-0 right-0 w-64 h-64 rounded-full -mr-20 -mt-20 blur-3xl ${darkMode ? 'bg-emerald-500 opacity-20' : 'bg-emerald-300 opacity-25'}`}></div>
                    
                    <div className="relative z-10 mb-6">
-                       <div className="absolute top-0 right-0 z-20 flex flex-col items-end gap-3.5 sm:gap-4">
-                           <button onClick={() => setViewData(null)} className={`${BUTTON_SYSTEM.icon} p-2 rounded-full backdrop-blur-md transition-colors ${darkMode ? 'text-slate-400 hover:text-white bg-white/5' : 'text-slate-500 hover:text-slate-700 bg-white border border-slate-200'}`}><LogOut className="w-4 h-4"/></button>
+                       <button onClick={() => setViewData(null)} className={`absolute top-0 right-0 p-2 rounded-full backdrop-blur-md transition-colors ${darkMode ? 'text-slate-400 hover:text-white bg-white/5' : 'text-slate-500 hover:text-slate-700 bg-white border border-slate-200'}`}><LogOut className="w-4 h-4"/></button>
 
-                           {!isParentViewPending && viewData.prob && viewData.prob !== '-' && (
-                               <div className="w-[9rem] sm:w-[11rem] text-right">
-                                   <div className={`text-[9px] font-bold uppercase tracking-[0.28em] ${darkMode ? 'text-emerald-300/85' : 'text-emerald-700/85'}`}>錄取機率</div>
-                                   <div className="mt-1 flex items-end justify-end gap-1 leading-none">
-                                       <span className="text-[2.45rem] sm:text-[3rem] font-black tracking-tight tabular-nums" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>{viewData.prob}</span>
-                                       <span className="text-lg sm:text-xl font-black mb-[0.28rem]" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>%</span>
-                                   </div>
-                                   <p className={`mt-1 text-[9px] leading-relaxed font-medium ${darkMode ? 'text-slate-300/80' : 'text-slate-500'}`}>系統綜合歷史成績運算，僅供參考</p>
+                       {viewData.prob && viewData.prob !== '-' && (
+                           <div className="absolute right-0 top-10 text-right">
+                               <div className={`text-[10px] font-bold uppercase tracking-widest ${darkMode ? 'text-emerald-300/85' : 'text-emerald-700/85'}`}>錄取機率</div>
+                               <div className="mt-0.5 flex items-end justify-end gap-1 leading-none">
+                                   <span className="text-[2.15rem] sm:text-[2.7rem] font-black tracking-tight tabular-nums" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>{viewData.prob}</span>
+                                   <span className="text-base sm:text-lg font-black mb-[0.22rem]" style={parentProbVisual ? parentProbVisual.textStyle : undefined}>%</span>
                                </div>
-                           )}
-                       </div>
+                           </div>
+                       )}
 
-                       <div className={viewData.prob && viewData.prob !== '-' ? 'pr-[9.5rem] sm:pr-[12.5rem]' : 'pr-12'}>
+                       <div className="pr-[7.1rem] sm:pr-[9rem]">
                            <div className={`text-[9px] font-bold uppercase tracking-widest border inline-block px-2 py-1 rounded ${darkMode ? 'text-emerald-300 border-emerald-300/25' : 'text-emerald-700 border-emerald-200'}`}>Student Profile</div>
                            <div className="mt-2">
                                <h3 className={`text-2xl sm:text-3xl font-bold tracking-tighter break-words ${darkMode ? 'text-white' : 'text-slate-800'}`}>{viewData.name}</h3>
                                <p className="font-mono text-xs mt-1 font-bold text-slate-500">{viewData.id}</p>
                            </div>
                        </div>
+
+                       {viewData.prob && viewData.prob !== '-' && (
+                           <div className="mt-2 flex items-center justify-end gap-1.5 opacity-55">
+                                <p className={`text-[9px] font-medium ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>
+                                    系統綜合歷史成績運算，<span className={`${darkMode ? 'text-white/90 border-white/20' : 'text-slate-700 border-slate-300'} border-b pb-0.5`}>僅供參考</span>
+                                </p>
+                           </div>
+                       )}
                    </div>
                 </div>
 
@@ -8034,17 +6581,17 @@ export default function App() {
                   </div>
                   )}
 
-                  <div className={`premium-control-rail flex p-1 mb-6 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#08120d]/70 border-emerald-200/10' : 'bg-slate-50 border-slate-100'}`}>
+                  <div className={`flex p-1 mb-6 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#08120d]/70 border-emerald-200/10' : 'bg-slate-50 border-slate-100'}`}>
                       {PHASES.map(phase => (
                           <button key={phase.id} onClick={() => {
                               startTransition(() => {
                                   setActivePhase(phase.id);
                               });
-                          }} className={`${activePhase === phase.id ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.segment} flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${activePhase === phase.id ? (darkMode ? 'bg-[#1f2a24] text-emerald-100 shadow-md border border-emerald-200/20 ring-1 ring-emerald-200/10' : 'bg-white text-slate-800 shadow-sm border border-slate-100') : 'text-slate-500 hover:text-slate-400'}`}>{phase.name}</button>
+                          }} className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${activePhase === phase.id ? (darkMode ? 'bg-[#1f2a24] text-emerald-100 shadow-md border border-emerald-200/20 ring-1 ring-emerald-200/10' : 'bg-white text-slate-800 shadow-sm border border-slate-100') : 'text-slate-500 hover:text-slate-400'}`}>{phase.name}</button>
                       ))}
                   </div>
 
-                  <div className={`premium-control-rail flex p-1 rounded-2xl mb-8 justify-center shadow-inner ${darkMode ? 'bg-[#08120d]/70' : 'bg-slate-100'}`}>
+                  <div className={`flex p-1 rounded-2xl mb-8 justify-center shadow-inner ${darkMode ? 'bg-[#08120d]/70' : 'bg-slate-100'}`}>
                       {['總分', '國文', '英文', '數學'].map(tab => {
                           const tabKey = tab === '總分' ? 'total' : tab === '國文' ? 'chi' : tab === '英文' ? 'eng' : 'math';
                           const isActive = activeTab === tabKey;
@@ -8053,7 +6600,7 @@ export default function App() {
                                   startTransition(() => {
                                       setActiveTab(tabKey);
                                   });
-                              }} className={`${isActive ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.segment} flex-1 py-2.5 text-xs font-bold rounded-xl transition-all duration-300 ${isActive ? (darkMode ? 'bg-[#1f2a24] text-emerald-100 shadow-md border border-emerald-200/15 ring-1 ring-emerald-200/10' : 'bg-white text-slate-800 shadow-sm border border-slate-100') : 'text-slate-400'}`}>
+                              }} className={`flex-1 py-2.5 text-xs font-bold rounded-xl transition-all duration-300 ${isActive ? (darkMode ? 'bg-[#1f2a24] text-emerald-100 shadow-md border border-emerald-200/15 ring-1 ring-emerald-200/10' : 'bg-white text-slate-800 shadow-sm border border-slate-100') : 'text-slate-400'}`}>
                                 {isActive && <span className={`inline-block w-1.5 h-1.5 rounded-full ${TAB_DOT_BG_CLASS[tabKey]} mr-1.5 mb-0.5`}></span>}{tab}
                               </button>
                           )
@@ -8061,12 +6608,7 @@ export default function App() {
                   </div>
 
                   <div key={`parent-tab-${activePhase}-${activeTab}`} className={prefersReducedMotion ? '' : 'tab-panel-enter'}>
-                    {isParentViewPending ? (
-                      <div className="space-y-4 animate-pulse">
-                        <div className={`h-72 rounded-3xl border ${darkMode ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200'}`} />
-                        <div className={`h-48 rounded-3xl border ${darkMode ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200'}`} />
-                      </div>
-                    ) : deferredParentPhaseData.length > 0 ? (
+                    {deferredParentPhaseData.length > 0 ? (
                       <Suspense fallback={<ChartFallback heightClass="h-72" />}>
                         {activeTab === 'total' && <SingleSubjectChart data={deferredParentPhaseData} subjectKey="total" avgKey="avgTotal" lineColor={COLORS.total.hex} title="總分" domain={[0, 300]} isDarkMode={darkMode} />}
                         {activeTab === 'chi' && <SingleSubjectChart data={deferredParentPhaseData} subjectKey="chi" avgKey="avgChi" lineColor={COLORS.chi.hex} title="國文" domain={[0, 100]} isDarkMode={darkMode} />}
@@ -8084,21 +6626,6 @@ export default function App() {
                   
                 <div className={`p-6 border-t backdrop-blur-md ${darkMode ? 'bg-[#101a15] border-emerald-200/10' : 'bg-white/74 border-white/75 ring-1 ring-white/45'}`}>
                     <h4 className={`font-bold mb-6 text-xs flex items-center justify-center gap-2 tracking-widest uppercase ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>詳細紀錄</h4>
-                    {isParentViewPending ? (
-                        <div className="space-y-4 animate-pulse">
-                            {Array.from({ length: 2 }).map((_, idx) => (
-                                <div key={`parent-detail-shell-${idx}`} className={`rounded-3xl border p-5 ${darkMode ? 'bg-white/5 border-white/10' : 'bg-white/84 border-white/85 ring-1 ring-white/45'}`}>
-                                    <div className={`h-4 w-24 rounded-full ${darkMode ? 'bg-white/10' : 'bg-slate-200/85'}`} />
-                                    <div className={`mt-4 h-10 w-full rounded-2xl ${darkMode ? 'bg-white/10' : 'bg-slate-100/90'}`} />
-                                    <div className="mt-4 grid grid-cols-3 gap-2">
-                                        {Array.from({ length: 3 }).map((__, cellIdx) => (
-                                            <div key={`parent-detail-shell-${idx}-${cellIdx}`} className={`h-16 rounded-2xl ${darkMode ? 'bg-white/10' : 'bg-slate-100/90'}`} />
-                                        ))}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    ) : (
                     <div className="space-y-4">
                         {parentPhaseDataDesc.map((d, rowIndex) => {
                              // 使用 weekendID（如果存在）或 date，確保日A班/日B班的週日日期也能正確計算排名
@@ -8113,7 +6640,7 @@ export default function App() {
                                             <span className="text-sm font-bold text-slate-400 font-mono">{d.date}</span>
                                             {d.class && <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold opacity-60 ${darkMode ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-600'}`}>{d.class}</span>}
                                         </div>
-                                        <button onClick={() => openStatsModal(dateForRank, { total: d.total, chi: d.chi, eng: d.eng, math: d.math }, d.class)} className={`${BUTTON_SYSTEM.secondary} px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-95 shadow-sm backdrop-blur-md ${darkMode ? 'bg-slate-800/85 text-emerald-100 hover:bg-slate-700/88 border border-emerald-200/20 shadow-black/25' : 'bg-white/88 text-slate-700 hover:bg-white border border-white/90 ring-1 ring-white/60 shadow-[0_8px_20px_rgba(15,23,42,0.08)]'}`}>
+                                        <button onClick={() => openStatsModal(dateForRank, { total: d.total, chi: d.chi, eng: d.eng, math: d.math }, d.class)} className={`btn-sheen px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-95 shadow-sm backdrop-blur-md ${darkMode ? 'bg-slate-800/85 text-emerald-100 hover:bg-slate-700/88 border border-emerald-200/20 shadow-black/25' : 'bg-white/88 text-slate-700 hover:bg-white border border-white/90 ring-1 ring-white/60 shadow-[0_8px_20px_rgba(15,23,42,0.08)]'}`}>
                                             <BarChart2 className="w-3.5 h-3.5" /> 
                                             查看落點分析
                                             <ChevronRight className="w-3 h-3 opacity-80" />
@@ -8151,7 +6678,6 @@ export default function App() {
                             </div>
                         )}
                     </div>
-                    )}
                 </div>
               </div>
             )}
@@ -8177,8 +6703,8 @@ export default function App() {
                     autoFocus
                   />
                   <div className="flex justify-end gap-2 mt-5">
-                      <button onClick={() => setShowAddStudentModal(false)} className={`${BUTTON_SYSTEM.secondary} px-4 py-2 rounded-lg text-sm font-bold ${darkMode ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-500 hover:bg-slate-100'}`}>取消</button>
-                      <button onClick={handleAddNewStudent} className={`${BUTTON_SYSTEM.primary} px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold`}>確認</button>
+                      <button onClick={() => setShowAddStudentModal(false)} className={`px-4 py-2 rounded-lg text-sm font-bold ${darkMode ? 'text-slate-300 hover:bg-slate-700' : 'text-slate-500 hover:bg-slate-100'}`}>取消</button>
+                      <button onClick={handleAddNewStudent} className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold">確認</button>
                   </div>
               </div>
           </div>
@@ -8189,32 +6715,19 @@ export default function App() {
               <div className={`modal-panel-animate rounded-[2.5rem] w-full max-w-2xl max-h-[85vh] flex flex-col ${darkMode ? 'bg-slate-800 border border-white/10' : 'bg-white shadow-2xl'}`} onClick={e => e.stopPropagation()}>
                   <div className={`p-6 border-b flex justify-between items-center ${darkMode ? 'border-white/5' : 'border-slate-100'}`}>
                       <h3 className={`text-xl font-bold flex items-center gap-3 ${darkMode ? 'text-white' : 'text-slate-800'}`}><Edit3 className="w-5 h-5 text-indigo-500"/> 設定班級平均</h3>
-                      <button onClick={() => setShowAvgModal(false)} className={`${BUTTON_SYSTEM.icon} p-2 rounded-full transition ${darkMode ? 'bg-white/5 hover:bg-white/10 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-500'}`}><X className="w-5 h-5"/></button>
+                      <button onClick={() => setShowAvgModal(false)} className={`p-2 rounded-full transition ${darkMode ? 'bg-white/5 hover:bg-white/10 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-500'}`}><X className="w-5 h-5"/></button>
                   </div>
                   <div className={`px-6 pt-6 pb-2`}>
-                      <div className={`premium-control-rail flex p-1 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
-                          {activeTeacherClassDefs.map(c => {
-                              const isActive = avgSettingsClassFilter === c.id;
-                              const classTheme = getClassPillTheme(c.id, darkMode);
-                              return (
-                                  <button
-                                    key={c.id}
-                                    onClick={() => setAvgSettingsClassFilter(c.id)}
-                                    className={`${isActive ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.segment} flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${isActive ? classTheme.active : classTheme.inactive}`}
-                                  >
-                                    <span className="inline-flex items-center justify-center gap-1.5">
-                                      <span className={`h-1.5 w-1.5 rounded-full ${classTheme.dot} ${isActive ? 'opacity-100' : 'opacity-72'}`} />
-                                      <span>{c.label}</span>
-                                    </span>
-                                  </button>
-                              );
-                          })}
+                      <div className={`flex p-1 rounded-xl border overflow-x-auto justify-center shadow-inner ${darkMode ? 'bg-[#020617]/50 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
+                          {CLASS_DEFS.map(c => (
+                              <button key={c.id} onClick={() => setAvgSettingsClassFilter(c.id)} className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-bold rounded-lg transition-all ${avgSettingsClassFilter === c.id ? (darkMode ? 'bg-slate-800 text-white shadow-md border border-white/5' : 'bg-white text-slate-800 shadow-sm border border-slate-200') : 'text-slate-500 hover:text-slate-400'}`}>{c.label}</button>
+                          ))}
                       </div>
                   </div>
                   <div className={`px-6 pb-6 overflow-y-auto flex-1 ${darkMode ? 'bg-[#020617]/30' : 'bg-slate-50/50'}`}>
                       <div className="mb-4 text-xs font-bold text-amber-500 bg-amber-500/10 p-3 rounded-xl border border-amber-500/20 flex items-center gap-2">
                         <Sparkles className="w-4 h-4" />
-                        系統已自動計算 <span className="font-black text-amber-600 dark:text-amber-400 mx-1">{activeTeacherClassDefs.find(c=>c.id===avgSettingsClassFilter)?.label}</span> 班平均。若需調整，請直接修改。
+                        系統已自動計算 <span className="font-black text-amber-600 dark:text-amber-400 mx-1">{CLASS_DEFS.find(c=>c.id===avgSettingsClassFilter)?.label}</span> 班平均。若需調整，請直接修改。
                       </div>
                       <table className="w-full text-sm text-left">
                           <thead className={`text-xs uppercase sticky top-0 backdrop-blur z-10 ${darkMode ? 'text-slate-500 bg-slate-800/95' : 'text-slate-400 bg-slate-50/95'}`}>
@@ -8232,7 +6745,7 @@ export default function App() {
                                   const avg = dateData[avgSettingsClassFilter] || { chi: '', eng: '', math: '', total: '' };
                                   return (
                                       <tr key={date} className={darkMode ? 'bg-transparent' : 'bg-white'}>
-                                          <td className="px-4 py-3 font-mono font-bold text-slate-500">{weekendLabelByDate[date] || getScopedDateLabel(date, activeDateContextCohortId, availableDates)}</td>
+                                          <td className="px-4 py-3 font-mono font-bold text-slate-500">{weekendLabelByDate[date] || getWeekendDisplayLabel(date)}</td>
                                           {['chi', 'eng', 'math', 'total'].map(sub => (
                                               <td key={sub} className="px-1 py-1.5">
                                                   <input id={`avg-${dateIndex}-${sub}`} type="number" className={`w-full text-center p-2 rounded-xl border outline-none transition-all font-bold ${darkMode ? 'bg-slate-900 border-transparent focus:bg-slate-800 focus:border-blue-500/50 text-slate-200' : 'bg-slate-50 border-slate-100 focus:bg-white focus:border-indigo-300 text-slate-600'} ${sub==='total'?'text-blue-500':''}`} value={avg[sub] || ''} onChange={(e) => handleManualAverageChange(date, avgSettingsClassFilter, sub, e.target.value)} onKeyDown={(e) => handleAvgKeyDown(e, dateIndex, sub)} onPaste={(e) => handleAvgPaste(e, dateIndex, sub)} placeholder="-" />
@@ -8245,8 +6758,8 @@ export default function App() {
                       </table>
                   </div>
                   <div className={`p-6 border-t rounded-b-[2rem] flex justify-end gap-3 ${darkMode ? 'border-white/5 bg-slate-800' : 'border-slate-100 bg-white'}`}>
-                      <button onClick={() => setShowAvgModal(false)} className={`${BUTTON_SYSTEM.secondary} px-6 py-3 rounded-xl font-bold transition text-sm ${darkMode ? 'text-slate-400 hover:bg-white/5' : 'text-slate-500 hover:bg-slate-100'}`}>取消</button>
-                      <button onClick={saveManualClassAverages} className={`${BUTTON_SYSTEM.primary} px-6 py-3 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-500 shadow-lg shadow-indigo-900/20 transition active:scale-95 text-sm`}>儲存設定</button>
+                      <button onClick={() => setShowAvgModal(false)} className={`px-6 py-3 rounded-xl font-bold transition text-sm ${darkMode ? 'text-slate-400 hover:bg-white/5' : 'text-slate-500 hover:bg-slate-100'}`}>取消</button>
+                      <button onClick={saveManualClassAverages} className="px-6 py-3 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-500 shadow-lg shadow-indigo-900/20 transition active:scale-95 text-sm">儲存設定</button>
                   </div>
               </div>
           </div>
@@ -8256,7 +6769,7 @@ export default function App() {
             <div className="modal-backdrop-animate fixed inset-0 bg-black/62 backdrop-blur-sm flex items-start sm:items-center justify-center z-[70] px-4 pb-4 pt-[calc(5rem+env(safe-area-inset-top))] sm:p-4" onClick={() => setStatsModalData(null)}>
                 <div className={`modal-panel-animate rounded-[2.2rem] w-full max-w-2xl overflow-hidden flex flex-col max-h-[calc(100svh-6rem-env(safe-area-inset-top))] sm:max-h-[92vh] border ${darkMode ? 'bg-slate-800 border-white/10' : 'bg-white/95 border-slate-200/95 shadow-[0_30px_70px_rgba(15,23,42,0.22)]'}`} onClick={e => e.stopPropagation()}>
                     <div className={`p-6 sm:p-7 border-b relative ${darkMode ? 'border-white/5 bg-slate-800/75' : 'border-slate-200/95 bg-[linear-gradient(112deg,rgba(224,242,254,0.96)_0%,rgba(255,255,255,0.98)_46%,rgba(236,253,245,0.96)_100%)]'}`}>
-                        <button onClick={() => setStatsModalData(null)} className={`${BUTTON_SYSTEM.icon} absolute top-5 right-5 p-2 rounded-full transition ${darkMode ? 'bg-white/5 hover:bg-white/10 text-white' : 'bg-white hover:bg-slate-50 text-slate-500 border border-slate-200'}`}><X className="w-5 h-5"/></button>
+                        <button onClick={() => setStatsModalData(null)} className={`absolute top-5 right-5 p-2 rounded-full transition ${darkMode ? 'bg-white/5 hover:bg-white/10 text-white' : 'bg-white hover:bg-slate-50 text-slate-500 border border-slate-200'}`}><X className="w-5 h-5"/></button>
                         <div className="pr-12">
                             <div className={`text-[10px] font-black uppercase tracking-[0.18em] mb-2 ${darkMode ? 'text-blue-400' : 'text-sky-700'}`}>落點分析報告</div>
                             <h3 className={`text-2xl font-black tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>{statsModalData.date} 落點分析</h3>
@@ -8273,7 +6786,7 @@ export default function App() {
                                     const tabKey = tab === '總分' ? 'total' : tab === '國文' ? 'chi' : tab === '英文' ? 'eng' : 'math';
                                     const isActive = statsActiveTab === tabKey;
                                     return (
-                                        <button key={tabKey} onClick={() => setStatsActiveTab(tabKey)} className={`${isActive ? BUTTON_SYSTEM.segmentActive : BUTTON_SYSTEM.segment} py-2 text-xs font-black rounded-xl transition-all ${isActive ? (darkMode ? 'bg-slate-800 text-white shadow-md border border-white/5' : 'bg-white text-slate-800 shadow-sm border border-slate-200') : 'text-slate-500'}`}>
+                                        <button key={tabKey} onClick={() => setStatsActiveTab(tabKey)} className={`py-2 text-xs font-black rounded-xl transition-all ${isActive ? (darkMode ? 'bg-slate-800 text-white shadow-md border border-white/5' : 'bg-white text-slate-800 shadow-sm border border-slate-200') : 'text-slate-500'}`}>
                                             {isActive && <span className={`inline-block w-1.5 h-1.5 rounded-full ${TAB_DOT_BG_CLASS[tabKey]} mr-1.5 mb-0.5`}></span>}{tab}
                                         </button>
                                     );
@@ -8372,88 +6885,6 @@ export default function App() {
             </div>
         )}
 
-        {showImportFormatGuide && (
-            <div className="modal-backdrop-animate fixed inset-0 bg-black/58 backdrop-blur-sm flex items-center justify-center z-[64] px-4 py-[calc(env(safe-area-inset-top)+1.2rem)] pb-[calc(env(safe-area-inset-bottom)+1.2rem)]" onClick={() => setShowImportFormatGuide(false)}>
-                <div className={`modal-panel-animate w-full max-w-2xl rounded-[1.8rem] border overflow-hidden ${darkMode ? 'bg-slate-800 border-white/10' : 'bg-white border-slate-200 shadow-[0_26px_64px_rgba(15,23,42,0.2)]'}`} onClick={(event) => event.stopPropagation()}>
-                    <div className={`px-5 py-4 border-b ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-slate-200 bg-slate-50'}`}>
-                        <div className="flex items-start justify-between gap-3">
-                            <div>
-                                <h3 className={`text-base font-black tracking-tight ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>匯入格式說明</h3>
-                                <p className={`text-[11px] mt-1 font-semibold ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>匯入前先對照這份格式，能減少預檢失敗與錯誤日期被略過。</p>
-                            </div>
-                            <button onClick={() => setShowImportFormatGuide(false)} className={`${BUTTON_SYSTEM.icon} p-1.5 rounded-full transition ${darkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-white text-slate-500 border border-slate-200'}`}>
-                                <X className="w-4 h-4" />
-                            </button>
-                        </div>
-                    </div>
-
-                    <div className="px-5 py-4 space-y-3">
-                        <div className={`rounded-lg border px-3 py-2.5 ${darkMode ? 'border-white/10 bg-slate-900/45 text-slate-300' : 'border-slate-200 bg-slate-50 text-slate-600'}`}>
-                            <div className={`text-[10px] font-black tracking-widest uppercase mb-2 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>建議欄位順序</div>
-                            <div className="flex flex-wrap gap-1.5">
-                                {importFormatGuide.sampleHeaders.map((header) => (
-                                    <span key={header} className={`inline-flex rounded-full px-2 py-1 text-[10px] font-black ${darkMode ? 'bg-slate-800 text-slate-100 border border-white/10' : 'bg-white text-slate-700 border border-slate-200'}`}>
-                                        {header}
-                                    </span>
-                                ))}
-                            </div>
-                        </div>
-
-                        <div className={`rounded-lg border overflow-hidden ${darkMode ? 'border-white/10 bg-slate-900/50' : 'border-slate-200 bg-white'}`}>
-                            <div className={`grid grid-cols-[5.2rem_1fr_5rem_4.4rem_3.3rem_3.3rem_3.3rem] px-3 py-2 text-[10px] font-bold tracking-wide ${darkMode ? 'bg-slate-800 text-slate-300' : 'bg-slate-50 text-slate-500'}`}>
-                                <span className="text-center">學號</span>
-                                <span className="text-center">姓名</span>
-                                <span className="text-center">日期</span>
-                                <span className="text-center">班級</span>
-                                <span className="text-center">國</span>
-                                <span className="text-center">英</span>
-                                <span className="text-center">數</span>
-                            </div>
-                            <div>
-                                {importFormatGuide.sampleRows.map((row, idx) => (
-                                    <div key={`import-guide-row-${idx}`} className={`grid grid-cols-[5.2rem_1fr_5rem_4.4rem_3.3rem_3.3rem_3.3rem] px-3 py-1.5 text-[11px] border-t ${darkMode ? 'border-white/10 text-slate-200' : 'border-slate-100 text-slate-700'}`}>
-                                        {row.map((cell, cellIdx) => (
-                                            <span key={`import-guide-cell-${idx}-${cellIdx}`} className={`${cellIdx === 1 ? 'truncate text-center' : 'text-center'} ${cellIdx === 0 || cellIdx === 2 ? 'font-mono' : ''}`}>
-                                                {cell}
-                                            </span>
-                                        ))}
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                            <div className={`rounded-lg border p-3 ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-slate-50'}`}>
-                                <div className={`text-[10px] font-black tracking-widest uppercase mb-2 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>欄位辨識規則</div>
-                                <div className="space-y-1.5">
-                                    {importFormatGuide.headerHints.map((hint) => (
-                                        <div key={hint} className={`text-[11px] leading-relaxed font-semibold ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>{hint}</div>
-                                    ))}
-                                </div>
-                            </div>
-                            <div className={`rounded-lg border p-3 ${darkMode ? 'border-white/10 bg-slate-900/45' : 'border-slate-200 bg-slate-50'}`}>
-                                <div className={`text-[10px] font-black tracking-widest uppercase mb-2 ${darkMode ? 'text-slate-300' : 'text-slate-500'}`}>匯入注意事項</div>
-                                <div className="space-y-1.5">
-                                    {importFormatGuide.rules.map((rule) => (
-                                        <div key={rule} className={`text-[11px] leading-relaxed font-semibold ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>{rule}</div>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className={`px-5 py-4 border-t flex justify-end ${darkMode ? 'border-white/10 bg-slate-900/50' : 'border-slate-200 bg-white'}`}>
-                        <button
-                          onClick={() => setShowImportFormatGuide(false)}
-                          className={`${BUTTON_SYSTEM.secondary} px-4 py-2 rounded-lg text-xs font-bold ${darkMode ? 'bg-slate-800 text-slate-200 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                        >
-                          關閉
-                        </button>
-                    </div>
-                </div>
-            </div>
-        )}
-
         {importPreview && (
             <div className="modal-backdrop-animate fixed inset-0 bg-black/58 backdrop-blur-sm flex items-center justify-center z-[65] px-4 py-[calc(env(safe-area-inset-top)+1.2rem)] pb-[calc(env(safe-area-inset-bottom)+1.2rem)]" onClick={handleCancelImportPreview}>
                 <div className={`modal-panel-animate w-full max-w-2xl rounded-[1.8rem] border overflow-hidden ${darkMode ? 'bg-slate-800 border-white/10' : 'bg-white border-slate-200 shadow-[0_26px_64px_rgba(15,23,42,0.2)]'}`} onClick={(event) => event.stopPropagation()}>
@@ -8463,7 +6894,7 @@ export default function App() {
                                 <h3 className={`text-base font-black tracking-tight ${darkMode ? 'text-slate-100' : 'text-slate-800'}`}>匯入預檢確認</h3>
                                 <p className={`text-[11px] mt-1 font-semibold ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>{importPreview.fileName}</p>
                             </div>
-                            <button onClick={handleCancelImportPreview} className={`${BUTTON_SYSTEM.icon} p-1.5 rounded-full transition ${darkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-white text-slate-500 border border-slate-200'}`}>
+                            <button onClick={handleCancelImportPreview} className={`p-1.5 rounded-full transition ${darkMode ? 'hover:bg-slate-700 text-slate-300' : 'hover:bg-white text-slate-500 border border-slate-200'}`}>
                                 <X className="w-4 h-4" />
                             </button>
                         </div>
@@ -8523,14 +6954,14 @@ export default function App() {
                         <button
                           onClick={handleCancelImportPreview}
                           disabled={isApplyingImport}
-                          className={`${BUTTON_SYSTEM.secondary} px-4 py-2 rounded-lg text-xs font-bold ${darkMode ? 'bg-slate-800 text-slate-200 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                          className={`px-4 py-2 rounded-lg text-xs font-bold ${darkMode ? 'bg-slate-800 text-slate-200 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                         >
                           取消
                         </button>
                         <button
                           onClick={handleConfirmImportPreview}
                           disabled={isApplyingImport}
-                          className={`${BUTTON_SYSTEM.primary} px-4 py-2 rounded-lg text-xs font-bold text-white ${isApplyingImport ? 'bg-slate-400 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500'}`}
+                          className={`px-4 py-2 rounded-lg text-xs font-bold text-white ${isApplyingImport ? 'bg-slate-400 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500'}`}
                         >
                           {isApplyingImport ? '套用中...' : '確認匯入'}
                         </button>
@@ -8550,12 +6981,12 @@ export default function App() {
                     確定要刪除 <span className={`font-bold px-2 py-0.5 rounded-md mx-1 text-base ${darkMode ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-900'}`}>{deleteTarget || studentToDelete?.name}</span> 的資料嗎？
                   </p>
                   <div className="flex gap-3 justify-end">
-                      <button onClick={() => { setDeleteTarget(null); setStudentToDelete(null); }} className={`${BUTTON_SYSTEM.secondary} flex-1 px-4 py-3.5 rounded-xl font-bold text-sm transition-colors ${darkMode ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>取消</button>
+                      <button onClick={() => { setDeleteTarget(null); setStudentToDelete(null); }} className={`flex-1 px-4 py-3.5 rounded-xl font-bold text-sm transition-colors ${darkMode ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>取消</button>
                       <button
                         onClick={() => executeWithSecurity(deleteTarget ? confirmDeleteDate : confirmDeleteStudent, {
                             title: deleteTarget ? '刪除測驗日期' : '刪除學生資料'
                         })}
-                        className={`${BUTTON_SYSTEM.danger} flex-1 px-4 py-3.5 rounded-xl bg-red-500 text-white hover:bg-red-600 font-bold text-sm shadow-lg shadow-red-900/20 transition-all active:scale-95`}
+                        className="flex-1 px-4 py-3.5 rounded-xl bg-red-500 text-white hover:bg-red-600 font-bold text-sm shadow-lg shadow-red-900/20 transition-all active:scale-95"
                       >
                         刪除
                       </button>

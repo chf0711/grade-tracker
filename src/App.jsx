@@ -513,6 +513,145 @@ const buildWeekendGradeEntryMap = (grades, getDateID) => {
     return weekendEntryMap;
 };
 
+const buildParentChartData = ({ grades, datePool, classAveragesMap, getDateID }) => {
+    const weekendOrder = new Map();
+    sanitizeDateList(datePool).forEach((date, index) => {
+        const weekendID = getDateID(date);
+        if (weekendID && !weekendOrder.has(weekendID)) {
+            weekendOrder.set(weekendID, index);
+        }
+    });
+
+    const weekendGradeEntries = buildWeekendGradeEntryMap(grades, getDateID);
+    if (Object.keys(weekendGradeEntries).length === 0) {
+        Object.entries(grades || {}).forEach(([sourceDate, grade]) => {
+            const normalizedSourceDate = normalizeDateToken(sourceDate);
+            if (!normalizedSourceDate) return;
+            const weekendID = getDateID(normalizedSourceDate) || normalizedSourceDate;
+            if (!weekendID || weekendGradeEntries[weekendID]) return;
+            weekendGradeEntries[weekendID] = {
+                sourceDate: normalizedSourceDate,
+                grade: normalizeStudentGrade(grade)
+            };
+        });
+    }
+
+    Object.keys(weekendGradeEntries)
+        .sort(customDateSort)
+        .forEach((weekendID) => {
+            if (!weekendOrder.has(weekendID)) {
+                weekendOrder.set(weekendID, weekendOrder.size);
+            }
+        });
+
+    const resolveAverageValue = (primaryValue, fallbackValue) => {
+        const primaryNumber = toNumberOrNull(primaryValue);
+        if (primaryNumber !== null) return primaryNumber;
+        return toNumberOrNull(fallbackValue);
+    };
+
+    const chartData = Object.entries(weekendGradeEntries)
+        .map(([weekendID, entry]) => {
+            const weekData = normalizeStudentGrade(entry.grade);
+            const totalValue =
+                toNumberOrNull(weekData.total)
+                ?? toNumberOrNull(calculateTotal(weekData.chi, weekData.eng, weekData.math));
+            const hasAnyScore =
+                totalValue !== null
+                || SCORE_KEYS.some((key) => toNumberOrNull(weekData[key]) !== null);
+            if (!hasAnyScore) return null;
+
+            const weekClass = weekData.class || 'A班';
+            const avgData = classAveragesMap?.[weekendID]?.[weekClass] || {};
+            const avgAllData = classAveragesMap?.[weekendID]?.all || {};
+
+            return {
+                date: normalizeDateToken(entry.sourceDate) || weekendID,
+                weekendID,
+                total: totalValue ?? 0,
+                chi: toNumberOrNull(weekData.chi) ?? 0,
+                eng: toNumberOrNull(weekData.eng) ?? 0,
+                math: toNumberOrNull(weekData.math) ?? 0,
+                avgTotal: resolveAverageValue(avgData.total, avgAllData.total),
+                avgChi: resolveAverageValue(avgData.chi, avgAllData.chi),
+                avgEng: resolveAverageValue(avgData.eng, avgAllData.eng),
+                avgMath: resolveAverageValue(avgData.math, avgAllData.math),
+                avgAllTotal: toNumberOrNull(avgAllData.total),
+                avgAllChi: toNumberOrNull(avgAllData.chi),
+                avgAllEng: toNumberOrNull(avgAllData.eng),
+                avgAllMath: toNumberOrNull(avgAllData.math),
+                class: weekClass
+            };
+        })
+        .filter(Boolean)
+        .sort((a, b) => {
+            const indexA = weekendOrder.has(a.weekendID) ? weekendOrder.get(a.weekendID) : Number.POSITIVE_INFINITY;
+            const indexB = weekendOrder.has(b.weekendID) ? weekendOrder.get(b.weekendID) : Number.POSITIVE_INFINITY;
+            if (indexA === indexB) return 0;
+            return indexA - indexB;
+        });
+
+    const average = chartData.length > 0
+        ? (chartData.reduce((sum, item) => sum + item.total, 0) / chartData.length).toFixed(1)
+        : 0;
+
+    return { chartData, average };
+};
+
+const buildParentResolvedViewData = ({
+    student,
+    cohortId,
+    classData,
+    datePool,
+    classAveragesMap,
+    getDateID,
+    scoreContext
+}) => {
+    const { chartData, average } = buildParentChartData({
+        grades: student?.grades,
+        datePool,
+        classAveragesMap,
+        getDateID
+    });
+
+    let prob = '-';
+    if (Array.isArray(classData) && classData.length > 0 && student?.id) {
+        const resolvedScoreContext = scoreContext || buildProbabilityContext(classData, datePool, getDateID);
+        const studentGradeMap = { [student.id]: {} };
+        const weekendEntries = buildWeekendGradeEntryMap(student.grades, getDateID);
+        Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
+            studentGradeMap[student.id][weekendID] = entry.grade;
+        });
+
+        prob = calculateProbLogic(
+            student,
+            resolvedScoreContext.scoresByDate,
+            resolvedScoreContext.mathScoresByDate,
+            studentGradeMap,
+            resolvedScoreContext.normalizedDates,
+            resolvedScoreContext.probabilityProfiles,
+            resolvedScoreContext.totalPRLookupByDate,
+            resolvedScoreContext.mathPRLookupByDate
+        );
+    }
+
+    const latestDateKey = chartData.length > 0
+        ? chartData[chartData.length - 1].weekendID || chartData[chartData.length - 1].date
+        : '';
+
+    return {
+        latestDateKey,
+        viewData: {
+            ...student,
+            chartData,
+            average,
+            prob,
+            cohortId,
+            isPending: false
+        }
+    };
+};
+
 const deriveDatePoolFromStudents = (students = []) => sanitizeDateList(
     students.flatMap((student) => (
         Object.entries(student?.grades || {})
@@ -1292,7 +1431,7 @@ export default function App() {
   const [teacherStudentsCohortId, setTeacherStudentsCohortId] = useState('');
   const [publicStudentsCohortId, setPublicStudentsCohortId] = useState('');
   const [, setQueryStatsCohortId] = useState('');
-  const [, setTeacherMessageCohortId] = useState('');
+  const [teacherMessageCohortId, setTeacherMessageCohortId] = useState('');
   const [cohortRegistryLoading, setCohortRegistryLoading] = useState(false);
   const [publicCohortSaving, setPublicCohortSaving] = useState(false);
     
@@ -1392,6 +1531,7 @@ export default function App() {
   const [searchId, setSearchId] = useState('');
   const [viewData, setViewData] = useState(null);
   const [parentSearchShell, setParentSearchShell] = useState(null);
+  const [parentAnalyticsPending, setParentAnalyticsPending] = useState(false);
   const [parentViewContext, setParentViewContext] = useState({
       cohortId: '',
       dates: [],
@@ -4920,14 +5060,15 @@ export default function App() {
       return;
     }
     const searchStartTs = performance.now();
+    let hasRenderableView = false;
+    let loadingReleased = false;
+    const releaseLoading = () => {
+        if (loadingReleased) return;
+        loadingReleased = true;
+        setLoading(false);
+    };
     setSearchError('');
-    setParentViewContext({
-        cohortId: '',
-        dates: [],
-        classData: [],
-        classAverages: {},
-        teacherMessage: { globalMessage: '', byStudent: {} }
-    });
+    setParentAnalyticsPending(false);
     setLoading(true);
     try {
       const rawSearchKeyword = searchId.trim();
@@ -4973,15 +5114,18 @@ export default function App() {
                   break;
               }
           }
+      }
 
-          if (db && likelyStudentId) {
-              const cachedDatePool = sanitizeDateList(
-                  readLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, cohortId)) || getDefaultDatesForCohort(cohortId, cohortOptions)
-              );
-              const getCachedDateID = (dateStr) => resolveScopedDateId(dateStr, cohortId, cachedDatePool);
-              const docRef = getCohortStudentDocRef(cohortId, normalizedSearchId);
-              const docSnap = await getDoc(docRef);
-              if (docSnap.exists()) {
+      if (!resolvedSearch && db && likelyStudentId) {
+          const remoteMatches = await Promise.allSettled(
+              parentSearchCohortOrder.map(async (cohortId) => {
+                  const cachedDatePool = sanitizeDateList(
+                      readLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, cohortId)) || getDefaultDatesForCohort(cohortId, cohortOptions)
+                  );
+                  const getCachedDateID = (dateStr) => resolveScopedDateId(dateStr, cohortId, cachedDatePool);
+                  const docSnap = await getDoc(getCohortStudentDocRef(cohortId, normalizedSearchId));
+                  if (!docSnap.exists()) return null;
+
                   const rawData = docSnap.data();
                   const normalizedResult = normalizeGrades(rawData.grades, {
                       withMeta: true,
@@ -4996,15 +5140,18 @@ export default function App() {
                           { ...rawData, grades: normalizedResult.normalized, lastUpdated: new Date().toISOString() }
                       ).catch((err) => console.error('Parent search cleanup invalid date error:', err));
                   }
-                  resolvedSearch = {
+
+                  return {
                       cohortId,
                       data: normalizedStudent,
                       fullClassData: []
                   };
-                  break;
-              }
-              continue;
-          }
+              })
+          );
+
+          resolvedSearch = remoteMatches
+              .map((result) => (result.status === 'fulfilled' ? result.value : null))
+              .find(Boolean) || null;
       }
 
       if (!resolvedSearch) {
@@ -5021,40 +5168,110 @@ export default function App() {
           fullClassData
       } = resolvedSearch;
 
-      setViewData({
+      const cachedStageDates = sanitizeDateList(
+          readLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, foundCohortId))
+          || (datesCohortId === foundCohortId ? sortedAvailableDatesAsc : getDefaultDatesForCohort(foundCohortId, cohortOptions))
+      );
+      const stageDatePool = mergeDatePools(cachedStageDates, deriveDatePoolFromStudents([matchedStudent]));
+      const getStageDateID = (dateStr) => resolveScopedDateId(dateStr, foundCohortId, stageDatePool);
+      const cachedStageAveragesRaw =
+          foundCohortId === classAveragesCohortId
+              ? classAverages
+              : (readLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.classAverages, foundCohortId)) || {});
+      const cachedStageAverages = normalizeClassAveragesByWeekend(cachedStageAveragesRaw, getStageDateID);
+      const cachedTeacherMessage =
+          foundCohortId === teacherMessageCohortId
+              ? { globalMessage: teacherGlobalMessage, byStudent: teacherStudentMessages }
+              : readLocalCache(
+                  getCohortCacheKey(LOCAL_CACHE_KEYS.teacherMessage, foundCohortId),
+                  TEACHER_MESSAGE_CACHE_TTL_MS
+              );
+      const normalizedStageTeacherMessage = cachedTeacherMessage && typeof cachedTeacherMessage === 'object'
+          ? {
+              globalMessage: String(cachedTeacherMessage.globalMessage ?? cachedTeacherMessage.message ?? '').trim(),
+              byStudent: normalizeTeacherStudentMessages(cachedTeacherMessage.byStudent)
+          }
+          : { globalMessage: '', byStudent: {} };
+      const previewChart = buildParentChartData({
+          grades: matchedStudent.grades,
+          datePool: stageDatePool,
+          classAveragesMap: cachedStageAverages,
+          getDateID: (dateStr) => getStageDateID(dateStr)
+      });
+      const previewViewData = {
           ...matchedStudent,
-          chartData: [],
-          average: '-',
+          chartData: previewChart.chartData,
+          average: previewChart.average,
           prob: '-',
           cohortId: foundCohortId,
           isPending: true
+      };
+      hasRenderableView = true;
+      setParentViewContext({
+          cohortId: foundCohortId,
+          dates: stageDatePool,
+          classData: fullClassData.length > 0 ? fullClassData : [],
+          classAverages: cachedStageAverages,
+          teacherMessage: normalizedStageTeacherMessage
       });
+      if (previewChart.chartData.length > 0) {
+          const latestPreview = previewChart.chartData[previewChart.chartData.length - 1];
+          setActivePhase(resolvePhaseByDate(latestPreview.weekendID || latestPreview.date, stageDatePool));
+      }
+      setViewData(previewViewData);
       setParentSearchShell(null);
+      setParentAnalyticsPending(true);
+      releaseLoading();
+
+      const cachedContextData = fullClassData.length > 0
+          ? fullClassData
+          : getCachedStudentsForParentSearch(foundCohortId);
+      if (cachedContextData.length > 0) {
+          const cachedEffectiveDatePool = mergeDatePools(stageDatePool, deriveDatePoolFromStudents(cachedContextData));
+          const cachedResolved = buildParentResolvedViewData({
+              student: cachedContextData.find((student) => String(student?.id || '').toUpperCase() === String(matchedStudent?.id || '').toUpperCase()) || matchedStudent,
+              cohortId: foundCohortId,
+              classData: cachedContextData,
+              datePool: cachedEffectiveDatePool.length ? cachedEffectiveDatePool : stageDatePool,
+              classAveragesMap: cachedStageAverages,
+              getDateID: (dateStr) => getStageDateID(dateStr)
+          });
+
+          setParentViewContext({
+              cohortId: foundCohortId,
+              dates: cachedEffectiveDatePool.length ? cachedEffectiveDatePool : stageDatePool,
+              classData: cachedContextData,
+              classAverages: cachedStageAverages,
+              teacherMessage: normalizedStageTeacherMessage
+          });
+          if (cachedResolved.latestDateKey) {
+              setActivePhase(resolvePhaseByDate(cachedResolved.latestDateKey, cachedEffectiveDatePool.length ? cachedEffectiveDatePool : stageDatePool));
+          }
+          setViewData(cachedResolved.viewData);
+          setParentAnalyticsPending(false);
+      }
 
       const teacherMessagePromise = loadTeacherMessage({ cohortId: foundCohortId, hydrateState: false });
-      const loadedDates = datesCohortId === foundCohortId && sortedAvailableDatesAsc.length > 0
-          ? sortedAvailableDatesAsc
-          : await loadDates({ cohortId: foundCohortId });
-      const getSearchDateID = (dateStr, datePool = loadedDates) => resolveScopedDateId(dateStr, foundCohortId, datePool);
-      const [contextData, teacherMessagePayload] = await Promise.all([
+      const loadedDatesPromise =
+          datesCohortId === foundCohortId && sortedAvailableDatesAsc.length > 0
+              ? Promise.resolve(sortedAvailableDatesAsc)
+              : loadDates({ cohortId: foundCohortId });
+      const backgroundContextPromise =
           fullClassData.length > 0
               ? Promise.resolve(fullClassData)
-              : loadParentSearchStudents(foundCohortId, { datePool: loadedDates }),
+              : loadParentSearchStudents(foundCohortId, { datePool: stageDatePool.length ? stageDatePool : cachedStageDates });
+      const [loadedDates, contextData, teacherMessagePayload] = await Promise.all([
+          loadedDatesPromise,
+          backgroundContextPromise,
           teacherMessagePromise
       ]);
+      const getSearchDateID = (dateStr, datePool = loadedDates) => resolveScopedDateId(dateStr, foundCohortId, datePool);
       const derivedSearchDates = deriveDatePoolFromStudents(contextData);
       const sortedDates = mergeDatePools(loadedDates, derivedSearchDates);
       const effectiveDatePool = sortedDates.length ? sortedDates : loadedDates;
       const effectiveClassAverages = await loadClassAverages({ cohortId: foundCohortId, datePool: effectiveDatePool });
       writeLocalCache(getCohortCacheKey(LOCAL_CACHE_KEYS.dates, foundCohortId), effectiveDatePool);
       const data = contextData.find((student) => String(student?.id || '').toUpperCase() === String(matchedStudent?.id || '').toUpperCase()) || matchedStudent;
-      const weekendOrder = new Map();
-      effectiveDatePool.forEach((date, index) => {
-          const weekendID = getSearchDateID(date, effectiveDatePool);
-          if (weekendID && !weekendOrder.has(weekendID)) {
-              weekendOrder.set(weekendID, index);
-          }
-      });
       if (foundCohortId === activePublicCohortId) {
           setAvailableDates(effectiveDatePool);
           setDatesCohortId(foundCohortId);
@@ -5109,133 +5326,44 @@ export default function App() {
           return;
       }
 
-      const allChartData = [];
-
-      if (data.grades) {
-          const weekendGradeEntries = buildWeekendGradeEntryMap(data.grades, (dateStr) => getSearchDateID(dateStr, effectiveDatePool));
-          if (Object.keys(weekendGradeEntries).length === 0) {
-              Object.entries(data.grades || {}).forEach(([sourceDate, grade]) => {
-                  const normalizedSourceDate = normalizeDateToken(sourceDate);
-                  if (!normalizedSourceDate) return;
-                  const weekendID = getSearchDateID(normalizedSourceDate, effectiveDatePool) || normalizedSourceDate;
-                  if (!weekendID) return;
-                  if (!weekendGradeEntries[weekendID]) {
-                      weekendGradeEntries[weekendID] = {
-                          sourceDate: normalizedSourceDate,
-                          grade: normalizeStudentGrade(grade)
-                      };
-                  }
-              });
-          }
-          Object.keys(weekendGradeEntries)
-              .sort(customDateSort)
-              .forEach((weekendID) => {
-                  if (!weekendOrder.has(weekendID)) {
-                      weekendOrder.set(weekendID, weekendOrder.size);
-                  }
-              });
-          Object.entries(weekendGradeEntries).forEach(([weekendID, entry]) => {
-              const weekData = normalizeStudentGrade(entry.grade);
-              const t =
-                  toNumberOrNull(weekData.total)
-                  ?? toNumberOrNull(calculateTotal(weekData.chi, weekData.eng, weekData.math));
-              const hasAnyScore =
-                  t !== null
-                  || SCORE_KEYS.some((key) => toNumberOrNull(weekData[key]) !== null);
-              if (!hasAnyScore) return;
-
-              const weekClass = weekData.class || 'A班';
-              const avgData = (effectiveClassAverages[weekendID] && effectiveClassAverages[weekendID][weekClass])
-                  ? effectiveClassAverages[weekendID][weekClass]
-                  : {};
-              const avgAllData = (effectiveClassAverages[weekendID] && effectiveClassAverages[weekendID].all)
-                  ? effectiveClassAverages[weekendID].all
-                  : {};
-              const resolveAverageValue = (primaryValue, fallbackValue) => {
-                  const primaryNumber = toNumberOrNull(primaryValue);
-                  if (primaryNumber !== null) return primaryNumber;
-                  return toNumberOrNull(fallbackValue);
-              };
-
-              const displayDate = normalizeDateToken(entry.sourceDate) || weekendID;
-
-              allChartData.push({
-                  date: displayDate,
-                  weekendID,
-                  total: t ?? 0,
-                  chi: toNumberOrNull(weekData.chi) ?? 0,
-                  eng: toNumberOrNull(weekData.eng) ?? 0,
-                  math: toNumberOrNull(weekData.math) ?? 0,
-                  avgTotal: resolveAverageValue(avgData.total, avgAllData.total),
-                  avgChi: resolveAverageValue(avgData.chi, avgAllData.chi),
-                  avgEng: resolveAverageValue(avgData.eng, avgAllData.eng),
-                  avgMath: resolveAverageValue(avgData.math, avgAllData.math),
-                  avgAllTotal: toNumberOrNull(avgAllData.total),
-                  avgAllChi: toNumberOrNull(avgAllData.chi),
-                  avgAllEng: toNumberOrNull(avgAllData.eng),
-                  avgAllMath: toNumberOrNull(avgAllData.math),
-                  class: weekClass
-              });
-          });
-      }
-
-      allChartData.sort((a, b) => {
-          const indexA = weekendOrder.has(a.weekendID) ? weekendOrder.get(a.weekendID) : Number.POSITIVE_INFINITY;
-          const indexB = weekendOrder.has(b.weekendID) ? weekendOrder.get(b.weekendID) : Number.POSITIVE_INFINITY;
-          if (indexA === indexB) return 0;
-          return indexA - indexB;
+      const shouldReuseParentContext =
+          foundCohortId === activePublicCohortId
+          && sortedAvailableDatesAsc.length > 0
+          && effectiveDatePool === sortedAvailableDatesAsc
+          && publicStudentsCohortId === activePublicCohortId
+          && datesCohortId === activePublicCohortId;
+      const scoreContext = shouldReuseParentContext && parentSearchScoreContext
+          ? parentSearchScoreContext
+          : buildProbabilityContext(contextData, effectiveDatePool, (dateStr) => getSearchDateID(dateStr, effectiveDatePool));
+      const { latestDateKey, viewData: nextViewData } = buildParentResolvedViewData({
+          student: data,
+          cohortId: foundCohortId,
+          classData: contextData,
+          datePool: effectiveDatePool,
+          classAveragesMap: effectiveClassAverages,
+          getDateID: (dateStr) => getSearchDateID(dateStr, effectiveDatePool),
+          scoreContext
       });
-
-      const avg = allChartData.length > 0 ? (allChartData.reduce((sum, item) => sum + item.total, 0) / allChartData.length).toFixed(1) : 0;
-      let studentProb = '-';
-
-      if (contextData.length > 0) {
-          const shouldReuseParentContext =
-              foundCohortId === activePublicCohortId
-              && sortedAvailableDatesAsc.length > 0
-              && effectiveDatePool === sortedAvailableDatesAsc
-              && publicStudentsCohortId === activePublicCohortId
-              && datesCohortId === activePublicCohortId;
-          const scoreContext = shouldReuseParentContext && parentSearchScoreContext
-              ? parentSearchScoreContext
-              : buildProbabilityContext(contextData, effectiveDatePool, (dateStr) => getSearchDateID(dateStr, effectiveDatePool));
-
-          const studentGradeMap = { [data.id]: {} };
-          const weekendEntries = buildWeekendGradeEntryMap(data.grades, (dateStr) => getSearchDateID(dateStr, effectiveDatePool));
-          Object.entries(weekendEntries).forEach(([weekendID, entry]) => {
-              studentGradeMap[data.id][weekendID] = entry.grade;
-          });
-
-          studentProb = calculateProbLogic(
-              data,
-              scoreContext.scoresByDate,
-              scoreContext.mathScoresByDate,
-              studentGradeMap,
-              scoreContext.normalizedDates,
-              scoreContext.probabilityProfiles,
-              scoreContext.totalPRLookupByDate,
-              scoreContext.mathPRLookupByDate
-          );
+      if (latestDateKey) {
+          setActivePhase(resolvePhaseByDate(latestDateKey, effectiveDatePool));
       }
-
-      if (allChartData.length > 0) {
-          const latestChartData = allChartData[allChartData.length - 1];
-          setActivePhase(resolvePhaseByDate(latestChartData.weekendID || latestChartData.date, effectiveDatePool));
-      }
-      const nextViewData = { ...data, chartData: allChartData, average: avg, prob: studentProb, cohortId: foundCohortId };
       setViewData(nextViewData);
+      hasRenderableView = true;
       writeParentQueryCache(cacheStudentKey, parentQueryDataVersion, nextViewData);
       incrementQueryCount(data.id, foundCohortId);
       updateParentQueryPerf(performance.now() - searchStartTs, false);
     } catch (e) {
       console.error('Parent search error:', e);
-      setViewData(null);
-      setSearchError('系統忙碌');
+      if (!hasRenderableView) {
+          setViewData(null);
+          setSearchError('系統忙碌');
+      }
       setParentSearchShell(null);
       updateParentQueryPerf(performance.now() - searchStartTs, false);
     } finally {
+      setParentAnalyticsPending(false);
       setParentSearchShell(null);
-      setLoading(false);
+      releaseLoading();
     }
   };
 
@@ -6245,7 +6373,7 @@ export default function App() {
       [viewData, darkMode]
   );
   const shouldShowParentWideShell = Boolean(viewData || parentSearchShell);
-  const isParentViewPending = Boolean(viewData?.isPending && loading);
+  const isParentViewPending = Boolean(parentAnalyticsPending);
 
   const teacherMessageForParent = useMemo(
       () => {
